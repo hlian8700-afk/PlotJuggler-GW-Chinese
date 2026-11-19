@@ -19,7 +19,7 @@ $src = $src.Replace($includeNeedle, @'
 $namespaceNeedle = @'
 namespace
 {
-bool isCurveTreeItem'@
+bool isCurveTreeItem('@
 $namespaceReplacement = @'
 namespace
 {
