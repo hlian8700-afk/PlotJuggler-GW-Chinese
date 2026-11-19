@@ -50,7 +50,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2019_64
-          modules: 'qtnetworkauth qtwebsockets'
+          # Qt WebSockets is included in the Qt 5.15 desktop archive; avoid unavailable add-on packages.
           cache: true
 
       - name: Configure
