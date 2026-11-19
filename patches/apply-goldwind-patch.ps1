@@ -16,10 +16,7 @@ $src = $src.Replace($includeNeedle, @'
 #include <QHash>
 #include <QTextStream>
 '@)
-$namespaceNeedle = @'
-namespace
-{
-bool isCurveTreeItem('@
+$namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
 $namespaceReplacement = @'
 namespace
 {
@@ -73,7 +70,8 @@ QString goldwindChineseName(const QString& raw_name)
   return goldwindChineseNames().value(raw_name);
 }
 
-bool isCurveTreeItem'@
+bool isCurveTreeItem(
+'@
 if (!$src.Contains($namespaceNeedle)) { throw "Could not find anonymous namespace insertion point." }
 $src = $src.Replace($namespaceNeedle, $namespaceReplacement)
 $addPattern = '(?m)^[ \t]*_tree_view->addItem\(group_name, getTreeName\(plot_id\), plot_id\);'
