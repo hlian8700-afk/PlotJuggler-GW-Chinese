@@ -184,6 +184,17 @@ $layoutReplacement = @'
 if (!$src.Contains($layoutNeedle)) { throw "Could not find series tree layout insertion point." }
 $src = $src.Replace('auto layout1 = new QHBoxLayout();', 'auto layout1 = new QVBoxLayout();')
 $src = $src.Replace($layoutNeedle, $layoutReplacement)
+# Localize the most frequently used series-list controls without changing raw data keys.
+$localizationNeedle = '  ui->setupUi(this);'
+$localizationReplacement = @'
+  ui->setupUi(this);
+  ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
+  ui->lineEditFilter->setToolTip(QString::fromUtf8("支持中文描述、英文编码及空格分隔的多个关键词"));
+  ui->lineEditCustomFilter->setPlaceholderText(QString::fromUtf8("搜索自定义曲线..."));
+'@
+if (!$src.Contains($localizationNeedle)) { throw "Could not find panel localization anchor" }
+$src = $src.Replace($localizationNeedle, $localizationReplacement)
+
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
 $src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
 $searchTagNeedle = '  _tree_view_items.insert(plot_name);'
