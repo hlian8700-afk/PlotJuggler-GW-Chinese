@@ -140,5 +140,10 @@ $before = 'settings.value("Preferences::no_splash", false).toBool()'
 $after = 'settings.value("Preferences::no_splash", true).toBool()'
 if (!$mainSrc.Contains($before)) { throw "Splash preference anchor not found in main.cpp" }
 $mainSrc = $mainSrc.Replace($before, $after)
+# Also bypass the splash unconditionally: existing user settings may explicitly
+# contain no_splash=false, which would otherwise override the new default.
+$splashGuard = 'if (!parser.isSet(nosplash_option) &&'
+if (!$mainSrc.Contains($splashGuard)) { throw "Splash guard not found in main.cpp" }
+$mainSrc = $mainSrc.Replace($splashGuard, 'if (false && !parser.isSet(nosplash_option) &&')
 Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
 Write-Host "Goldwind build defaults to no startup splash screen."
