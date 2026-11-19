@@ -77,10 +77,25 @@ jobs:
         run: |
           Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip" -Force
 
+      - name: Build Windows EXE installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed." }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
+          & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
+          $setup = "customization/installer/PlotJuggler-GW-Chinese-3.17.0-win64-Setup.exe"
+          if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
+          Write-Host "Installer created: $setup"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: PlotJuggler-GW-Chinese-3.17.0-win64
-          path: PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip
+          path: |
+            PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip
+            customization/installer/PlotJuggler-GW-Chinese-3.17.0-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30
