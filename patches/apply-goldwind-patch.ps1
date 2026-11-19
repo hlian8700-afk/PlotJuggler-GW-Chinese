@@ -21,6 +21,7 @@ $src = $src.Replace($includeNeedle, @'
 #include <QPushButton>
 #include <QHBoxLayout>
 #include <QTreeWidgetItemIterator>
+#include <QTimer>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
 $namespaceReplacement = @'
@@ -191,9 +192,45 @@ $localizationReplacement = @'
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
   ui->lineEditFilter->setToolTip(QString::fromUtf8("支持中文描述、英文编码及空格分隔的多个关键词"));
   ui->lineEditCustomFilter->setPlaceholderText(QString::fromUtf8("搜索自定义曲线..."));
+  ui->lineEditFilter->setClearButtonEnabled(true);
+  ui->lineEditCustomFilter->setClearButtonEnabled(true);
+  auto* goldwindSearchTimer = new QTimer(this);
+  goldwindSearchTimer->setObjectName("goldwindSearchTimer");
+  goldwindSearchTimer->setSingleShot(true);
+  goldwindSearchTimer->setInterval(180);
+  connect(goldwindSearchTimer, &QTimer::timeout, this, [this]() {
+    const QString search_string = ui->lineEditFilter->text();
+    bool updated = _tree_view->applyVisibilityFilter(search_string);
+    const auto counts = _tree_view->hiddenItemsCount();
+    const int visible_count = counts.second - counts.first;
+    ui->labelNumberDisplayed->setText(QString::number(visible_count) +
+                                     QString::fromUtf8(" / ") + QString::number(counts.second));
+    if (updated) emit hiddenItemsChanged();
+  });
 '@
 if (!$src.Contains($localizationNeedle)) { throw "Could not find panel localization anchor" }
 $src = $src.Replace($localizationNeedle, $localizationReplacement)
+# Debounce text edits for 100-500 MB datasets with thousands of columns.
+# Keep the upstream filtering method intact for all non-typing refresh paths.
+$filterMethodBefore = @'
+void CurveListPanel::on_lineEditFilter_textChanged(const QString& search_string)
+{
+  bool updated = _tree_view->applyVisibilityFilter(search_string);
+'@
+$filterMethodAfter = @'
+void CurveListPanel::on_lineEditFilter_textChanged(const QString& search_string)
+{
+  auto* searchTimer = findChild<QTimer*>("goldwindSearchTimer");
+  if (searchTimer && ui->lineEditFilter->hasFocus())
+  {
+    searchTimer->start();
+    return;
+  }
+  bool updated = _tree_view->applyVisibilityFilter(search_string);
+'@
+if (!$src.Contains($filterMethodBefore)) { throw "Missing search debounce anchor" }
+$src = $src.Replace($filterMethodBefore, $filterMethodAfter)
+
 
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
 $src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
