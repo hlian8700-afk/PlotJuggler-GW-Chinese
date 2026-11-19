@@ -76,7 +76,7 @@ QString goldwindChineseName(const QString& raw_name)
 bool isCurveTreeItem'@
 if (!$src.Contains($namespaceNeedle)) { throw "Could not find anonymous namespace insertion point." }
 $src = $src.Replace($namespaceNeedle, $namespaceReplacement)
-$addNeedle = '_tree_view->addItem(group_name, getTreeName(plot_id), plot_id);'
+$addNeedle = 'addItem(group_name, getTreeName(plot_id), plot_id);'
 $addReplacement = @'
   const QString chinese_name = goldwindChineseName(plot_id);
   if (chinese_name.isEmpty())
