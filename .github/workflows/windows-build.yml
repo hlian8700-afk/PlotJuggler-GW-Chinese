@@ -56,7 +56,7 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S upstream -B build -A x64 -DQt5_DIR="$env:Qt5_DIR" -DCMAKE_BUILD_TYPE=Release
+          cmake -S upstream -B build -A x64 -DQt5_DIR="$env:Qt5_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -71,6 +71,10 @@ jobs:
           if (!$exe) { throw "plotjuggler.exe was not produced by the build." }
           windeployqt --release --compiler-runtime $exe.FullName
           Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
+          # The Goldwind labels do not need embedded Python. Ensure the application
+          # does not accidentally depend on the runner-only Python 3.14 DLL.
+          $pythonImport = & dumpbin /dependents $exe.FullName 2>&1 | Out-String
+          if ($pythonImport -match "python3[0-9]+\\.dll") { throw "Unexpected Python runtime dependency in plotjuggler.exe" }
           # Upstream copies wasmer.dll beside the build-tree executable, but cmake --install
           # does not include it. windeployqt only deploys Qt dependencies.
           $wasmer = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter wasmer.dll |
