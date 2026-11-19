@@ -1,0 +1,86 @@
+name: Windows x64 build (PlotJuggler 3.17.0)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'patches/**'
+      - '.github/workflows/windows-build.yml'
+      - 'data/**'
+      - 'PROJECT_SPEC.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout customization repository
+        uses: actions/checkout@v4
+        with:
+          path: customization
+
+      - name: Verify required mapping file
+        shell: pwsh
+        run: |
+          if (!(Test-Path "customization/data/gw_tag_mapping.csv")) {
+            throw "Missing data/gw_tag_mapping.csv. Upload the supplied UTF-8 CSV to this path in the private repository, then rerun the workflow."
+          }
+
+      - name: Checkout upstream PlotJuggler 3.17.0
+        uses: actions/checkout@v4
+        with:
+          repository: PlotJuggler/PlotJuggler
+          ref: 3.17.0
+          path: upstream
+
+      - name: Apply Goldwind display-name patch
+        shell: pwsh
+        run: |
+          Copy-Item customization/data/gw_tag_mapping.csv upstream/plotjuggler_app/gw_tag_mapping.csv
+          & customization/patches/apply-goldwind-patch.ps1
+        working-directory: upstream
+
+      - name: Install Qt 5.15.2
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          modules: 'qtnetworkauth qtwebsockets'
+          cache: true
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S upstream -B build -A x64 -DCMAKE_PREFIX_PATH="$env:Qt5_DIR/../../.." -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install
+        run: cmake --install build --config Release --prefix "$env:GITHUB_WORKSPACE\stage"
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:GITHUB_WORKSPACE\stage" -Recurse -Filter plotjuggler.exe | Select-Object -First 1
+          if (!$exe) { throw "plotjuggler.exe was not produced by the build." }
+          windeployqt --release --compiler-runtime $exe.FullName
+          Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
+
+      - name: Package portable x64 build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlotJuggler-GW-Chinese-3.17.0-win64
+          path: PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip
+          if-no-files-found: error
+          retention-days: 30
