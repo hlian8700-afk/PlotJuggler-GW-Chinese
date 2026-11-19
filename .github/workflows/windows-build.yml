@@ -71,6 +71,26 @@ jobs:
           if (!$exe) { throw "plotjuggler.exe was not produced by the build." }
           windeployqt --release --compiler-runtime $exe.FullName
           Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
+          # Upstream plugin install destination is configured as an absolute path
+          # (C:/Program Files/plotjuggler/...), outside our custom stage prefix.
+          # Collect the compiled plugins beside the executable, which MainWindow scans.
+          $pluginSources = @(
+            (Join-Path $env:GITHUB_WORKSPACE "stage/lib/plotjuggler/plugins"),
+            "C:/Program Files/plotjuggler/lib/plotjuggler/plugins"
+          )
+          $pluginDlls = @($pluginSources | ForEach-Object {
+            if (Test-Path $_) { Get-ChildItem $_ -Filter *.dll -File }
+          })
+          if (!$pluginDlls) { throw "No PlotJuggler plugins were installed" }
+          $csvPlugin = @($pluginDlls | Where-Object { $_.Name -eq "DataLoadCSV.dll" })
+          if (!$csvPlugin) { throw "DataLoadCSV.dll missing from plugin install output" }
+          foreach ($dll in $pluginDlls) {
+            Copy-Item $dll.FullName (Join-Path $exe.DirectoryName $dll.Name) -Force
+          }
+          if (!(Test-Path (Join-Path $exe.DirectoryName "DataLoadCSV.dll"))) {
+            throw "CSV plugin not deployed beside PlotJuggler executable"
+          }
+          Write-Host "Deployed $($pluginDlls.Count) PlotJuggler plugins into bin"
           # The Goldwind labels do not need embedded Python. Ensure the application
           # does not accidentally depend on the runner-only Python 3.14 DLL.
           # Read the PE import table using a Visual Studio developer environment.
@@ -123,6 +143,7 @@ jobs:
           $csv = Join-Path $target "bin/gw_tag_mapping.csv"
           if (!(Test-Path $exe)) { throw "Installed PlotJuggler executable missing" }
           if (!(Test-Path $csv)) { throw "Installed Goldwind Chinese dictionary missing" }
+          if (!(Test-Path (Join-Path $target "bin/DataLoadCSV.dll"))) { throw "Installed CSV plugin missing" }
           if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
           # Launch for a few seconds to catch Windows loader errors (e.g. missing DLLs).
           $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
