@@ -71,6 +71,17 @@ jobs:
           if (!$exe) { throw "plotjuggler.exe was not produced by the build." }
           windeployqt --release --compiler-runtime $exe.FullName
           Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
+          # Upstream copies wasmer.dll beside the build-tree executable, but cmake --install
+          # does not include it. windeployqt only deploys Qt dependencies.
+          $wasmer = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter wasmer.dll |
+            Where-Object { $_.FullName -match '[\\/]bin[\\/]' } | Select-Object -First 1
+          if (!$wasmer) {
+            $wasmer = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter wasmer.dll | Select-Object -First 1
+          }
+          if (!$wasmer) { throw "wasmer.dll missing from build; cannot create a working installer." }
+          Copy-Item $wasmer.FullName (Join-Path $exe.DirectoryName "wasmer.dll") -Force
+          if (!(Test-Path (Join-Path $exe.DirectoryName "wasmer.dll"))) { throw "Failed to deploy wasmer.dll" }
+          Write-Host "Bundled wasmer.dll from $($wasmer.FullName)"
 
       - name: Package portable x64 build
         shell: pwsh
@@ -101,6 +112,14 @@ jobs:
           $csv = Join-Path $target "bin/gw_tag_mapping.csv"
           if (!(Test-Path $exe)) { throw "Installed PlotJuggler executable missing" }
           if (!(Test-Path $csv)) { throw "Installed Goldwind Chinese dictionary missing" }
+          if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
+          # Launch for a few seconds to catch Windows loader errors (e.g. missing DLLs).
+          $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          Start-Sleep -Seconds 8
+          $app.Refresh()
+          if ($app.HasExited) { throw "Installed application exited during startup (code $($app.ExitCode)); inspect runtime dependencies." }
+          Stop-Process -Id $app.Id -Force
+          Write-Host "GUI executable survived startup smoke test."
           $rows = @(Import-Csv -LiteralPath $csv -Encoding UTF8)
           if ($rows.Count -ne 1981) { throw "Expected 1981 mappings, found $($rows.Count)" }
           if (@($rows | Where-Object { [string]::IsNullOrWhiteSpace($_.raw_tag) -or [string]::IsNullOrWhiteSpace($_.cn_name) }).Count -ne 0) {
