@@ -73,7 +73,14 @@ jobs:
           Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
           # The Goldwind labels do not need embedded Python. Ensure the application
           # does not accidentally depend on the runner-only Python 3.14 DLL.
-          $pythonImport = & dumpbin /dependents $exe.FullName 2>&1 | Out-String
+          # Read the PE import table using a Visual Studio developer environment.
+          $vswhere = "${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC\\Tools\\MSVC") -Filter dumpbin.exe -Recurse -File |
+            Where-Object { $_.FullName -match 'Hostx64[\\\\/]x64' } | Select-Object -First 1
+          if (!$dumpbin) { throw "Visual Studio dumpbin.exe not found" }
+          $pythonImport = & $dumpbin.FullName /dependents $exe.FullName 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "PE dependency inspection failed" }
           if ($pythonImport -match "python3[0-9]+\\.dll") { throw "Unexpected Python runtime dependency in plotjuggler.exe" }
           # Upstream copies wasmer.dll beside the build-tree executable, but cmake --install
           # does not include it. windeployqt only deploys Qt dependencies.
