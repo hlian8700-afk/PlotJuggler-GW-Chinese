@@ -90,6 +90,6 @@ $addReplacement = @'
   }
 '@
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
-$src = [regex]::Replace($src, $addPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $addReplacement.Trim() }, 1)
+$src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
 Set-Content -Path $file -Value $src -Encoding UTF8
 Write-Host "Goldwind label patch applied."
