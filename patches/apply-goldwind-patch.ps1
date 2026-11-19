@@ -22,9 +22,14 @@ $src = $src.Replace($includeNeedle, @'
 #include <QHBoxLayout>
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
+#include <QFileDialog>
+#include <QStandardPaths>
+#include <QSaveFile>
+#include <QDir>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
 $namespaceReplacement = @'
+void goldwindReloadSearchAliases();
 namespace
 {
 bool& goldwindGroupBySystem()
@@ -49,11 +54,12 @@ int& goldwindLabelMode()
   return mode;
 }
 
-const QHash<QString, QString>& goldwindChineseNames()
+QHash<QString, QString>& goldwindChineseNames()
 {
-  static const QHash<QString, QString> names = [] {
+  static QHash<QString, QString> names = [] {
     QHash<QString, QString> result;
-    QFile file(QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
+    const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
+    QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
       qWarning() << "Goldwind tag dictionary not found:" << file.fileName();
@@ -95,6 +101,26 @@ const QHash<QString, QString>& goldwindChineseNames()
   return names;
 }
 
+void goldwindReloadChineseNames()
+{
+  auto& names = goldwindChineseNames();
+  names.clear();
+  const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
+  QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  QTextStream stream(&file);
+  stream.setCodec("UTF-8");
+  while (!stream.atEnd())
+  {
+    const QString line = stream.readLine();
+    const int comma = line.indexOf(',');
+    if (comma <= 0) continue;
+    const QString key = line.left(comma).trimmed();
+    const QString value = line.mid(comma + 1).trimmed();
+    if (!key.isEmpty() && !value.isEmpty()) names.insert(key, value);
+  }
+}
+
 QString goldwindChineseName(const QString& raw_name)
 {
   return goldwindChineseNames().value(raw_name);
@@ -123,7 +149,84 @@ $addReplacement = @'
   }
 '@
 # Insert a compact selector above the native series tree. Raw IDs remain unchanged.
-$layoutNeedle = '  layout1->addWidget(_tree_view, 1);'
+$layoutNeedle = '  auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
+  goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
+  goldwindToolbar->addWidget(goldwindImport);
+  connect(goldwindImport, &QPushButton::clicked, this, [this]() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, QString::fromUtf8("选择新的标签映射 CSV"), QString(),
+        QString::fromUtf8("CSV 文件 (*.csv)"));
+    if (path.isEmpty()) return;
+    QFile input(path);
+    if (!input.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+      QMessageBox::warning(this, QString::fromUtf8("导入失败"), input.errorString());
+      return;
+    }
+    QTextStream in(&input);
+    in.setCodec("UTF-8");
+    QHash<QString, QString> checked;
+    bool first = true;
+    while (!in.atEnd())
+    {
+      QString line = in.readLine();
+      if (first)
+      {
+        first = false;
+        if (!line.isEmpty() && line.front() == QChar(0xFEFF)) line.remove(0, 1);
+        if (line.trimmed() == "raw_tag,cn_name") continue;
+      }
+      const int comma = line.indexOf(',');
+      if (comma <= 0) continue;
+      const QString key = line.left(comma).trimmed();
+      const QString val = line.mid(comma + 1).trimmed();
+      if (!key.isEmpty() && !val.isEmpty()) checked.insert(key, val);
+    }
+    if (checked.isEmpty())
+    {
+      QMessageBox::warning(this, QString::fromUtf8("导入失败"),
+                           QString::fromUtf8("未找到有效映射。需要 raw_tag,cn_name 两列"));
+      return;
+    }
+    if (QMessageBox::question(this, QString::fromUtf8("确认全部替换"),
+          QString::fromUtf8("将使用新文件的 %1 条标签完全替换当前映射。未包含的旧标签不再显示中文。是否继续？").arg(checked.size()),
+          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!QDir().mkpath(dir))
+    {
+      QMessageBox::warning(this, QString::fromUtf8("导入失败"), QString::fromUtf8("无法创建配置目录"));
+      return;
+    }
+    QSaveFile output(dir + "/gw_tag_mapping.csv");
+    if (!output.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+      QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
+      return;
+    }
+    QTextStream out(&output);
+    out.setCodec("UTF-8");
+    out << "raw_tag,cn_name\n";
+    for (auto it = checked.cbegin(); it != checked.cend(); ++it)
+      out << it.key() << "," << it.value() << "\n";
+    out.flush();
+    if (!output.commit())
+    {
+      QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
+      return;
+    }
+    goldwindReloadChineseNames();
+    goldwindReloadSearchAliases();
+    const auto existing = _tree_view_items;
+    _tree_view->setUpdatesEnabled(false);
+    _tree_view->clear();
+    _tree_view_items.clear();
+    for (const auto& name : existing) addCurve(name);
+    _tree_view->setUpdatesEnabled(true);
+    refreshColumns();
+    QMessageBox::information(this, QString::fromUtf8("导入成功"),
+                             QString::fromUtf8("已全部替换为 %1 条标签映射").arg(checked.size()));
+  });
+  layout1->addWidget(_tree_view, 1);'
 $layoutReplacement = @'
   auto* goldwindMode = new QComboBox(this);
   goldwindMode->addItem(QString::fromUtf8("中文标签"));
@@ -271,16 +374,17 @@ $treeSrc = $treeSrc.Replace($searchBefore, $searchAfter)
 # inserted. Avoid scanning the entire growing tree once for each of 1,981 tags.
 $treeInclude = '#include <QClipboard>'
 if (!$treeSrc.Contains($treeInclude)) { throw "Missing tree include anchor" }
-$treeSrc = $treeSrc.Replace($treeInclude, $treeInclude + "`n#include <QCoreApplication>`n#include <QFile>`n#include <QHash>`n#include <QTextStream>")
+$treeSrc = $treeSrc.Replace($treeInclude, $treeInclude + "`n#include <QCoreApplication>`n#include <QFile>`n#include <QHash>`n#include <QTextStream>`n#include <QStandardPaths>")
 $treeNamespace = "namespace`n{`nbool isCurveItem("
 $treeLookup = @'
 namespace
 {
-const QHash<QString, QString>& goldwindSearchAliases()
+QHash<QString, QString>& goldwindSearchAliases()
 {
-  static const QHash<QString, QString> aliases = [] {
+  static QHash<QString, QString> aliases = [] {
     QHash<QString, QString> result;
-    QFile file(QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
+    const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
+    QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return result;
     QTextStream stream(&file);
     stream.setCodec("UTF-8");
@@ -307,6 +411,31 @@ $treeLeafReplacement = 'setData(0, Name, plot_ID);'
 $treeSrc = $treeSrc.Replace('matching_child->' + $treeLeafNeedle, 'matching_child->' + $treeLeafReplacement + "`n        matching_child->setToolTip(0, goldwindSearchAliases().value(plot_ID));")
 $treeSrc = $treeSrc.Replace('child_item->' + $treeLeafNeedle, 'child_item->' + $treeLeafReplacement + "`n        child_item->setToolTip(0, goldwindSearchAliases().value(plot_ID));")
 
+$reloadAnchor = '}  // namespace'
+$reloadBlock = @'
+}  // namespace
+void goldwindReloadSearchAliases()
+{
+  auto& aliases = goldwindSearchAliases();
+  aliases.clear();
+  const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
+  QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  QTextStream stream(&file);
+  stream.setCodec("UTF-8");
+  while (!stream.atEnd())
+  {
+    const QString line = stream.readLine();
+    const int comma = line.indexOf(',');
+    if (comma <= 0) continue;
+    const QString key = line.left(comma).trimmed();
+    const QString value = line.mid(comma + 1).trimmed();
+    if (!key.isEmpty() && !value.isEmpty()) aliases.insert(key, value);
+  }
+}
+'@
+if (!$treeSrc.Contains($reloadAnchor)) { throw "Missing tree namespace end" }
+$treeSrc = $treeSrc.Replace($reloadAnchor, $reloadBlock)
 Set-Content -Path $treeFile -Value $treeSrc -Encoding UTF8
 Write-Host "Goldwind search now matches visible labels and raw series IDs."
 
