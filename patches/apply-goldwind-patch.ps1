@@ -149,7 +149,23 @@ $addReplacement = @'
   }
 '@
 # Insert a compact selector above the native series tree. Raw IDs remain unchanged.
-$layoutNeedle = '  auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
+$layoutNeedle = '  layout1->addWidget(_tree_view, 1);'
+$layoutReplacement = @'
+  auto* goldwindMode = new QComboBox(this);
+  goldwindMode->addItem(QString::fromUtf8("中文标签"));
+  goldwindMode->addItem(QString::fromUtf8("原始标签"));
+  goldwindMode->addItem(QString::fromUtf8("中英文对照"));
+  goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
+  auto* goldwindToolbar = new QHBoxLayout();
+  goldwindToolbar->addWidget(goldwindMode);
+  auto* goldwindGroup = new QPushButton(QString::fromUtf8("按系统分类"), this);
+  goldwindGroup->setCheckable(true);
+  goldwindToolbar->addWidget(goldwindGroup);
+  auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
+  goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
+  goldwindToolbar->addWidget(goldwindSelect);
+  layout1->addLayout(goldwindToolbar);
+  auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
   goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
   goldwindToolbar->addWidget(goldwindImport);
   connect(goldwindImport, &QPushButton::clicked, this, [this]() {
@@ -226,22 +242,6 @@ $layoutNeedle = '  auto* goldwindImport = new QPushButton(QString::fromUtf8("导
     QMessageBox::information(this, QString::fromUtf8("导入成功"),
                              QString::fromUtf8("已全部替换为 %1 条标签映射").arg(checked.size()));
   });
-  layout1->addWidget(_tree_view, 1);'
-$layoutReplacement = @'
-  auto* goldwindMode = new QComboBox(this);
-  goldwindMode->addItem(QString::fromUtf8("中文标签"));
-  goldwindMode->addItem(QString::fromUtf8("原始标签"));
-  goldwindMode->addItem(QString::fromUtf8("中英文对照"));
-  goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
-  auto* goldwindToolbar = new QHBoxLayout();
-  goldwindToolbar->addWidget(goldwindMode);
-  auto* goldwindGroup = new QPushButton(QString::fromUtf8("按系统分类"), this);
-  goldwindGroup->setCheckable(true);
-  goldwindToolbar->addWidget(goldwindGroup);
-  auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
-  goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
-  goldwindToolbar->addWidget(goldwindSelect);
-  layout1->addLayout(goldwindToolbar);
   layout1->addWidget(_tree_view, 1);
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, [this](int mode) {
