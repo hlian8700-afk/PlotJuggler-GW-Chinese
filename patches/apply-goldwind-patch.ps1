@@ -239,27 +239,6 @@ $src = [regex]::Replace($src, $filterPattern, $filterMethodAfter.Trim())
 
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
 $src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
-$searchTagNeedle = '  _tree_view_items.insert(plot_name);'
-$searchTagReplacement = @'
-  if (!chinese_name.isEmpty())
-  {
-    // Searchable Chinese alias in every display mode, including raw-only.
-    QTreeWidgetItemIterator search_it(_tree_view);
-    while (*search_it)
-    {
-      auto* item = *search_it;
-      if (item->data(0, CustomRoles::Name).toString() == plot_id)
-      {
-        item->setData(0, Qt::ToolTipRole, chinese_name);
-        break;
-      }
-      ++search_it;
-    }
-  }
-  _tree_view_items.insert(plot_name);
-'@
-if (!$src.Contains($searchTagNeedle)) { throw "Missing tag insertion anchor" }
-$src = $src.Replace($searchTagNeedle, $searchTagReplacement)
 
 Set-Content -Path $file -Value $src -Encoding UTF8
 Write-Host "Goldwind label patch applied."
@@ -288,6 +267,46 @@ $searchBefore = 'if (name.contains(spaced_item, Qt::CaseInsensitive) == false)'
 $searchAfter = 'if (!name.contains(spaced_item, Qt::CaseInsensitive) && !item->text(0).contains(spaced_item, Qt::CaseInsensitive) && !item->data(0, Qt::ToolTipRole).toString().contains(spaced_item, Qt::CaseInsensitive))'
 if (!$treeSrc.Contains($searchBefore)) { throw "Could not find CurveTreeView filter anchor" }
 $treeSrc = $treeSrc.Replace($searchBefore, $searchAfter)
+# Cache the Chinese lookup once in CurveTreeView and set tooltips when leaves are
+# inserted. Avoid scanning the entire growing tree once for each of 1,981 tags.
+$treeInclude = '#include <QClipboard>'
+if (!$treeSrc.Contains($treeInclude)) { throw "Missing tree include anchor" }
+$treeSrc = $treeSrc.Replace($treeInclude, $treeInclude + "`n#include <QCoreApplication>`n#include <QFile>`n#include <QHash>`n#include <QTextStream>")
+$treeNamespace = "namespace`n{`nbool isCurveItem("
+$treeLookup = @'
+namespace
+{
+const QHash<QString, QString>& goldwindSearchAliases()
+{
+  static const QHash<QString, QString> aliases = [] {
+    QHash<QString, QString> result;
+    QFile file(QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return result;
+    QTextStream stream(&file);
+    stream.setCodec("UTF-8");
+    while (!stream.atEnd())
+    {
+      const QString line = stream.readLine();
+      const int comma = line.indexOf(',');
+      if (comma <= 0) continue;
+      const QString key = line.left(comma).trimmed();
+      const QString value = line.mid(comma + 1).trimmed();
+      if (!key.isEmpty() && !value.isEmpty()) result.insert(key, value);
+    }
+    return result;
+  }();
+  return aliases;
+}
+bool isCurveItem(
+'@
+if (!$treeSrc.Contains($treeNamespace)) { throw "Missing tree lookup insertion anchor" }
+$treeSrc = $treeSrc.Replace($treeNamespace, $treeLookup)
+$treeLeafNeedle = 'setData(0, Name, plot_ID);'
+$treeLeafReplacement = 'setData(0, Name, plot_ID);'
+# Both existing-leaf and new-leaf paths assign Name; attach alias at that point.
+$treeSrc = $treeSrc.Replace('matching_child->' + $treeLeafNeedle, 'matching_child->' + $treeLeafReplacement + "`n        matching_child->setToolTip(0, goldwindSearchAliases().value(plot_ID));")
+$treeSrc = $treeSrc.Replace('child_item->' + $treeLeafNeedle, 'child_item->' + $treeLeafReplacement + "`n        child_item->setToolTip(0, goldwindSearchAliases().value(plot_ID));")
+
 Set-Content -Path $treeFile -Value $treeSrc -Encoding UTF8
 Write-Host "Goldwind search now matches visible labels and raw series IDs."
 
