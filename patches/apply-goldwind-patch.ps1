@@ -18,11 +18,30 @@ $src = $src.Replace($includeNeedle, @'
 #include <QHash>
 #include <QTextStream>
 #include <QComboBox>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QTreeWidgetItemIterator>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
 $namespaceReplacement = @'
 namespace
 {
+bool& goldwindGroupBySystem()
+{
+  static bool enabled = false;
+  return enabled;
+}
+
+QString goldwindSystemGroup(const QString& raw)
+{
+  const QString prefix = raw.section('.', 0, 0).toUpper();
+  if (prefix == "WTPS") return QString::fromUtf8("变桨系统");
+  if (prefix == "WCNV") return QString::fromUtf8("变流器");
+  if (prefix == "WYAW") return QString::fromUtf8("偏航系统");
+  if (prefix == "WTUR") return QString::fromUtf8("风机主控");
+  return QString::fromUtf8("其他测点");
+}
+
 int& goldwindLabelMode()
 {
   static int mode = 0; // 0 Chinese, 1 raw, 2 bilingual
@@ -88,9 +107,10 @@ $addPattern = '(?m)^[ \t]*_tree_view->addItem\(group_name, getTreeName\(plot_id\
 $addReplacement = @'
   const QString chinese_name = goldwindChineseName(plot_id);
   const int label_mode = goldwindLabelMode();
+  const QString category = goldwindGroupBySystem() ? goldwindSystemGroup(plot_id) : QString();
   if (chinese_name.isEmpty() || label_mode == 1)
   {
-    _tree_view->addItem(group_name, getTreeName(plot_id), plot_id);
+    _tree_view->addItem(category.isEmpty() ? group_name : category, getTreeName(plot_id), plot_id);
   }
   else
   {
@@ -98,7 +118,7 @@ $addReplacement = @'
     const QString label = (label_mode == 2)
                               ? chinese_name + " (" + plot_id + ")"
                               : chinese_name;
-    _tree_view->addItem(QString(), label, plot_id);
+    _tree_view->addItem(category, label, plot_id);
   }
 '@
 # Insert a compact selector above the native series tree. Raw IDs remain unchanged.
@@ -109,7 +129,15 @@ $layoutReplacement = @'
   goldwindMode->addItem(QString::fromUtf8("原始标签"));
   goldwindMode->addItem(QString::fromUtf8("中英文对照"));
   goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
-  layout1->addWidget(goldwindMode);
+  auto* goldwindToolbar = new QHBoxLayout();
+  goldwindToolbar->addWidget(goldwindMode);
+  auto* goldwindGroup = new QPushButton(QString::fromUtf8("按系统分类"), this);
+  goldwindGroup->setCheckable(true);
+  goldwindToolbar->addWidget(goldwindGroup);
+  auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
+  goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
+  goldwindToolbar->addWidget(goldwindSelect);
+  layout1->addLayout(goldwindToolbar);
   layout1->addWidget(_tree_view, 1);
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, [this](int mode) {
@@ -122,6 +150,35 @@ $layoutReplacement = @'
       addCurve(name);
     }
     refreshColumns();
+  });
+  connect(goldwindGroup, &QPushButton::toggled, this, [this](bool checked) {
+    goldwindGroupBySystem() = checked;
+    const auto existing = _tree_view_items;
+    _tree_view->clear();
+    _tree_view_items.clear();
+    for (const auto& name : existing)
+    {
+      addCurve(name);
+    }
+    refreshColumns();
+  });
+  connect(goldwindSelect, &QPushButton::clicked, this, [this]() {
+    _tree_view->clearSelection();
+    QTreeWidgetItemIterator it(_tree_view);
+    while (*it)
+    {
+      auto* item = *it;
+      if (!item->isHidden() && isCurveTreeItem(item))
+      {
+        bool parentsVisible = true;
+        for (auto* parent = item->parent(); parent; parent = parent->parent())
+        {
+          if (parent->isHidden()) { parentsVisible = false; break; }
+        }
+        if (parentsVisible) item->setSelected(true);
+      }
+      ++it;
+    }
   });
 '@
 if (!$src.Contains($layoutNeedle)) { throw "Could not find series tree layout insertion point." }
