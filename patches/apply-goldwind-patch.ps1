@@ -186,6 +186,28 @@ $src = $src.Replace('auto layout1 = new QHBoxLayout();', 'auto layout1 = new QVB
 $src = $src.Replace($layoutNeedle, $layoutReplacement)
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
 $src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
+$searchTagNeedle = '  _tree_view_items.insert(plot_name);'
+$searchTagReplacement = @'
+  if (!chinese_name.isEmpty())
+  {
+    // Searchable Chinese alias in every display mode, including raw-only.
+    QTreeWidgetItemIterator search_it(_tree_view);
+    while (*search_it)
+    {
+      auto* item = *search_it;
+      if (item->data(0, CustomRoles::Name).toString() == plot_id)
+      {
+        item->setData(0, Qt::ToolTipRole, chinese_name);
+        break;
+      }
+      ++search_it;
+    }
+  }
+  _tree_view_items.insert(plot_name);
+'@
+if (!$src.Contains($searchTagNeedle)) { throw "Missing tag insertion anchor" }
+$src = $src.Replace($searchTagNeedle, $searchTagReplacement)
+
 Set-Content -Path $file -Value $src -Encoding UTF8
 Write-Host "Goldwind label patch applied."
 
@@ -204,3 +226,15 @@ if (!$mainSrc.Contains($splashGuard)) { throw "Splash guard not found in main.cp
 $mainSrc = $mainSrc.Replace($splashGuard, 'if (false && !parser.isSet(nosplash_option) &&')
 Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
 Write-Host "Goldwind build defaults to no startup splash screen."
+
+# Search fix: upstream CurveTreeView filters Qt::UserRole (the raw series ID),
+# not the displayed Chinese alias. Match both fields, independent of label mode.
+$treeFile = "plotjuggler_app/curvetree_view.cpp"
+$treeSrc = (Get-Content -Raw -Encoding UTF8 $treeFile).Replace("`r`n", "`n")
+$searchBefore = 'if (name.contains(spaced_item, Qt::CaseInsensitive) == false)'
+$searchAfter = 'if (!name.contains(spaced_item, Qt::CaseInsensitive) && !item->text(0).contains(spaced_item, Qt::CaseInsensitive) && !item->data(0, Qt::ToolTipRole).toString().contains(spaced_item, Qt::CaseInsensitive))'
+if (!$treeSrc.Contains($searchBefore)) { throw "Could not find CurveTreeView filter anchor" }
+$treeSrc = $treeSrc.Replace($searchBefore, $searchAfter)
+Set-Content -Path $treeFile -Value $treeSrc -Encoding UTF8
+Write-Host "Goldwind search now matches visible labels and raw series IDs."
+
