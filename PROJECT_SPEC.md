@@ -32,6 +32,15 @@ This is an application UI change, not a Toolbox-only side panel or a standalone 
 - [ ] Run a Windows x64 startup/load smoke test.
 - [ ] Publish the installer and build provenance.
 
-## Status
+## Current priorities (updated 2026-11-20)
 
-Repository initialized. The application patch and Windows build are not yet complete. No installer is claimed to exist until the checks above pass.
+1. **Full main-interface Chinese localization**: menus, dialogs, tooltips, import status and common error messages. Preserve raw tag IDs and application behavior.
+2. **Import new label mappings**: add a UI action to select a UTF-8 CSV mapping file with columns `raw_tag,cn_name`, validate rows and duplicates, store a user-writable copy, reload mappings without reinstalling, and refresh the native series list and Chinese search.
+3. Regression checks for existing 1,981 labels, Chinese search, system groups, label-mode toggle, CSV streaming and Windows EXE packaging.
+
+**Removed from the roadmap at user request:** curve-rendering performance optimization. Do not implement or prioritize this work.
+
+## Implementation status
+
+The above two new priorities are **planned, not yet implemented**. Previous Windows CI builds succeeded for existing features; a newer tag-search optimization build is being checked separately. Full localization must be staged and verified rather than claimed complete.
+
