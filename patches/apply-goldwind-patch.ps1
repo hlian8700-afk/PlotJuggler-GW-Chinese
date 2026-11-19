@@ -476,3 +476,50 @@ $csvSrc = $csvSrc.Replace('progress_dialog.setWindowTitle("Loading the CSV file"
 $csvSrc = $csvSrc.Replace('progress_dialog.setLabelText("Loading... please wait");', 'progress_dialog.setLabelText(QString::fromUtf8("正在读取录波数据，请稍候..."));')
 Set-Content -Path $csvFile -Value $csvSrc -Encoding UTF8
 Write-Host "Goldwind CSV streaming import and Chinese progress labels applied."
+
+# Phase 4: translate commonly used MainWindow UI strings at Qt UI compilation time.
+# This leaves QAction names, signals, keyboard shortcuts and internal data keys intact.
+$uiFile = "plotjuggler_app/mainwindow.ui"
+$uiSrc = (Get-Content -Raw -Encoding UTF8 $uiFile).Replace("`r`n", "`n")
+$translations = [ordered]@{
+  'File' = '文件'
+  'Data:' = '数据：'
+  'Add prefix' = '添加前缀'
+  'Merge data' = '合并数据'
+  'Layout:' = '布局：'
+  'Streaming' = '实时数据'
+  'Start' = '开始'
+  'Buffer:' = '缓冲区：'
+  'Publishers' = '发布器'
+  'Timeseries List' = '时间序列列表'
+  'Show point in plot' = '在曲线图中显示数据点'
+  'Keep the aspect ratio of XY plots' = '保持 XY 图纵横比'
+  'Speed:' = '速度：'
+  'Step size:' = '步长：'
+  'File Menu (ALT+F)' = '文件菜单 (ALT+F)'
+  'App' = '应用'
+  'Help (ALT+H)' = '帮助 (ALT+H)'
+  'Help' = '帮助'
+  'Cloud' = '云服务'
+  'Tools' = '工具'
+  'Exit' = '退出'
+  'About' = '关于'
+  'Report a problem' = '报告问题'
+  'Report issue on GitHub' = '在 GitHub 上报告问题'
+  'Clear data points' = '清空数据点'
+  'Cheatsheet' = '快捷操作指南'
+  'Support PlotJuggler' = '支持 PlotJuggler'
+  'Clear' = '清空'
+  'Delete everything' = '删除全部数据'
+  'Preferences...' = '首选项...'
+  'Share the love' = '分享 PlotJuggler'
+  'Load StyleSheet' = '加载界面样式'
+  'ColorMap Editor' = '颜色映射编辑器'
+}
+foreach ($entry in $translations.GetEnumerator()) {
+  $needle = '<string>' + $entry.Key + '</string>'
+  $replacement = '<string>' + $entry.Value + '</string>'
+  $uiSrc = $uiSrc.Replace($needle, $replacement)
+}
+Set-Content -Path $uiFile -Value $uiSrc -Encoding UTF8
+Write-Host "Goldwind main-window Chinese localization applied."
