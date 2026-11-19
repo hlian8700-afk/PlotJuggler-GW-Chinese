@@ -144,23 +144,27 @@ $layoutReplacement = @'
           this, [this](int mode) {
     goldwindLabelMode() = mode;
     const auto existing = _tree_view_items;
+    _tree_view->setUpdatesEnabled(false);
     _tree_view->clear();
     _tree_view_items.clear();
     for (const auto& name : existing)
     {
       addCurve(name);
     }
+    _tree_view->setUpdatesEnabled(true);
     refreshColumns();
   });
   connect(goldwindGroup, &QPushButton::toggled, this, [this](bool checked) {
     goldwindGroupBySystem() = checked;
     const auto existing = _tree_view_items;
+    _tree_view->setUpdatesEnabled(false);
     _tree_view->clear();
     _tree_view_items.clear();
     for (const auto& name : existing)
     {
       addCurve(name);
     }
+    _tree_view->setUpdatesEnabled(true);
     refreshColumns();
   });
   connect(goldwindSelect, &QPushButton::clicked, this, [this]() {
