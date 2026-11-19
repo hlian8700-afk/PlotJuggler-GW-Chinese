@@ -125,8 +125,20 @@ $layoutReplacement = @'
   });
 '@
 if (!$src.Contains($layoutNeedle)) { throw "Could not find series tree layout insertion point." }
+$src = $src.Replace('auto layout1 = new QHBoxLayout();', 'auto layout1 = new QVBoxLayout();')
 $src = $src.Replace($layoutNeedle, $layoutReplacement)
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
 $src = [regex]::Replace($src, $addPattern, $addReplacement.Trim(), [System.Text.RegularExpressions.RegexOptions]::Multiline)
 Set-Content -Path $file -Value $src -Encoding UTF8
 Write-Host "Goldwind label patch applied."
+
+# Disable the upstream startup splash image by default in this custom build.
+# Do not remove unrelated icons, logos, or image assets.
+$mainFile = "plotjuggler_app/main.cpp"
+$mainSrc = (Get-Content -Raw -Encoding UTF8 $mainFile).Replace("`r`n", "`n")
+$before = 'settings.value("Preferences::no_splash", false).toBool()'
+$after = 'settings.value("Preferences::no_splash", true).toBool()'
+if (!$mainSrc.Contains($before)) { throw "Splash preference anchor not found in main.cpp" }
+$mainSrc = $mainSrc.Replace($before, $after)
+Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
+Write-Host "Goldwind build defaults to no startup splash screen."
