@@ -287,3 +287,39 @@ $treeSrc = $treeSrc.Replace($searchBefore, $searchAfter)
 Set-Content -Path $treeFile -Value $treeSrc -Encoding UTF8
 Write-Host "Goldwind search now matches visible labels and raw series IDs."
 
+
+# Stream CSV from disk instead of keeping both QByteArray and std::string copies.
+# This targets peak memory usage for 100-500 MB recordings; parsing remains unchanged.
+$csvFile = "plotjuggler_plugins/DataLoadCSV/dataload_csv.cpp"
+$csvSrc = (Get-Content -Raw -Encoding UTF8 $csvFile).Replace("`r`n", "`n")
+$csvInclude = '#include <array>'
+if (!$csvSrc.Contains($csvInclude)) { throw "Missing CSV include anchor" }
+$csvSrc = $csvSrc.Replace($csvInclude, "#include <fstream>`n#include <filesystem>`n" + $csvInclude)
+$csvBefore = @'
+  file.open(QFile::ReadOnly);
+  QByteArray file_data = file.readAll();
+  file.close();
+
+  std::string file_str(file_data.constData(), file_data.size());
+
+  auto result = PJ::CSV::ParseCsvData(file_str, config, [&](int current, int) -> bool {
+'@
+$csvAfter = @'
+  // Avoid allocating two additional copies of the complete CSV in memory.
+  // std::filesystem::path preserves Unicode Windows filenames.
+  std::ifstream csv_stream(std::filesystem::path(file.fileName().toStdWString()),
+                           std::ios::binary);
+  if (!csv_stream.is_open())
+  {
+    QMessageBox::warning(nullptr, QString::fromUtf8("CSV 文件读取失败"),
+                         QString::fromUtf8("无法打开文件：") + file.fileName());
+    return false;
+  }
+  auto result = PJ::CSV::ParseCsvData(csv_stream, config, [&](int current, int) -> bool {
+'@
+if (!$csvSrc.Contains($csvBefore)) { throw "Missing CSV streaming replacement anchor" }
+$csvSrc = $csvSrc.Replace($csvBefore, $csvAfter)
+$csvSrc = $csvSrc.Replace('progress_dialog.setWindowTitle("Loading the CSV file");', 'progress_dialog.setWindowTitle(QString::fromUtf8("正在导入 CSV 文件"));')
+$csvSrc = $csvSrc.Replace('progress_dialog.setLabelText("Loading... please wait");', 'progress_dialog.setLabelText(QString::fromUtf8("正在读取录波数据，请稍候..."));')
+Set-Content -Path $csvFile -Value $csvSrc -Encoding UTF8
+Write-Host "Goldwind CSV streaming import and Chinese progress labels applied."
