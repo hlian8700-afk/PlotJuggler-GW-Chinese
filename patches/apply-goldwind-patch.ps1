@@ -317,8 +317,9 @@ $csvAfter = @'
   }
   auto result = PJ::CSV::ParseCsvData(csv_stream, config, [&](int current, int) -> bool {
 '@
-if (!$csvSrc.Contains($csvBefore)) { throw "Missing CSV streaming replacement anchor" }
-$csvSrc = $csvSrc.Replace($csvBefore, $csvAfter)
+$csvPattern = '(?s)  file\.open\(QFile::ReadOnly\);\s*QByteArray file_data = file\.readAll\(\);\s*file\.close\(\);\s*std::string file_str\(file_data\.constData\(\), file_data\.size\(\)\);\s*auto result = PJ::CSV::ParseCsvData\(file_str, config, \[&\]\(int current, int\) -> bool \{'
+if (![regex]::IsMatch($csvSrc, $csvPattern)) { throw "Missing CSV streaming replacement anchor" }
+$csvSrc = [regex]::Replace($csvSrc, $csvPattern, $csvAfter.TrimEnd())
 $csvSrc = $csvSrc.Replace('progress_dialog.setWindowTitle("Loading the CSV file");', 'progress_dialog.setWindowTitle(QString::fromUtf8("正在导入 CSV 文件"));')
 $csvSrc = $csvSrc.Replace('progress_dialog.setLabelText("Loading... please wait");', 'progress_dialog.setLabelText(QString::fromUtf8("正在读取录波数据，请稍候..."));')
 Set-Content -Path $csvFile -Value $csvSrc -Encoding UTF8
