@@ -228,8 +228,9 @@ void CurveListPanel::on_lineEditFilter_textChanged(const QString& search_string)
   }
   bool updated = _tree_view->applyVisibilityFilter(search_string);
 '@
-if (!$src.Contains($filterMethodBefore)) { throw "Missing search debounce anchor" }
-$src = $src.Replace($filterMethodBefore, $filterMethodAfter)
+$filterPattern = 'void CurveListPanel::on_lineEditFilter_textChanged\(const QString& search_string\)\s*\{\s*bool updated = _tree_view->applyVisibilityFilter\(search_string\);'
+if (![regex]::IsMatch($src, $filterPattern)) { throw "Missing search debounce anchor" }
+$src = [regex]::Replace($src, $filterPattern, $filterMethodAfter.Trim())
 
 
 if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
