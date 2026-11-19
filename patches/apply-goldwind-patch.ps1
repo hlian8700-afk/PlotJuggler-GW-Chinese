@@ -76,7 +76,7 @@ QString goldwindChineseName(const QString& raw_name)
 bool isCurveTreeItem'@
 if (!$src.Contains($namespaceNeedle)) { throw "Could not find anonymous namespace insertion point." }
 $src = $src.Replace($namespaceNeedle, $namespaceReplacement)
-$addNeedle = '_tree_view->addItem(group_name, getTreeName(plot_id), plot_id);'
+$addPattern = '(?m)^[ \t]*_tree_view->addItem\(group_name, getTreeName\(plot_id\), plot_id\);'
 $addReplacement = @'
   const QString chinese_name = goldwindChineseName(plot_id);
   if (chinese_name.isEmpty())
@@ -89,7 +89,7 @@ $addReplacement = @'
     _tree_view->addItem(QString(), chinese_name, plot_id);
   }
 '@
-if (!$src.Contains($addNeedle)) { throw "Could not find addCurve insertion point." }
-$src = $src.Replace($addNeedle, $addReplacement.TrimStart())
+if (![regex]::IsMatch($src, $addPattern)) { throw "Could not find addCurve insertion point." }
+$src = [regex]::Replace($src, $addPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $addReplacement.Trim() }, 1)
 Set-Content -Path $file -Value $src -Encoding UTF8
 Write-Host "Goldwind label patch applied."
