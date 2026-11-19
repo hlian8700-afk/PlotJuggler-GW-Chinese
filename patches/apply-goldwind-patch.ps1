@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 $file = "plotjuggler_app/curvelist_panel.cpp"
 if (!(Test-Path $file)) { throw "Expected PlotJuggler 3.17.0 source file not found: $file" }
 $src = Get-Content -Raw -Encoding UTF8 $file
+# Normalize CRLF from the Windows checkout so exact multiline anchors match.
+$src = $src.Replace("`r`n", "`n")
 if ($src.Contains("goldwindChineseName")) {
   Write-Host "Goldwind patch already present."
   exit 0
