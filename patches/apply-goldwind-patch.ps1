@@ -992,6 +992,37 @@ $plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVaria
 Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
 Write-Host "BladeScope legend follows label mode and Chinese aliases."
 
+# Calculate plot legend entry width from the full label, not the old narrow layout.
+$legendHeaderFile = "plotjuggler_base/src/plotlegend.h"
+$legendHeaderSrc = (Get-Content -Raw -Encoding UTF8 $legendHeaderFile).Replace("`r`n", "`n")
+$legendHeaderAnchor = "  QRectF hideButtonRect() const;"
+if (!$legendHeaderSrc.Contains($legendHeaderAnchor)) { throw "Legend header size anchor missing" }
+$legendHeaderSrc = $legendHeaderSrc.Replace($legendHeaderAnchor,
+    "  QSize minimumSize(const QwtLegendData& data) const override;`n`n" + $legendHeaderAnchor)
+Set-Content -Path $legendHeaderFile -Value $legendHeaderSrc -Encoding UTF8
+$legendCppFile = "plotjuggler_base/src/plotlegend.cpp"
+$legendCppSrc = (Get-Content -Raw -Encoding UTF8 $legendCppFile).Replace("`r`n", "`n")
+$legendCppAnchor = "QRectF PlotLegend::hideButtonRect() const"
+if (!$legendCppSrc.Contains($legendCppAnchor)) { throw "Legend source size anchor missing" }
+$legendCppMethod = @'
+QSize PlotLegend::minimumSize(const QwtLegendData& data) const
+{
+  QSize size = QwtPlotLegendItem::minimumSize(data);
+  const QString label = data.title().text();
+  if (!label.isEmpty())
+  {
+    const int fullWidth = QFontMetrics(font()).horizontalAdvance(label) + 36;
+    size.setWidth(qMax(size.width(), qMin(460, fullWidth)));
+  }
+  return size;
+}
+
+'@
+$legendCppSrc = $legendCppSrc.Replace($legendCppAnchor, $legendCppMethod + $legendCppAnchor)
+$legendCppSrc = "#include <QFontMetrics>`n" + $legendCppSrc
+Set-Content -Path $legendCppFile -Value $legendCppSrc -Encoding UTF8
+Write-Host "BladeScope legend allocates width for full raw/Chinese labels."
+
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
 $panelUi = (Get-Content -Raw -Encoding UTF8 $panelUiFile).Replace("`r`n", "`n")
