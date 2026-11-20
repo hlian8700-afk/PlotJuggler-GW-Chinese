@@ -572,7 +572,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   // The left pane stays resizable; the chart gets the majority of the workspace.
   ui->leftLayout->setContentsMargins(10, 8, 10, 8);
   ui->leftLayout->setSpacing(5);
-  ui->verticalLayout_2->setContentsMargins(8, 8, 8, 6);
+  ui->verticalLayout_2->setContentsMargins(0, 0, 0, 0);
   ui->plottingLayout->setSpacing(5);
   auto* signalHeader = new QLabel(QString::fromUtf8("测点列表"), ui->leftMainWindowFrame);
   signalHeader->setObjectName("BladeScopeSignalHeader");
@@ -770,10 +770,16 @@ $curvePanelLayout = @'
   ui->plottingLayout->setContentsMargins(0, 0, 0, 3);
   ui->plottingLayout->setSpacing(2);
   ui->horizontalLayout_5->setContentsMargins(0, 0, 0, 0);
+  ui->horizontalLayout_5->setSpacing(3);
+  ui->verticalLayout_5->setContentsMargins(0, 0, 0, 0);
+  ui->verticalLayout_5->setSpacing(0);
+  ui->plottingArea->setStyleSheet("QWidget#plottingArea{background:#f7f1eb;border:0px;}");
+  ui->plotPage->setStyleSheet("QWidget#plotPage{background:#f7f1eb;border:0px;}");
+  ui->plottingAreaH->setStyleSheet("QWidget#plottingAreaH{background:#f7f1eb;border:0px;}");
   ui->tabsFrame->setMinimumHeight(0);
   ui->tabsFrame->setMaximumHeight(QWIDGETSIZE_MAX);
   ui->tabsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-  ui->tabsFrame->setStyleSheet("QFrame#tabsFrame{background:transparent;border:0px;}");
+  ui->tabsFrame->setStyleSheet("QFrame#tabsFrame{background:#f7f1eb;border:0px;}");
   ui->plottingAreaH->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
@@ -945,9 +951,9 @@ $tabInsert = @'
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   _tabWidget->tabBar()->setStyleSheet(
-      "QTabWidget::pane{background:#f6f0e9;border:1px solid #e5d7ca;}"
-      "QTabBar{background:#f4e9dd;border:0px;}"
-      "QTabWidget::tab-bar{left:58px;}"
+      "QTabWidget::pane{background:#fffdfa;border:1px solid #e5d7ca;border-top:0px;}"
+      "QTabBar{background:#f7f1eb;border:0px;}"
+      "QTabWidget::tab-bar{left:0px;}"
       "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
       "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
       "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
