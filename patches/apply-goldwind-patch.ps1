@@ -618,6 +618,24 @@ if ($mainSrc.Contains($mainInclude)) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
 }
+# Move the existing functional curve list to the top of the left pane.
+# Preserve the upstream panel instance, search, drag/drop, signals and shortcuts.
+$curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);'
+if (!$mainSrc.Contains($curvePanelAnchor)) { throw "Curve list layout anchor missing" }
+$curvePanelLayout = @'
+  ui->leftLayout->addWidget(_curvelist_widget, 1);
+  // Place the real signal tree directly below the BladeScope signal heading.
+  // Existing file, streaming and publisher controls remain accessible below.
+  ui->leftLayout->removeWidget(ui->widgetLabelTimeseries);
+  ui->leftLayout->insertWidget(1, ui->widgetLabelTimeseries);
+  ui->leftLayout->removeWidget(_curvelist_widget);
+  ui->leftLayout->insertWidget(2, _curvelist_widget, 1);
+  ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
+  ui->label_5->setText(QString::fromUtf8("文件与布局"));
+  ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
+  ui->label_8->setText(QString::fromUtf8("数据发布（高级）"));
+'@
+$mainSrc = $mainSrc.Replace($curvePanelAnchor, $curvePanelLayout.TrimEnd())
 Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
 Write-Host "BladeScope runtime window icon applied."
 
