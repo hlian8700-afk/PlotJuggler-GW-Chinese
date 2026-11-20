@@ -165,10 +165,7 @@ $layoutReplacement = @'
   goldwindLabelMode() = 1;
   QCoreApplication::instance()->setProperty("bladeScopeLabelMode", 1);
   goldwindMode->setMinimumHeight(30);
-  goldwindMode->setStyleSheet(
-      "QComboBox{background:#fffaf5;border:1px solid #ead9ca;"
-      "border-radius:5px;padding:4px 8px;color:#59483c;}"
-      "QComboBox:hover{border-color:#c9946b;}");
+  // Selector colors inherit from the active global theme.
 
   goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
   auto* goldwindToolbar = new QGridLayout();
@@ -179,11 +176,7 @@ $layoutReplacement = @'
   auto* goldwindGroup = new QPushButton(QString::fromUtf8("系统分类"), this);
   goldwindGroup->setCheckable(true);
   goldwindGroup->setMinimumHeight(30);
-  goldwindGroup->setStyleSheet(
-      "QPushButton{background:#fffaf5;border:1px solid #ead9ca;"
-      "border-radius:5px;padding:4px 8px;color:#59483c;}"
-      "QPushButton:checked{background:#f2e2d4;border-color:#c9946b;color:#704e38;}"
-      "QPushButton:hover{border-color:#c9946b;}");
+  // Category toggle colors inherit from the active global theme.
 
   goldwindToolbar->addWidget(goldwindGroup, 0, 1);
   auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
