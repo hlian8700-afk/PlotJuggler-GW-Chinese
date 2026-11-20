@@ -620,7 +620,16 @@ if ($mainSrc.Contains($mainInclude)) {
 }
 # Move the existing functional curve list to the top of the left pane.
 # Preserve the upstream panel instance, search, drag/drop, signals and shortcuts.
-$curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);'
+$curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);
+  // Set a practical first-launch split: compact signal sidebar, wide plot canvas.
+  ui->mainSplitter->setStretchFactor(0, 0);
+  ui->mainSplitter->setStretchFactor(1, 1);
+  ui->mainSplitter->setSizes(QList<int>{275, 1165});
+  ui->mainSplitter->setHandleWidth(5);
+  ui->mainSplitter->setChildrenCollapsible(false);
+  ui->leftMainWindowFrame->setMinimumWidth(235);
+  ui->leftMainWindowFrame->setMaximumWidth(420);
+'
 if (!$mainSrc.Contains($curvePanelAnchor)) { throw "Curve list layout anchor missing" }
 $curvePanelLayout = @'
   ui->leftLayout->addWidget(_curvelist_widget, 1);
