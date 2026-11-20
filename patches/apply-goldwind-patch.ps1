@@ -963,6 +963,15 @@ $tabInsert = @'
       "QTabBar::close-button{margin-left:4px;}");
 '@
 $tabSrc = $tabSrc.Replace($tabAnchor, $tabInsert.TrimEnd())
+# The upstream paintEvent moves the add-tab button relative to the tab bar width.
+# Pin it to the far right and keep the full strip aligned with the plot container.
+$tabPaintAnchor = "  int button_pos = std::min(width_tabbar + margin, max_width_tabbar);"
+if (!$tabSrc.Contains($tabPaintAnchor)) { throw "Tab paintEvent button anchor missing" }
+$tabSrc = $tabSrc.Replace($tabPaintAnchor,
+    "  int button_pos = std::max(0, width() - _buttonAddTab->width() - margin);")
+$tabSrc = $tabSrc.Replace("  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);",
+    "  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);")
+
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
