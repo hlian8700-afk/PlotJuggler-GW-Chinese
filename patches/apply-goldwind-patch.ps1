@@ -331,8 +331,8 @@ $localizationReplacement = @'
   ui->setupUi(this);
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
   // Real leading search icon/action, independent of placeholder text.
-  auto* goldwindSearchIcon = ui->lineEditFilter->addAction(
-      QString::fromUtf8("⌕"), QLineEdit::LeadingPosition);
+  auto* goldwindSearchIcon = new QAction(QString::fromUtf8("⌕"), ui->lineEditFilter);
+  ui->lineEditFilter->addAction(goldwindSearchIcon, QLineEdit::LeadingPosition);
   goldwindSearchIcon->setToolTip(QString::fromUtf8("搜索测点（支持中文和原始编码）"));
   connect(goldwindSearchIcon, &QAction::triggered, ui->lineEditFilter,
           static_cast<void (QWidget::*)()>(&QWidget::setFocus));
