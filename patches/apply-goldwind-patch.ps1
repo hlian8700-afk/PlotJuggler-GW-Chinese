@@ -569,6 +569,16 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   chartHeader->setAlignment(Qt::AlignCenter);
   chartHeader->setStyleSheet("font-size:14px;font-weight:600;padding:7px 0;");
   ui->plottingLayout->insertWidget(0, chartHeader);
+  // Compact and label the native timeline controls without changing playback behavior.
+  ui->buttonTimeTracker->setToolTip(QString::fromUtf8("时间跟踪"));
+  ui->buttonLegend->setToolTip(QString::fromUtf8("显示或隐藏曲线图例"));
+  ui->buttonActivateGrid->setToolTip(QString::fromUtf8("显示或隐藏绘图区网格"));
+  ui->buttonRemoveTimeOffset->setToolTip(QString::fromUtf8("清除时间偏移"));
+  ui->buttonUseDateTime->setToolTip(QString::fromUtf8("切换日期时间显示"));
+  ui->buttonZoomOut->setToolTip(QString::fromUtf8("缩放以显示完整时间范围"));
+  ui->buttonPlay->setToolTip(QString::fromUtf8("播放或暂停时间轴"));
+  ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
+
   ui->mainSplitter->setHandleWidth(5);
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
@@ -618,7 +628,12 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QMenu::item:selected{background:%5;}"
     "QWidget#plotPage{background:%1;}"
     "QLabel#BladeScopeChartHeader{background:%3;color:%4;border-bottom:1px solid %6;padding:8px 4px;font-weight:600;}"
-    "QWidget#widgetTimescale{background:%3;border-top:1px solid %6;}"
+    "QWidget#widgetTimescale{background:%3;border-top:1px solid %6;padding:3px 5px;}"
+    "QWidget#widgetTimescale QPushButton{min-height:25px;max-height:29px;padding:3px 8px;border-radius:5px;}"
+    "QWidget#widgetTimescale QDoubleSpinBox{min-height:25px;max-height:29px;padding:2px 5px;border:1px solid %6;border-radius:4px;background:%2;color:%4;}"
+    "QWidget#widgetTimescale QLineEdit{min-height:25px;max-height:29px;padding:2px 5px;}"
+    "QWidget#widgetTimescale QSlider::groove:horizontal{height:4px;background:%6;border-radius:2px;}"
+    "QWidget#widgetTimescale QSlider::handle:horizontal{width:12px;margin:-5px 0;border-radius:6px;background:%5;}"
     "QFrame#tabsFrame{border:1px solid %6;border-radius:6px;}"
     "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
   QStringList themeStyles;
