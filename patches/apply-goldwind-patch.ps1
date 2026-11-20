@@ -1064,7 +1064,7 @@ $plotSyncInsert = @'
   _grid = new QwtPlotGrid();
 '@
 $plotSyncSrc = $plotSyncSrc.Replace($plotSyncAnchor, $plotSyncInsert.TrimEnd())
-$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <QwtText>`n" + $plotSyncSrc
+$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <qwt_text.h>`n" + $plotSyncSrc
 Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
 Write-Host "BladeScope legend follows label mode and Chinese aliases."
 
