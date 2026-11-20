@@ -541,6 +541,49 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
   bladeScopeToolbar->addSeparator();
   bladeScopeToolbar->addAction(ui->actionAbout);
+  // Persistent five-theme selector. Plot data and curve colors are not modified.
+  auto* themeButton = new QToolButton(this);
+  themeButton->setText(QString::fromUtf8("主题"));
+  themeButton->setPopupMode(QToolButton::InstantPopup);
+  auto* themeMenu = new QMenu(themeButton);
+  const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
+  const QStringList palettes[] = {
+    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa"},
+    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#edf4fa","#ffffff"},
+    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#f0f1ef","#ffffff"},
+    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#f4eee5","#fffdf9"},
+    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#2d3b4b","#202b38"}};
+  const QString styleTemplate = QString::fromUtf8(
+    "QMainWindow{background:%1;color:%4;}"
+    "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
+    "QWidget#widgetLabelLoad{background:%3;}"
+    "QToolBar{background:%3;border-bottom:1px solid %6;spacing:7px;padding:5px;}"
+    "QToolButton,QPushButton{color:%4;background:%2;border:1px solid %6;border-radius:5px;padding:5px 9px;}"
+    "QToolButton:hover,QPushButton:hover{background:%5;border-color:%5;}"
+    "QLineEdit,QComboBox{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:5px;}"
+    "QLineEdit:focus{border:1px solid %5;}"
+    "QMenuBar,QMenu{background:%3;color:%4;}"
+    "QMenu::item:selected{background:%5;}"
+    "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
+  QStringList themeStyles;
+  for (const auto& p : palettes) {
+    themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7]);
+  }
+  auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
+  auto applyBladeTheme = [this, themeButton, themeSettings, themeNames, themeStyles](int index) {
+    if (index < 0 || index >= themeStyles.size()) index = 0;
+    this->setStyleSheet(themeStyles[index]);
+    themeButton->setText(QString::fromUtf8("主题：") + themeNames[index]);
+    themeSettings->setValue("appearance/theme_index", index);
+    themeSettings->sync();
+  };
+  for (int i = 0; i < themeNames.size(); ++i) {
+    QAction* themeAction = themeMenu->addAction(themeNames[i]);
+    connect(themeAction, &QAction::triggered, this, [applyBladeTheme, i]() { applyBladeTheme(i); });
+  }
+  themeButton->setMenu(themeMenu);
+  bladeScopeToolbar->addWidget(themeButton);
+  applyBladeTheme(themeSettings->value("appearance/theme_index", 0).toInt());
 '@.TrimEnd())
 $mainSrc = $mainSrc.Replace($mainAnchor, @'
   const QString bladeScopeIconPath = QCoreApplication::applicationDirPath() + "/BladeScope.ico";
@@ -552,9 +595,10 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $mainSrc = $mainSrc.Replace($mainInclude, $mainInclude + "`n#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>`n#include <QToolBar>`n#include <QPushButton>")
-} else {
-  $mainSrc = "#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>`n" + $mainSrc
+  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>')
+  foreach ($header in $extraIncludes) {
+    if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
+  }
 }
 Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
 Write-Host "BladeScope runtime window icon applied."
