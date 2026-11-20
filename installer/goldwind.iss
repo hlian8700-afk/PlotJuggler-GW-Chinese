@@ -16,14 +16,14 @@ Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\bin\plotjuggler.exe
+UninstallDisplayIcon={app}\bin\BladeScope.exe
 WizardStyle=modern
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\bin\plotjuggler.exe"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\plotjuggler.exe"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\bin\BladeScope.exe"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\BladeScope.exe"; Tasks: desktopicon
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 [Run]
-Filename: "{app}\bin\plotjuggler.exe"; Description: "启动 BladeScope"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\bin\BladeScope.exe"; Description: "启动 BladeScope"; Flags: nowait postinstall skipifsilent
