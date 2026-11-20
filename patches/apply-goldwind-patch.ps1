@@ -579,6 +579,9 @@ foreach ($entry in $translations.GetEnumerator()) {
   $escapedReplacement = [System.Security.SecurityElement]::Escape($entry.Value)
   $uiSrc = $uiSrc.Replace($escapedNeedle, $escapedReplacement)
 }
+# BladeScope branding: use the Qt main window title without changing application
+# settings identity, preserving users' existing imported mapping CSV paths.
+$uiSrc = $uiSrc.Replace('<string>PlotJuggler</string>', '<string>BladeScope 风机录波数据分析工具</string>')
 Set-Content -Path $uiFile -Value $uiSrc -Encoding UTF8
 Write-Host "Goldwind main-window Chinese localization applied."
 
