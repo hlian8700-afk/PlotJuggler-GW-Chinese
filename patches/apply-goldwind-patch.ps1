@@ -522,11 +522,33 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
   {
     setWindowIcon(QIcon(bladeScopeIconPath));
   }
+  // BladeScope quick-access toolbar: reuse the existing application actions and
+  // buttons, preserving the upstream slots and file-loading behavior.
+  auto* bladeScopeToolbar = new QToolBar(QString::fromUtf8("BladeScope 快捷工具"), this);
+  bladeScopeToolbar->setObjectName("BladeScopeQuickToolbar");
+  bladeScopeToolbar->setMovable(false);
+  bladeScopeToolbar->setFloatable(false);
+  bladeScopeToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  bladeScopeToolbar->setStyleSheet(
+      "QToolBar { background: #edf5fc; border-bottom: 1px solid #d6e5f1; spacing: 8px; padding: 5px; }"
+      "QToolButton { color: #1f4a70; background: white; border: 1px solid #cbdfea;"
+      " border-radius: 5px; padding: 6px 11px; font-weight: 500; }"
+      "QToolButton:hover { background: #dceffc; border-color: #76b9e4; }");
+  addToolBar(Qt::TopToolBarArea, bladeScopeToolbar);
+  auto* bladeLoad = bladeScopeToolbar->addAction(QString::fromUtf8("打开录波"));
+  connect(bladeLoad, &QAction::triggered, ui->buttonLoadDatafile, &QPushButton::click);
+  auto* bladeLayout = bladeScopeToolbar->addAction(QString::fromUtf8("加载布局"));
+  connect(bladeLayout, &QAction::triggered, ui->buttonLoadLayout, &QPushButton::click);
+  bladeScopeToolbar->addSeparator();
+  bladeScopeToolbar->addAction(ui->actionPreferences);
+  bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
+  bladeScopeToolbar->addSeparator();
+  bladeScopeToolbar->addAction(ui->actionAbout);
   QLocale::setDefault(QLocale::c());  // set as default
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $mainSrc = $mainSrc.Replace($mainInclude, $mainInclude + "`n#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>")
+  $mainSrc = $mainSrc.Replace($mainInclude, $mainInclude + "`n#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>`n#include <QToolBar>`n#include <QPushButton>")
 } else {
   $mainSrc = "#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>`n" + $mainSrc
 }
