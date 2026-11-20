@@ -879,6 +879,17 @@ $plotWidgetSrc = $plotWidgetSrc.Replace($gridAnchor,
 Set-Content -Path $plotWidgetFile -Value $plotWidgetSrc -Encoding UTF8
 Write-Host "BladeScope subtle time-series grid styling applied."
 
+# Compact the native Qwt in-canvas legend; preserve its collapse and item-click logic.
+$plotLegendFile = "plotjuggler_base/src/plotlegend.cpp"
+$plotLegendSrc = (Get-Content -Raw -Encoding UTF8 $plotLegendFile).Replace("`r`n", "`n")
+$legendAnchor = '  setBorderRadius(0);'
+if (!$plotLegendSrc.Contains($legendAnchor)) { throw "Plot legend border anchor missing" }
+$plotLegendSrc = $plotLegendSrc.Replace($legendAnchor, '  setBorderRadius(5);')
+$plotLegendSrc = $plotLegendSrc.Replace('  setMargin(2);', '  setMargin(4);')
+$plotLegendSrc = $plotLegendSrc.Replace('  font.setPointSize(9);', '  font.setPointSize(8);')
+Set-Content -Path $plotLegendFile -Value $plotLegendSrc -Encoding UTF8
+Write-Host "BladeScope compact rounded plot legend styling applied."
+
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
 $panelUi = (Get-Content -Raw -Encoding UTF8 $panelUiFile).Replace("`r`n", "`n")
