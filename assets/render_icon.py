@@ -1,4 +1,5 @@
 from PIL import Image, ImageDraw
+from pathlib import Path
 import math
 S=1024
 im=Image.new("RGBA",(S,S),(0,0,0,0))
@@ -29,5 +30,6 @@ for i in range(len(pts)-1):
     k=min(int(t),len(colors)-2); a=t-k
     col=tuple(round(colors[k][j]*(1-a)+colors[k+1][j]*a) for j in range(3))+(255,)
     d.line([pts[i],pts[i+1]],fill=col,width=35)
-im.save("assets/BladeScope.ico",format="ICO",sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
-print("generated assets/BladeScope.ico")
+out = Path(__file__).resolve().parent / "BladeScope.ico"
+im.save(str(out),format="ICO",sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+print(f"generated {out}")
