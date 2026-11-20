@@ -559,6 +559,18 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
   bladeScopeToolbar->addSeparator();
   bladeScopeToolbar->addAction(ui->actionAbout);
+  // Quick plot actions forward to the existing, tested PlotJuggler controls.
+  // Do not create a second plot or duplicate its underlying data.
+  bladeScopeToolbar->addSeparator();
+  auto* bladeZoomAll = bladeScopeToolbar->addAction(QString::fromUtf8("适应时间范围"));
+  bladeZoomAll->setToolTip(QString::fromUtf8("显示全部已加载数据的时间范围"));
+  connect(bladeZoomAll, &QAction::triggered, ui->buttonZoomOut, &QPushButton::click);
+  auto* bladeGrid = bladeScopeToolbar->addAction(QString::fromUtf8("显示/隐藏网格"));
+  bladeGrid->setToolTip(QString::fromUtf8("切换曲线绘图区网格"));
+  connect(bladeGrid, &QAction::triggered, ui->buttonActivateGrid, &QPushButton::click);
+  auto* bladeLegend = bladeScopeToolbar->addAction(QString::fromUtf8("显示/隐藏图例"));
+  bladeLegend->setToolTip(QString::fromUtf8("切换曲线图例显示"));
+  connect(bladeLegend, &QAction::triggered, ui->buttonLegend, &QPushButton::click);
   // Persistent five-theme selector. Plot data and curve colors are not modified.
   auto* themeButton = new QToolButton(this);
   themeButton->setText(QString::fromUtf8("主题"));
