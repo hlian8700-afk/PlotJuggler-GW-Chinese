@@ -1,49 +1,33 @@
-"""Render a BladeScope Windows icon without Cairo/native SVG dependencies."""
 from PIL import Image, ImageDraw
 import math
-
-SIZE = 768
-im = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-px = im.load()
-for y in range(SIZE):
-    for x in range(SIZE):
-        # Rounded square, radius 125 px.
-        r = 125
-        cx = min(max(x, r), SIZE-r-1)
-        cy = min(max(y, r), SIZE-r-1)
-        if (x-cx)**2 + (y-cy)**2 > r*r:
-            continue
-        t = (x + y) / (2*(SIZE-1))
-        px[x,y] = (int(18+13*t), int(54+131*t), int(116+35*t), 255)
-
-d = ImageDraw.Draw(im)
-baseline = 380
-def bump(x, mu, spread):
-    return math.exp(-0.5*((x-mu)/spread)**2)
-def wave(x, shift):
-    return (64*bump(x,145+shift,22)
-            +220*bump(x,240+shift,31)
-            -180*bump(x,302+shift,30)
-            +110*bump(x,360+shift,34)
-            -105*bump(x,425+shift,34)
-            +150*bump(x,500+shift,30)
-            -112*bump(x,558+shift,31)
-            +65*bump(x,620+shift,25))
-for color, shift in [("#2598dd",16),("#37ca58",0),("#ff433c",-14),("#ff9824",55)]:
-    points = [(x, round(baseline-wave(x,shift))) for x in range(0,SIZE,2)]
-    d.line(points, fill=color, width=12, joint="curve")
-
-# Three white rotor blades and tower.
-hub=(592,505)
-d.polygon([(582,519),(602,519),(610,699),(573,699)], fill="white")
-for angle in [-math.pi/2, math.pi/6, 5*math.pi/6]:
-    ux,uy=math.cos(angle),math.sin(angle)
-    vx,vy=-uy,ux
-    pts=[(hub[0]+ux*12+vx*9,hub[1]+uy*12+vy*9),
-         (hub[0]+ux*145+vx*3,hub[1]+uy*145+vy*3),
-         (hub[0]+ux*160,hub[1]+uy*160),
-         (hub[0]+ux*14-vx*8,hub[1]+uy*14-vy*8)]
-    d.polygon(pts,fill="white")
-d.ellipse((hub[0]-15,hub[1]-15,hub[0]+15,hub[1]+15),fill="white")
-im.save("customization/assets/BladeScope.ico",format="ICO",sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
-print("BladeScope.ico generated")
+S=1024
+im=Image.new("RGBA",(S,S),(0,0,0,0))
+# Rounded-square teal-to-blue gradient, matching the user-approved artwork.
+pix=im.load()
+for x in range(S):
+    t=x/(S-1)
+    c=(int(73+(8-73)*t),int(189+(126-189)*t),int(179+(184-179)*t),255)
+    for y in range(S): pix[x,y]=c
+mask=Image.new("L",(S,S),0)
+ImageDraw.Draw(mask).rounded_rectangle((0,0,S-1,S-1),radius=232,fill=255)
+im.putalpha(mask)
+d=ImageDraw.Draw(im)
+d.ellipse((174,174,850,850),fill="white")
+# Smooth wave: sampled Catmull-like sine blend following the supplied logo's path.
+pts=[]
+for i in range(1200):
+    x=130+i*(894/1199)
+    y=565 - (47*math.sin((x-130)/42) * math.exp(-((x-390)/240)**2)
+             + 43*math.sin((x-455)/35) * math.exp(-((x-720)/230)**2))
+    # broad, smooth undulations matching the reference icon
+    y=565 - 54*math.sin((x-180)/48)*math.exp(-((x-380)/210)**2) + 48*math.sin((x-500)/43)*math.exp(-((x-760)/260)**2)
+    pts.append((x,y))
+# Draw gradient stroke in short connected segments for a continuous multi-colour wave.
+colors=[(229,241,248),(166,137,194),(151,40,158),(210,44,124),(234,77,92),(241,138,55)]
+for i in range(len(pts)-1):
+    t=i/(len(pts)-2)*(len(colors)-1)
+    k=min(int(t),len(colors)-2); a=t-k
+    col=tuple(round(colors[k][j]*(1-a)+colors[k+1][j]*a) for j in range(3))+(255,)
+    d.line([pts[i],pts[i+1]],fill=col,width=35)
+im.save("assets/BladeScope.ico",format="ICO",sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+print("generated assets/BladeScope.ico")
