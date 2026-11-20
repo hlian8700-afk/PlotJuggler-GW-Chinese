@@ -44,3 +44,11 @@ This is an application UI change, not a Toolbox-only side panel or a standalone 
 
 The above two new priorities are **planned, not yet implemented**. Previous Windows CI builds succeeded for existing features; a newer tag-search optimization build is being checked separately. Full localization must be staged and verified rather than claimed complete.
 
+
+
+## Next localization increment (2026-11-20)
+
+- Continue Chinese localization of the main window: toolbar tooltips, recent-file/help text, zoom/playback and common action labels.
+- Keep the previously user-verified GBK/GB18030 and UTF-8 mapping import behavior, full-replacement semantics, and user-level persistence unchanged.
+- Do not implement curve-rendering performance optimization; it was explicitly removed from scope by the user.
+- After CI succeeds, ask the user to verify translated tooltips/menu labels and regression-test mapping import.
