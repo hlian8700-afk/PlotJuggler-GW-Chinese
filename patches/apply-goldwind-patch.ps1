@@ -706,6 +706,22 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QCoreApplication::instance()->setProperty("bladeScopeThemeBorder", p[5]);
     this->setAutoFillBackground(true);
     for (auto* child : this->findChildren<QWidget*>()) child->setPalette(palette);
+    // Re-tint monochrome toolbar glyphs so dark themes never leave black icons
+    // on dark button tiles; preserve each original icon for later theme switches.
+    for (auto* tool : this->findChildren<QToolButton*>()) {
+      if (!tool->property("bladeScopeOriginalIcon").isValid())
+        tool->setProperty("bladeScopeOriginalIcon", QVariant::fromValue(tool->icon()));
+      const QIcon original = qvariant_cast<QIcon>(tool->property("bladeScopeOriginalIcon"));
+      if (!original.isNull()) {
+        const QSize iconSize = tool->iconSize().expandedTo(QSize(16, 16));
+        QPixmap tinted = original.pixmap(iconSize);
+        QPainter painter(&tinted);
+        painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        painter.fillRect(tinted.rect(), QColor(p[3]));
+        painter.end();
+        tool->setIcon(QIcon(tinted));
+      }
+    }
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
