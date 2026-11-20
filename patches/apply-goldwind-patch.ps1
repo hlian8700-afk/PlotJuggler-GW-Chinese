@@ -616,6 +616,10 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QLineEdit:focus{border:1px solid %5;}"
     "QMenuBar,QMenu{background:%3;color:%4;}"
     "QMenu::item:selected{background:%5;}"
+    "QWidget#plotPage{background:%1;}"
+    "QLabel#BladeScopeChartHeader{background:%3;color:%4;border-bottom:1px solid %6;padding:8px 4px;font-weight:600;}"
+    "QWidget#widgetTimescale{background:%3;border-top:1px solid %6;}"
+    "QFrame#tabsFrame{border:1px solid %6;border-radius:6px;}"
     "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
   QStringList themeStyles;
   for (const auto& p : palettes) {
