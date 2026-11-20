@@ -52,3 +52,12 @@ The above two new priorities are **planned, not yet implemented**. Previous Wind
 - Keep the previously user-verified GBK/GB18030 and UTF-8 mapping import behavior, full-replacement semantics, and user-level persistence unchanged.
 - Do not implement curve-rendering performance optimization; it was explicitly removed from scope by the user.
 - After CI succeeds, ask the user to verify translated tooltips/menu labels and regression-test mapping import.
+
+
+## BladeScope branding and UI redesign (user-approved reference images, 2026-11-20)
+
+1. Rename displayed product/window to **BladeScope 风机录波数据分析工具**; progressively rebrand installer, shortcuts, application icon and about dialog. Preserve Qt organization/application settings identity or migrate user AppData mapping safely before any identity change.
+2. Replace app icon with the user's supplied visual reference: rounded-square dark blue to teal gradient, multicolor oscillation traces, white wind turbine; generate Windows .ico with multi-resolution layers and embed in executable and installer.
+3. Restyle desktop UI inspired by the supplied second screenshot: light Chinese menu and icon toolbar; left searchable signal list with grouping; central multiple synchronized charts; right dockable curve properties (line width, color, markers, interpolation). Preserve PlotJuggler plotting/CSV/plugin functionality; implement in safe increments rather than claim a full redesign is done.
+4. Regression: imported 1,981-tag mappings, UTF-8 BOM/plain, GBK/GB18030 detection, full replacement, 100-500 MB recorder CSV import, search, plotting and Windows packaging.
+5. No curve rendering performance optimization (explicitly excluded).
