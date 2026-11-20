@@ -326,13 +326,7 @@ if (!$src.Contains($layoutNeedle)) { throw "Could not find series tree layout in
 $src = $src.Replace('auto layout1 = new QHBoxLayout();', 'auto layout1 = new QVBoxLayout();')
 $src = $src.Replace($layoutNeedle, $layoutReplacement)
 # Localize the most frequently used series-list controls without changing raw data keys.
-$localizationNeedle = '  ui->setupUi(this);
-  // Load the BladeScope brand icon deployed beside the executable.
-  const QString bladeScopeIcon = QCoreApplication::applicationDirPath() + "/BladeScope.ico";
-  if (QFile::exists(bladeScopeIcon))
-  {
-    setWindowIcon(QIcon(bladeScopeIcon));
-  }'
+$localizationNeedle = '  ui->setupUi(this);'
 $localizationReplacement = @'
   ui->setupUi(this);
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
