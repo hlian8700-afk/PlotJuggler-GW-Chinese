@@ -20,6 +20,7 @@ $src = $src.Replace($includeNeedle, @'
 #include <QComboBox>
 #include <QPushButton>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
 #include <QFileDialog>
@@ -156,18 +157,21 @@ $layoutReplacement = @'
   goldwindMode->addItem(QString::fromUtf8("原始标签"));
   goldwindMode->addItem(QString::fromUtf8("中英文对照"));
   goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
-  auto* goldwindToolbar = new QHBoxLayout();
-  goldwindToolbar->addWidget(goldwindMode);
+  auto* goldwindToolbar = new QGridLayout();
+  goldwindToolbar->setContentsMargins(0, 0, 0, 0);
+  goldwindToolbar->setHorizontalSpacing(5);
+  goldwindToolbar->setVerticalSpacing(5);
+  goldwindToolbar->addWidget(goldwindMode, 0, 0);
   auto* goldwindGroup = new QPushButton(QString::fromUtf8("按系统分类"), this);
   goldwindGroup->setCheckable(true);
-  goldwindToolbar->addWidget(goldwindGroup);
+  goldwindToolbar->addWidget(goldwindGroup, 0, 1);
   auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
   goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
-  goldwindToolbar->addWidget(goldwindSelect);
+  goldwindToolbar->addWidget(goldwindSelect, 1, 0);
   layout1->addLayout(goldwindToolbar);
   auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
   goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
-  goldwindToolbar->addWidget(goldwindImport);
+  goldwindToolbar->addWidget(goldwindImport, 1, 1);
   connect(goldwindImport, &QPushButton::clicked, this, [this]() {
     const QString path = QFileDialog::getOpenFileName(
         this, QString::fromUtf8("选择新的标签映射 CSV"), QString(),
