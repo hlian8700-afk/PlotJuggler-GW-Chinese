@@ -146,7 +146,7 @@ jobs:
       - name: Smoke test EXE installer and Chinese mapping
         shell: pwsh
         run: |
-          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/PlotJuggler-GW-Chinese-3.17.0-win64-Setup.exe"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0-win64-Setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "PlotJuggler-GW-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
@@ -174,9 +174,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PlotJuggler-GW-Chinese-3.17.0-win64
+          name: BladeScope-3.17.0-win64
           path: |
-            PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip
-            customization/installer/PlotJuggler-GW-Chinese-3.17.0-win64-Setup.exe
+            BladeScope-3.17.0-win64-portable.zip
+            customization/installer/BladeScope-3.17.0-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30
