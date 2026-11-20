@@ -631,34 +631,65 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#f4eee5","#fffdf9"},
     QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#2d3b4b","#202b38"}};
   const QString styleTemplate = QString::fromUtf8(
-    "QMainWindow{background:%1;color:%4;}"
+    "QMainWindow,QWidget{background:%1;color:%4;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
-    "QWidget#widgetLabelLoad{background:%3;}"
-    "QToolBar{background:%3;border-bottom:1px solid %6;spacing:7px;padding:5px;}"
+    "QWidget#widgetLabelLoad,QWidget#BladeScopeSignalActions{background:%3;color:%4;}"
+    "QToolBar,QMenuBar{background:%3;color:%4;border:0px;spacing:7px;padding:4px;}"
+    "QMenuBar::item{background:transparent;color:%4;padding:5px 8px;border-radius:4px;}"
+    "QMenuBar::item:selected,QMenu::item:selected{background:%5;color:%4;}"
+    "QMenu{background:%2;color:%4;border:1px solid %6;}"
+    "QMenu::item{background:transparent;color:%4;padding:5px 22px;}"
     "QToolButton,QPushButton{color:%4;background:%2;border:1px solid %6;border-radius:5px;padding:5px 9px;}"
-    "QToolButton:hover,QPushButton:hover{background:%5;border-color:%5;}"
-    "QLineEdit,QComboBox{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:5px;}"
-    "QLineEdit:focus{border:1px solid %5;}"
-    "QMenuBar,QMenu{background:%3;color:%4;}"
-    "QMenu::item:selected{background:%5;}"
-    "QWidget#plotPage{background:%1;}"
+    "QToolButton:hover,QPushButton:hover{background:%5;border-color:%5;color:%4;}"
+    "QToolButton:pressed,QPushButton:pressed,QToolButton:checked,QPushButton:checked{background:%5;border-color:%5;color:%4;}"
+    "QToolButton:disabled,QPushButton:disabled{background:%3;color:%6;border-color:%6;}"
+    "QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:5px;selection-background-color:%5;selection-color:%4;}"
+    "QComboBox QAbstractItemView{background:%2;color:%4;selection-background-color:%5;selection-color:%4;border:1px solid %6;}"
+    "QTreeView,QTreeWidget,QListView,QListWidget,QTableView,QTableWidget{background:%2;alternate-background-color:%3;color:%4;gridline-color:%6;border:1px solid %6;}"
+    "QTreeView::item:selected,QListView::item:selected,QTableView::item:selected{background:%5;color:%4;}"
+    "QHeaderView::section{background:%3;color:%4;border:0px;border-bottom:1px solid %6;padding:4px;}"
+    "QCheckBox,QRadioButton,QLabel{color:%4;}"
+    "QScrollBar:vertical,QScrollBar:horizontal{background:%3;border:0px;margin:2px;}"
+    "QScrollBar::handle:vertical,QScrollBar::handle:horizontal{background:%6;border-radius:4px;min-height:22px;min-width:22px;}"
+    "QScrollBar::handle:vertical:hover,QScrollBar::handle:horizontal:hover{background:%5;}"
+    "QSlider::groove:horizontal{height:4px;background:%6;border-radius:2px;}"
+    "QSlider::handle:horizontal{width:12px;margin:-5px 0;border-radius:6px;background:%5;}"
+    "QWidget#plotPage,QWidget#plottingArea,QWidget#plottingAreaH,QFrame#tabsFrame{background:%3;color:%4;border:0px;}"
     "QLabel#BladeScopeChartHeader{background:%3;color:%4;border-bottom:1px solid %6;padding:8px 4px;font-weight:600;}"
-    "QWidget#widgetTimescale{background:%3;border-top:1px solid %6;padding:3px 5px;}"
+    "QWidget#widgetTimescale{background:%3;color:%4;border-top:1px solid %6;padding:3px 5px;}"
     "QWidget#widgetTimescale QPushButton{min-height:25px;max-height:29px;padding:3px 8px;border-radius:5px;}"
     "QWidget#widgetTimescale QDoubleSpinBox{min-height:25px;max-height:29px;padding:2px 5px;border:1px solid %6;border-radius:4px;background:%2;color:%4;}"
     "QWidget#widgetTimescale QLineEdit{min-height:25px;max-height:29px;padding:2px 5px;}"
-    "QWidget#widgetTimescale QSlider::groove:horizontal{height:4px;background:%6;border-radius:2px;}"
-    "QWidget#widgetTimescale QSlider::handle:horizontal{width:12px;margin:-5px 0;border-radius:6px;background:%5;}"
+    "QWidget#BladeScopeSignalActions QPushButton{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:6px 2px;min-height:24px;}"
+    "QWidget#BladeScopeSignalActions QPushButton:hover{background:%5;border-color:%5;}"
     "QFrame#tabsFrame{background:%3;border:0px;border-radius:0px;}"
+    "QSplitter#mainSplitter{background:%3;border:0px;}"
+    "QSplitter#mainSplitter::handle:horizontal{background:%6;width:1px;border:0px;}"
+    "QSplitter#mainSplitter::handle:vertical{background:%6;height:1px;border:0px;}"
     "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
   QStringList themeStyles;
   for (const auto& p : palettes) {
     themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7]);
   }
   auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
-  auto applyBladeTheme = [this, themeSettings, themeStyles](int index) {
+  auto applyBladeTheme = [this, themeSettings, themeStyles, palettes](int index) {
     if (index < 0 || index >= themeStyles.size()) index = 0;
+    const auto p = palettes[index];
     this->setStyleSheet(themeStyles[index]);
+    QPalette palette = this->palette();
+    palette.setColor(QPalette::Window, QColor(p[0]));
+    palette.setColor(QPalette::Base, QColor(p[1]));
+    palette.setColor(QPalette::AlternateBase, QColor(p[2]));
+    palette.setColor(QPalette::Button, QColor(p[1]));
+    palette.setColor(QPalette::Text, QColor(p[3]));
+    palette.setColor(QPalette::WindowText, QColor(p[3]));
+    palette.setColor(QPalette::ButtonText, QColor(p[3]));
+    palette.setColor(QPalette::HighlightedText, QColor(p[3]));
+    palette.setColor(QPalette::Highlight, QColor(p[4]));
+    palette.setColor(QPalette::Mid, QColor(p[5]));
+    this->setPalette(palette);
+    this->setAutoFillBackground(true);
+    for (auto* child : this->findChildren<QWidget*>()) child->setPalette(palette);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
@@ -678,7 +709,7 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>', '#include <QHBoxLayout>', '#include <QLineEdit>', '#include <QPainter>', '#include <QPixmap>', '#include <QPen>')
+  $extraIncludes = @('#include <QPalette>', '#include <QColor>', '#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>', '#include <QHBoxLayout>', '#include <QLineEdit>', '#include <QPainter>', '#include <QPixmap>', '#include <QPen>')
   foreach ($header in $extraIncludes) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
