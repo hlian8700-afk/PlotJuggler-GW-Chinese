@@ -612,7 +612,7 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>')
+  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>', '#include <QHBoxLayout>', '#include <QLineEdit>')
   foreach ($header in $extraIncludes) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
@@ -658,12 +658,32 @@ $curvePanelLayout = @'
       break;
     }
   }
-  // Data loading stays one click away in the signal sidebar.
-  auto* bladeLoadData = new QPushButton(QString::fromUtf8("加载数据"), ui->leftMainWindowFrame);
-  bladeLoadData->setObjectName("BladeScopeLoadData");
-  bladeLoadData->setToolTip(QString::fromUtf8("打开风机录波数据文件"));
-  ui->leftLayout->insertWidget(1, bladeLoadData);
+  // One compact action row: load recording, focus filter, clear search.
+  // Buttons call the original controls and never modify the underlying samples.
+  auto* bladeSignalActions = new QWidget(ui->leftMainWindowFrame);
+  bladeSignalActions->setObjectName("BladeScopeSignalActions");
+  auto* bladeActionRow = new QHBoxLayout(bladeSignalActions);
+  bladeActionRow->setContentsMargins(0, 2, 0, 4);
+  bladeActionRow->setSpacing(5);
+  auto* bladeLoadData = new QPushButton(QString::fromUtf8("加载数据"), bladeSignalActions);
+  bladeLoadData->setToolTip(QString::fromUtf8("打开风机录波文件"));
+  auto* bladeFilterData = new QPushButton(QString::fromUtf8("筛选"), bladeSignalActions);
+  bladeFilterData->setToolTip(QString::fromUtf8("定位到测点搜索框"));
+  auto* bladeClearSearch = new QPushButton(QString::fromUtf8("清空"), bladeSignalActions);
+  bladeClearSearch->setToolTip(QString::fromUtf8("清空搜索条件，不删除已加载数据或曲线"));
+  bladeActionRow->addWidget(bladeLoadData, 1);
+  bladeActionRow->addWidget(bladeFilterData, 1);
+  bladeActionRow->addWidget(bladeClearSearch, 1);
+  ui->leftLayout->insertWidget(1, bladeSignalActions);
   connect(bladeLoadData, &QPushButton::clicked, ui->buttonLoadDatafile, &QPushButton::click);
+  connect(bladeFilterData, &QPushButton::clicked, this, [this]() {
+    auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
+    if (search) { search->setFocus(); search->selectAll(); }
+  });
+  connect(bladeClearSearch, &QPushButton::clicked, this, [this]() {
+    auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
+    if (search) { search->clear(); search->setFocus(); }
+  });
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
   ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
