@@ -326,30 +326,7 @@ if (!$src.Contains($layoutNeedle)) { throw "Could not find series tree layout in
 $src = $src.Replace('auto layout1 = new QHBoxLayout();', 'auto layout1 = new QVBoxLayout();')
 $src = $src.Replace($layoutNeedle, $layoutReplacement)
 # Localize the most frequently used series-list controls without changing raw data keys.
-$localizationNeedle = '  ui->setupUi(this);
-
-  // BladeScope quick-access toolbar: reuse the existing application actions and
-  // buttons, preserving the upstream slots and file-loading behavior.
-  auto* bladeScopeToolbar = new QToolBar(QString::fromUtf8("BladeScope 快捷工具"), this);
-  bladeScopeToolbar->setObjectName("BladeScopeQuickToolbar");
-  bladeScopeToolbar->setMovable(false);
-  bladeScopeToolbar->setFloatable(false);
-  bladeScopeToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  bladeScopeToolbar->setStyleSheet(
-      "QToolBar { background: #edf5fc; border-bottom: 1px solid #d6e5f1; spacing: 8px; padding: 5px; }"
-      "QToolButton { color: #1f4a70; background: white; border: 1px solid #cbdfea;"
-      " border-radius: 5px; padding: 6px 11px; font-weight: 500; }"
-      "QToolButton:hover { background: #dceffc; border-color: #76b9e4; }");
-  addToolBar(Qt::TopToolBarArea, bladeScopeToolbar);
-  auto* bladeLoad = bladeScopeToolbar->addAction(QString::fromUtf8("打开录波"));
-  connect(bladeLoad, &QAction::triggered, ui->buttonLoadDatafile, &QPushButton::click);
-  auto* bladeLayout = bladeScopeToolbar->addAction(QString::fromUtf8("加载布局"));
-  connect(bladeLayout, &QAction::triggered, ui->buttonLoadLayout, &QPushButton::click);
-  bladeScopeToolbar->addSeparator();
-  bladeScopeToolbar->addAction(ui->actionPreferences);
-  bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
-  bladeScopeToolbar->addSeparator();
-  bladeScopeToolbar->addAction(ui->actionAbout);'
+$localizationNeedle = '  ui->setupUi(this);'
 $localizationReplacement = @'
   ui->setupUi(this);
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
@@ -539,6 +516,32 @@ $mainFile = "plotjuggler_app/mainwindow.cpp"
 $mainSrc = (Get-Content -Raw -Encoding UTF8 $mainFile).Replace("`r`n", "`n")
 $mainAnchor = "  QLocale::setDefault(QLocale::c());  // set as default"
 if (!$mainSrc.Contains($mainAnchor)) { throw "MainWindow icon insertion anchor missing" }
+$mainUiAnchor = "  ui->setupUi(this);"
+if (!$mainSrc.Contains($mainUiAnchor)) { throw "MainWindow setupUi anchor missing" }
+$mainSrc = $mainSrc.Replace($mainUiAnchor, @'
+  ui->setupUi(this);
+  // BladeScope quick-access toolbar; create only after Qt widgets exist.
+  auto* bladeScopeToolbar = new QToolBar(QString::fromUtf8("BladeScope 快捷工具"), this);
+  bladeScopeToolbar->setObjectName("BladeScopeQuickToolbar");
+  bladeScopeToolbar->setMovable(false);
+  bladeScopeToolbar->setFloatable(false);
+  bladeScopeToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  bladeScopeToolbar->setStyleSheet(
+      "QToolBar { background: #edf5fc; border-bottom: 1px solid #d6e5f1; spacing: 8px; padding: 5px; }"
+      "QToolButton { color: #1f4a70; background: white; border: 1px solid #cbdfea;"
+      " border-radius: 5px; padding: 6px 11px; font-weight: 500; }"
+      "QToolButton:hover { background: #dceffc; border-color: #76b9e4; }");
+  addToolBar(Qt::TopToolBarArea, bladeScopeToolbar);
+  auto* bladeLoad = bladeScopeToolbar->addAction(QString::fromUtf8("打开录波"));
+  connect(bladeLoad, &QAction::triggered, ui->buttonLoadDatafile, &QPushButton::click);
+  auto* bladeLayout = bladeScopeToolbar->addAction(QString::fromUtf8("加载布局"));
+  connect(bladeLayout, &QAction::triggered, ui->buttonLoadLayout, &QPushButton::click);
+  bladeScopeToolbar->addSeparator();
+  bladeScopeToolbar->addAction(ui->actionPreferences);
+  bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
+  bladeScopeToolbar->addSeparator();
+  bladeScopeToolbar->addAction(ui->actionAbout);
+'@.TrimEnd())
 $mainSrc = $mainSrc.Replace($mainAnchor, @'
   const QString bladeScopeIconPath = QCoreApplication::applicationDirPath() + "/BladeScope.ico";
   if (QFile::exists(bladeScopeIconPath))
