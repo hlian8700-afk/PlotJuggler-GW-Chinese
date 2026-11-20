@@ -594,6 +594,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
 
   ui->mainSplitter->setHandleWidth(5);
+  ui->mainSplitter->setStyleSheet("QSplitter::handle{background:#e9dfd5;border:0px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope: one menu row only, no second-row quick toolbar.
@@ -693,6 +694,7 @@ $curvePanelLayout = @'
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{265, 1175});
   ui->mainSplitter->setHandleWidth(5);
+  ui->mainSplitter->setStyleSheet("QSplitter::handle{background:#e9dfd5;border:0px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(350);
@@ -765,6 +767,9 @@ $curvePanelLayout = @'
   // tabsFrame contains the *entire* plotting widget, not just its tab strip.
   // Never constrain its height: doing so hides the plot canvas.
   ui->tabsFrame->setContentsMargins(0, 0, 0, 0);
+  ui->plottingLayout->setContentsMargins(0, 0, 0, 3);
+  ui->plottingLayout->setSpacing(2);
+  ui->horizontalLayout_5->setContentsMargins(0, 0, 0, 0);
   ui->tabsFrame->setMinimumHeight(0);
   ui->tabsFrame->setMaximumHeight(QWIDGETSIZE_MAX);
   ui->tabsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -917,6 +922,15 @@ if (!$plotLegendSrc.Contains($legendAnchor)) { throw "Plot legend border anchor 
 $plotLegendSrc = $plotLegendSrc.Replace($legendAnchor, '  setBorderRadius(5);')
 $plotLegendSrc = $plotLegendSrc.Replace('  setMargin(2);', '  setMargin(4);')
 $plotLegendSrc = $plotLegendSrc.Replace('  font.setPointSize(9);', '  font.setPointSize(8);')
+# Reserve actual text width for long raw tags and Chinese names.
+$legendSizeAnchor = '  setRenderHint(QwtPlotItem::RenderAntialiased);'
+if (!$plotLegendSrc.Contains($legendSizeAnchor)) { throw "Legend constructor anchor missing" }
+$legendSizeHook = @'
+  setRenderHint(QwtPlotItem::RenderAntialiased);
+  setItemSpacing(7);
+'@
+$plotLegendSrc = $plotLegendSrc.Replace($legendSizeAnchor, $legendSizeHook.TrimEnd())
+
 Set-Content -Path $plotLegendFile -Value $plotLegendSrc -Encoding UTF8
 Write-Host "BladeScope compact rounded plot legend styling applied."
 
@@ -932,7 +946,7 @@ $tabInsert = @'
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   _tabWidget->tabBar()->setStyleSheet(
       "QTabWidget::pane{background:#f6f0e9;border:1px solid #e5d7ca;}"
-      "QTabBar{background:#eee5db;}"
+      "QTabBar{background:#eee5db;border:0px;}"
       "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
       "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
       "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
