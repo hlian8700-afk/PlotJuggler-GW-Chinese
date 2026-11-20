@@ -624,6 +624,14 @@ $curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);'
 if (!$mainSrc.Contains($curvePanelAnchor)) { throw "Curve list layout anchor missing" }
 $curvePanelLayout = @'
   ui->leftLayout->addWidget(_curvelist_widget, 1);
+  // Keep the daily workflow compact: file/layout stays visible; streaming
+  // and publisher panels are collapsed by default but remain one-click accessible.
+  ui->frameStreaming->hide();
+  ui->buttonHideStreamingFrame->setText(QString::fromUtf8("实时数据 +"));
+  ui->framePublishers->hide();
+  ui->buttonHidePublishersFrame->setText(QString::fromUtf8("数据发布 +"));
+  ui->buttonHideStreamingFrame->setToolTip(QString::fromUtf8("展开实时数据高级功能"));
+  ui->buttonHidePublishersFrame->setToolTip(QString::fromUtf8("展开数据发布高级功能"));
   // Place the real signal tree directly below the BladeScope signal heading.
   // Existing file, streaming and publisher controls remain accessible below.
   ui->leftLayout->removeWidget(ui->widgetLabelTimeseries);
@@ -741,6 +749,10 @@ QLabel#BladeScopeChartHeader { font-size: 14px; font-weight: 600; padding: 7px 0
 QFrame#tabsFrame { border: 1px solid #e5e8ec; border-radius: 7px; }
 QWidget#widgetTimescale { background: #fffdfa; border-top: 1px solid #e7e0da; }
 QSplitter::handle { background: #ece5df; }
+QFrame#frameFile { background: #fffdfa; border: 1px solid #eadfd4; border-radius: 7px; }
+QFrame#frameStreaming, QFrame#framePublishers { background: #faf6f1; border: 1px solid #eadfd4; border-radius: 6px; }
+QPushButton#buttonHideStreamingFrame, QPushButton#buttonHidePublishersFrame { text-align: left; color: #8a684e; background: #f7eee5; border: 0; padding: 6px 8px; }
+
 
 '@
 $styleAnchor = '<string notr="true"/>'
