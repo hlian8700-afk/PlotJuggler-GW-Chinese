@@ -593,8 +593,8 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->buttonPlay->setToolTip(QString::fromUtf8("播放或暂停时间轴"));
   ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
 
-  ui->mainSplitter->setHandleWidth(5);
-  ui->mainSplitter->setStyleSheet("QSplitter{background:#f7f0e8;} QSplitter::handle{background:#eadfd4;border:0px;}");
+  ui->mainSplitter->setHandleWidth(3);
+  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#eadfd4;border:0px; margin:0px; width:3px;} QSplitter#mainSplitter::handle:vertical{background:#eadfd4;border:0px; margin:0px; height:3px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope: one menu row only, no second-row quick toolbar.
@@ -693,8 +693,8 @@ $curvePanelLayout = @'
   ui->mainSplitter->setStretchFactor(0, 0);
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{265, 1175});
-  ui->mainSplitter->setHandleWidth(5);
-  ui->mainSplitter->setStyleSheet("QSplitter{background:#f7f0e8;} QSplitter::handle{background:#eadfd4;border:0px;}");
+  ui->mainSplitter->setHandleWidth(3);
+  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#eadfd4;border:0px; margin:0px; width:3px;} QSplitter#mainSplitter::handle:vertical{background:#eadfd4;border:0px; margin:0px; height:3px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(350);
@@ -950,10 +950,10 @@ $tabInsert = @'
   _tabWidget->setDocumentMode(true);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
-  _tabWidget->tabBar()->setStyleSheet(
+  _tabWidget->setStyleSheet(
       "QTabWidget::pane{background:#fffdfa;border:1px solid #e5d7ca;border-top:0px;}"
       "QTabBar{background:#f7f1eb;border:0px;}"
-      "QTabWidget::tab-bar{left:0px;}"
+      "QTabWidget::tab-bar{subcontrol-origin:margin; left:0px;}"
       "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
       "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
       "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
