@@ -36,7 +36,7 @@ This is an application UI change, not a Toolbox-only side panel or a standalone 
 
 1. **Full main-interface Chinese localization**: menus, dialogs, tooltips, import status and common error messages. Preserve raw tag IDs and application behavior.
 2. **Import new label mappings**: add a UI action to select a UTF-8 CSV mapping file with columns `raw_tag,cn_name`, validate rows and duplicates, store a user-writable copy, reload mappings without reinstalling, and refresh the native series list and Chinese search.
-3. Regression checks for existing 1,981 labels, Chinese search, system groups, label-mode toggle, CSV streaming and Windows EXE packaging.
+3. **Automatic Chinese CSV encoding detection (new requirement)**: support UTF-8 (with or without BOM) and GBK/GB18030 label-mapping files, detect encoding before parsing, preserve original raw tag IDs, warn on invalid/unrecognized input, and normalize saved mappings to UTF-8. Verify using Chinese sample labels and both encoding variants.\n4. Regression checks for existing 1,981 labels, Chinese search, system groups, label-mode toggle, CSV streaming and Windows EXE packaging.
 
 **Removed from the roadmap at user request:** curve-rendering performance optimization. Do not implement or prioritize this work.
 
