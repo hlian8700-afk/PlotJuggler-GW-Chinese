@@ -527,3 +527,13 @@ foreach ($entry in $translations.GetEnumerator()) {
 }
 Set-Content -Path $uiFile -Value $uiSrc -Encoding UTF8
 Write-Host "Goldwind main-window Chinese localization applied."
+
+# Localize remaining common Timeseries List labels and short search tooltips.
+$panelUiFile = "plotjuggler_app/curvelist_panel.ui"
+$panelUi = (Get-Content -Raw -Encoding UTF8 $panelUiFile).Replace("`r`n", "`n")
+$panelUi = $panelUi.Replace('<string>Values</string>', '<string>当前值</string>')
+$panelUi = $panelUi.Replace('<string>Custom Series:</string>', '<string>自定义曲线：</string>')
+$panelUi = $panelUi.Replace('<string>Filter...</string>', '<string>筛选...</string>')
+$panelUi = $panelUi.Replace('<string>  Filter...</string>', '<string>  筛选...</string>')
+Set-Content -Path $panelUiFile -Value $panelUi -Encoding UTF8
+Write-Host "Goldwind Timeseries List UI labels localized."
