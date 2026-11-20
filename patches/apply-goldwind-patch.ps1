@@ -594,7 +594,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
 
   ui->mainSplitter->setHandleWidth(5);
-  ui->mainSplitter->setStyleSheet("QSplitter::handle{background:#e9dfd5;border:0px;}");
+  ui->mainSplitter->setStyleSheet("QSplitter{background:#f7f0e8;} QSplitter::handle{background:#eadfd4;border:0px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope: one menu row only, no second-row quick toolbar.
@@ -694,7 +694,7 @@ $curvePanelLayout = @'
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{265, 1175});
   ui->mainSplitter->setHandleWidth(5);
-  ui->mainSplitter->setStyleSheet("QSplitter::handle{background:#e9dfd5;border:0px;}");
+  ui->mainSplitter->setStyleSheet("QSplitter{background:#f7f0e8;} QSplitter::handle{background:#eadfd4;border:0px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(350);
@@ -946,7 +946,8 @@ $tabInsert = @'
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   _tabWidget->tabBar()->setStyleSheet(
       "QTabWidget::pane{background:#f6f0e9;border:1px solid #e5d7ca;}"
-      "QTabBar{background:#eee5db;border:0px;}"
+      "QTabBar{background:#f4e9dd;border:0px;}"
+      "QTabWidget::tab-bar{left:58px;}"
       "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
       "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
       "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
@@ -1022,6 +1023,20 @@ $legendCppSrc = $legendCppSrc.Replace($legendCppAnchor, $legendCppMethod + $lege
 $legendCppSrc = "#include <QFontMetrics>`n" + $legendCppSrc
 Set-Content -Path $legendCppFile -Value $legendCppSrc -Encoding UTF8
 Write-Host "BladeScope legend allocates width for full raw/Chinese labels."
+
+# Fix legend text clipping: Qwt text size can exceed the compact legend row height.
+$legendFixFile = "plotjuggler_base/src/plotlegend.cpp"
+$legendFixSrc = (Get-Content -Raw -Encoding UTF8 $legendFixFile).Replace("`r`n", "`n")
+$legendFixAnchor = "    size.setWidth(qMax(size.width(), qMin(460, fullWidth)));"
+if (!$legendFixSrc.Contains($legendFixAnchor)) { throw "Legend full width anchor missing" }
+$legendFixSrc = $legendFixSrc.Replace($legendFixAnchor,
+  "    size.setWidth(qMax(size.width(), qMin(460, fullWidth)));`n    size.setHeight(qMax(size.height(), QFontMetrics(font()).height() + 16));")
+$legendClipAnchor = "  painter->setClipRect(r, Qt::IntersectClip);"
+if (!$legendFixSrc.Contains($legendClipAnchor)) { throw "Legend clip anchor missing" }
+$legendFixSrc = $legendFixSrc.Replace($legendClipAnchor,
+  "  // Do not clip the glyph ascenders/descenders inside a narrow Qwt legend row.`n  // The row height is reserved by minimumSize above.")
+Set-Content -Path $legendFixFile -Value $legendFixSrc -Encoding UTF8
+Write-Host "BladeScope legend text height and clipping fixed."
 
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
