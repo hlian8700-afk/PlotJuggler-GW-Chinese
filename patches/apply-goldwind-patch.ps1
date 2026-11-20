@@ -1051,9 +1051,10 @@ $plotSyncInsert = @'
         QwtText title = qwtPlot()->axisTitle(axis);
         title.setColor(axisText);
         qwtPlot()->setAxisTitle(axis, title);
-        QPen axisPen(axisText);
-        qwtPlot()->setAxisPen(axis, axisPen);
-        qwtPlot()->setAxisLabelPen(axis, axisPen);
+        QPalette axisPalette = qwtPlot()->axisWidget(axis)->palette();
+        axisPalette.setColor(QPalette::WindowText, axisText);
+        axisPalette.setColor(QPalette::Text, axisText);
+        qwtPlot()->axisWidget(axis)->setPalette(axisPalette);
       }
       _grid->setPen(QPen(gridColor, 0.0, Qt::DotLine));
       for (auto* item : qwtPlot()->itemList()) {
@@ -1082,7 +1083,7 @@ $plotSyncInsert = @'
   _grid = new QwtPlotGrid();
 '@
 $plotSyncSrc = $plotSyncSrc.Replace($plotSyncAnchor, $plotSyncInsert.TrimEnd())
-$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <qwt_text.h>
+$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <QPalette>`n#include <qwt_text.h>
 #include <qwt_plot_legenditem.h>`n" + $plotSyncSrc
 Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
 Write-Host "BladeScope legend follows label mode and Chinese aliases."
