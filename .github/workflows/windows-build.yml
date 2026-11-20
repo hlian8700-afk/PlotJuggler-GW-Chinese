@@ -140,6 +140,22 @@ jobs:
           Copy-Item customization/assets/BladeScope.ico $exe.DirectoryName -Force
           Write-Host "BladeScope multi-resolution icon generated and deployed."
           
+      - name: Finalize BladeScope runtime naming and remove developer headers
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:GITHUB_WORKSPACE "stage/bin"
+          $oldExe = Join-Path $bin "plotjuggler.exe"
+          $newExe = Join-Path $bin "BladeScope.exe"
+          if (!(Test-Path $oldExe)) { throw "Original application executable missing" }
+          Move-Item -LiteralPath $oldExe -Destination $newExe -Force
+          if (!(Test-Path $newExe)) { throw "BladeScope.exe rename failed" }
+          # The portable/installer distributions are runtime products, not SDKs.
+          # Keep original C++ header identifiers in source code for ABI/API compatibility,
+          # but do not distribute upstream PlotJuggler developer headers.
+          $headers = Join-Path $env:GITHUB_WORKSPACE "stage/include"
+          if (Test-Path $headers) { Remove-Item -LiteralPath $headers -Recurse -Force }
+          Write-Host "Packaged BladeScope.exe without unnecessary developer headers."
+
       - name: Package portable x64 build
         shell: pwsh
         run: |
@@ -162,12 +178,12 @@ jobs:
         shell: pwsh
         run: |
           $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0-win64-Setup.exe"
-          $target = Join-Path $env:RUNNER_TEMP "PlotJuggler-GW-SmokeTest"
+          $target = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
-          $exe = Join-Path $target "bin/plotjuggler.exe"
+          $exe = Join-Path $target "bin/BladeScope.exe"
           $csv = Join-Path $target "bin/gw_tag_mapping.csv"
-          if (!(Test-Path $exe)) { throw "Installed PlotJuggler executable missing" }
+          if (!(Test-Path $exe)) { throw "Installed BladeScope executable missing" }
           if (!(Test-Path $csv)) { throw "Installed Goldwind Chinese dictionary missing" }
           if (!(Test-Path (Join-Path $target "bin/DataLoadCSV.dll"))) { throw "Installed CSV plugin missing" }
           if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
