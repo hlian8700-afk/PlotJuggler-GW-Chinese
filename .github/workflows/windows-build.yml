@@ -134,7 +134,7 @@ jobs:
       - name: Package portable x64 build
         shell: pwsh
         run: |
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\PlotJuggler-GW-Chinese-3.17.0-win64-portable.zip" -Force
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0-win64-portable.zip" -Force
 
       - name: Build Windows EXE installer
         shell: pwsh
@@ -145,7 +145,7 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
-          $setup = "customization/installer/PlotJuggler-GW-Chinese-3.17.0-win64-Setup.exe"
+          $setup = "customization/installer/BladeScope-3.17.0-win64-Setup.exe"
           if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
           Write-Host "Installer created: $setup"
 
@@ -162,6 +162,7 @@ jobs:
           if (!(Test-Path $csv)) { throw "Installed Goldwind Chinese dictionary missing" }
           if (!(Test-Path (Join-Path $target "bin/DataLoadCSV.dll"))) { throw "Installed CSV plugin missing" }
           if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
+          if (!(Test-Path (Join-Path $target "bin/BladeScope.ico"))) { throw "BladeScope icon missing from installed files" }
           # Launch for a few seconds to catch Windows loader errors (e.g. missing DLLs).
           $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
           Start-Sleep -Seconds 8
