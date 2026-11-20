@@ -606,7 +606,8 @@ QToolTip { background: #fffef1; color: #273a50; border: 1px solid #cedbe6; }
 '@
 $styleAnchor = '<string notr="true"/>'
 if (!$uiSrc.Contains($styleAnchor)) { throw "BladeScope styleSheet anchor missing" }
-$uiSrc = $uiSrc.Replace($styleAnchor, '<string notr="true">' + $bladeScopeStyle + '</string>')
+$stylePos = $uiSrc.IndexOf($styleAnchor)
+$uiSrc = $uiSrc.Substring(0, $stylePos) + '<string notr="true">' + $bladeScopeStyle + '</string>' + $uiSrc.Substring($stylePos + $styleAnchor.Length)
 Write-Host "BladeScope light UI chrome, menu and signal-list styling applied."
 
 # BladeScope branding: use the Qt main window title without changing application
