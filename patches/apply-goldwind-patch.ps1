@@ -538,44 +538,32 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->mainSplitter->setHandleWidth(5);
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
-  // BladeScope quick-access toolbar; create only after Qt widgets exist.
-  auto* bladeScopeToolbar = new QToolBar(QString::fromUtf8("BladeScope 快捷工具"), this);
-  bladeScopeToolbar->setObjectName("BladeScopeQuickToolbar");
-  bladeScopeToolbar->setMovable(false);
-  bladeScopeToolbar->setFloatable(false);
-  bladeScopeToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  bladeScopeToolbar->setStyleSheet(
-      "QToolBar { background: #edf5fc; border-bottom: 1px solid #d6e5f1; spacing: 8px; padding: 5px; }"
-      "QToolButton { color: #1f4a70; background: white; border: 1px solid #cbdfea;"
-      " border-radius: 5px; padding: 6px 11px; font-weight: 500; }"
-      "QToolButton:hover { background: #dceffc; border-color: #76b9e4; }");
-  addToolBar(Qt::TopToolBarArea, bladeScopeToolbar);
-  auto* bladeLoad = bladeScopeToolbar->addAction(QString::fromUtf8("打开录波"));
+  // BladeScope: one menu row only, no second-row quick toolbar.
+  // Group infrequent actions in clear menus; reuse existing PlotJuggler buttons.
+  auto* bladeFileMenu = new QMenu(QString::fromUtf8("文件"), this);
+  ui->menuBar->insertMenu(ui->menuBar->actions().first(), bladeFileMenu);
+  auto* bladeLoad = bladeFileMenu->addAction(QString::fromUtf8("打开录波..."));
   connect(bladeLoad, &QAction::triggered, ui->buttonLoadDatafile, &QPushButton::click);
-  auto* bladeLayout = bladeScopeToolbar->addAction(QString::fromUtf8("加载布局"));
+  auto* bladeReload = bladeFileMenu->addAction(QString::fromUtf8("重新加载数据"));
+  connect(bladeReload, &QAction::triggered, ui->buttonReloadData, &QPushButton::click);
+  bladeFileMenu->addSeparator();
+  auto* bladeLayout = bladeFileMenu->addAction(QString::fromUtf8("加载布局..."));
   connect(bladeLayout, &QAction::triggered, ui->buttonLoadLayout, &QPushButton::click);
-  bladeScopeToolbar->addSeparator();
-  bladeScopeToolbar->addAction(ui->actionPreferences);
-  bladeScopeToolbar->addAction(ui->actionColorMap_Editor);
-  bladeScopeToolbar->addSeparator();
-  bladeScopeToolbar->addAction(ui->actionAbout);
-  // Quick plot actions forward to the existing, tested PlotJuggler controls.
-  // Do not create a second plot or duplicate its underlying data.
-  bladeScopeToolbar->addSeparator();
-  auto* bladeZoomAll = bladeScopeToolbar->addAction(QString::fromUtf8("适应时间范围"));
-  bladeZoomAll->setToolTip(QString::fromUtf8("显示全部已加载数据的时间范围"));
+  auto* bladeSaveLayout = bladeFileMenu->addAction(QString::fromUtf8("保存布局..."));
+  connect(bladeSaveLayout, &QAction::triggered, ui->buttonSaveLayout, &QPushButton::click);
+  auto* bladePlotMenu = new QMenu(QString::fromUtf8("曲线"), this);
+  ui->menuBar->insertMenu(ui->menuBar->actions().first(), bladePlotMenu);
+  auto* bladeZoomAll = bladePlotMenu->addAction(QString::fromUtf8("适应时间范围"));
   connect(bladeZoomAll, &QAction::triggered, ui->buttonZoomOut, &QPushButton::click);
-  auto* bladeGrid = bladeScopeToolbar->addAction(QString::fromUtf8("显示/隐藏网格"));
-  bladeGrid->setToolTip(QString::fromUtf8("切换曲线绘图区网格"));
+  auto* bladeGrid = bladePlotMenu->addAction(QString::fromUtf8("显示/隐藏网格"));
   connect(bladeGrid, &QAction::triggered, ui->buttonActivateGrid, &QPushButton::click);
-  auto* bladeLegend = bladeScopeToolbar->addAction(QString::fromUtf8("显示/隐藏图例"));
-  bladeLegend->setToolTip(QString::fromUtf8("切换曲线图例显示"));
+  auto* bladeLegend = bladePlotMenu->addAction(QString::fromUtf8("显示/隐藏图例"));
   connect(bladeLegend, &QAction::triggered, ui->buttonLegend, &QPushButton::click);
-  // Persistent five-theme selector. Plot data and curve colors are not modified.
-  auto* themeButton = new QToolButton(this);
-  themeButton->setText(QString::fromUtf8("主题"));
-  themeButton->setPopupMode(QToolButton::InstantPopup);
-  auto* themeMenu = new QMenu(themeButton);
+  auto* bladeSettingsMenu = new QMenu(QString::fromUtf8("设置"), this);
+  ui->menuBar->insertMenu(ui->menuBar->actions().first(), bladeSettingsMenu);
+  bladeSettingsMenu->addAction(ui->actionPreferences);
+  bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
+  auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
   const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
   const QStringList palettes[] = {
     QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa"},
@@ -600,10 +588,9 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7]);
   }
   auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
-  auto applyBladeTheme = [this, themeButton, themeSettings, themeNames, themeStyles](int index) {
+  auto applyBladeTheme = [this, themeSettings, themeStyles](int index) {
     if (index < 0 || index >= themeStyles.size()) index = 0;
     this->setStyleSheet(themeStyles[index]);
-    themeButton->setText(QString::fromUtf8("主题：") + themeNames[index]);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
@@ -611,8 +598,6 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QAction* themeAction = themeMenu->addAction(themeNames[i]);
     connect(themeAction, &QAction::triggered, this, [applyBladeTheme, i]() { applyBladeTheme(i); });
   }
-  themeButton->setMenu(themeMenu);
-  bladeScopeToolbar->addWidget(themeButton);
   applyBladeTheme(themeSettings->value("appearance/theme_index", 0).toInt());
 '@.TrimEnd())
 $mainSrc = $mainSrc.Replace($mainAnchor, @'
@@ -645,6 +630,12 @@ $curvePanelLayout = @'
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(420);
   // Keep advanced panels available but collapsed for the normal viewer workflow.
+  // Move file/layout and advanced functions to the main menu row.
+  // Keep their widgets alive (menu actions forward to the original buttons).
+  ui->widgetLabelLoad->hide();
+  ui->frameFile->hide();
+  ui->widgetLabelStreaming->hide();
+  ui->widgetLabelPublishers->hide();
   ui->frameStreaming->hide();
   ui->buttonHideStreamingFrame->setText(QString::fromUtf8("实时数据 +"));
   ui->framePublishers->hide();
