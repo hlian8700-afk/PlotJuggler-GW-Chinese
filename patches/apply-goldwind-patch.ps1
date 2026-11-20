@@ -740,6 +740,18 @@ $curvePanelLayout = @'
     auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
     if (search) { search->clear(); search->setFocus(); }
   });
+  // Remove visually redundant headings and utility row marked in the review screenshot.
+  signalHeader->hide();
+  chartHeader->hide();
+  ui->label_7->hide();
+  if (auto* trash = _curvelist_widget->findChild<QPushButton*>("pushButtonTrash")) trash->hide();
+  if (auto* count = _curvelist_widget->findChild<QLabel*>("labelNumberDisplayed")) count->hide();
+  if (auto* values = _curvelist_widget->findChild<QCheckBox*>("checkBoxShowValues")) values->hide();
+  // Reduce the tab strip height and surrounding whitespace; retain tab controls.
+  ui->tabsFrame->setContentsMargins(2, 1, 2, 1);
+  ui->tabsFrame->setMaximumHeight(42);
+  ui->tabsFrame->setMinimumHeight(38);
+  ui->tabsFrame->setStyleSheet("QFrame#tabsFrame{background:transparent;border:0px;}");
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
   ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
