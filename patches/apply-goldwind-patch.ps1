@@ -702,6 +702,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QCoreApplication::instance()->setProperty("bladeScopeCanvasTop", p[6]);
     QCoreApplication::instance()->setProperty("bladeScopeCanvasBottom", p[7]);
     QCoreApplication::instance()->setProperty("bladeScopeThemeText", p[3]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemePanel", p[1]);
     QCoreApplication::instance()->setProperty("bladeScopeThemeAccent", p[4]);
     QCoreApplication::instance()->setProperty("bladeScopeThemeBorder", p[5]);
     this->setAutoFillBackground(true);
@@ -1039,6 +1040,7 @@ $plotSyncInsert = @'
     const QColor canvasTop(app->property("bladeScopeCanvasTop").toString());
     const QColor canvasBottom(app->property("bladeScopeCanvasBottom").toString());
     const QColor axisText(app->property("bladeScopeThemeText").toString());
+    const QColor panelColor(app->property("bladeScopeThemePanel").toString());
     const QColor gridColor(app->property("bladeScopeThemeBorder").toString());
     if (canvasTop.isValid() && canvasBottom.isValid()) {
       QLinearGradient canvasGradient(0, 0, 0, qMax(1, qwtPlot()->canvas()->height()));
@@ -1054,6 +1056,13 @@ $plotSyncInsert = @'
         qwtPlot()->setAxisLabelPen(axis, axisPen);
       }
       _grid->setPen(QPen(gridColor, 0.0, Qt::DotLine));
+      for (auto* item : qwtPlot()->itemList()) {
+        if (auto* legend = dynamic_cast<QwtPlotLegendItem*>(item)) {
+          legend->setTextPen(QPen(axisText));
+          legend->setBackgroundBrush(QBrush(panelColor));
+          legend->setBorderPen(QPen(gridColor));
+        }
+      }
     }
     bool changed = false;
     for (auto& item : curveList()) {
@@ -1073,7 +1082,8 @@ $plotSyncInsert = @'
   _grid = new QwtPlotGrid();
 '@
 $plotSyncSrc = $plotSyncSrc.Replace($plotSyncAnchor, $plotSyncInsert.TrimEnd())
-$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <qwt_text.h>`n" + $plotSyncSrc
+$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <qwt_text.h>
+#include <qwt_plot_legenditem.h>`n" + $plotSyncSrc
 Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
 Write-Host "BladeScope legend follows label mode and Chinese aliases."
 
