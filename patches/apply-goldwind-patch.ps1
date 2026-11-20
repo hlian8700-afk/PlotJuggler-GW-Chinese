@@ -510,6 +510,29 @@ $csvSrc = $csvSrc.Replace('progress_dialog.setLabelText("Loading... please wait"
 Set-Content -Path $csvFile -Value $csvSrc -Encoding UTF8
 Write-Host "Goldwind CSV streaming import and Chinese progress labels applied."
 
+# Apply BladeScope window/taskbar icon at runtime. Copying an ICO beside the EXE
+# alone does not change the Qt window icon; this explicitly loads it in MainWindow.
+$mainFile = "plotjuggler_app/mainwindow.cpp"
+$mainSrc = (Get-Content -Raw -Encoding UTF8 $mainFile).Replace("`r`n", "`n")
+$mainAnchor = "  QLocale::setDefault(QLocale::c());  // set as default"
+if (!$mainSrc.Contains($mainAnchor)) { throw "MainWindow icon insertion anchor missing" }
+$mainSrc = $mainSrc.Replace($mainAnchor, @'
+  const QString bladeScopeIconPath = QCoreApplication::applicationDirPath() + "/BladeScope.ico";
+  if (QFile::exists(bladeScopeIconPath))
+  {
+    setWindowIcon(QIcon(bladeScopeIconPath));
+  }
+  QLocale::setDefault(QLocale::c());  // set as default
+'@.TrimEnd())
+$mainInclude = '#include <QMainWindow>'
+if ($mainSrc.Contains($mainInclude)) {
+  $mainSrc = $mainSrc.Replace($mainInclude, $mainInclude + "`n#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>")
+} else {
+  $mainSrc = "#include <QIcon>`n#include <QFile>`n#include <QCoreApplication>`n" + $mainSrc
+}
+Set-Content -Path $mainFile -Value $mainSrc -Encoding UTF8
+Write-Host "BladeScope runtime window icon applied."
+
 # Phase 4: translate commonly used MainWindow UI strings at Qt UI compilation time.
 # This leaves QAction names, signals, keyboard shortcuts and internal data keys intact.
 $uiFile = "plotjuggler_app/mainwindow.ui"
