@@ -618,11 +618,11 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
   const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
   const QList<QStringList> palettes = {
-    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa","#49382d","#e9ded4"},
-    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#edf4fa","#ffffff","#29445d","#dce6ef"},
-    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#f0f1ef","#ffffff","#3d4540","#e1e6e2"},
-    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#f4eee5","#fffdf9","#514538","#e7ddd0"},
-    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#f5f8fb","#eaf0f5","#405366","#d8e1e9"}};
+    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#ffffff","#fdfdfd","#49382d","#e6e9ec"},
+    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#ffffff","#fcfdff","#29445d","#e4eaf0"},
+    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#ffffff","#fdfefe","#3d4540","#e5e9e6"},
+    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
+    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#ffffff","#fcfdff","#405366","#e4eaf0"}};
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
