@@ -646,6 +646,16 @@ $curvePanelLayout = @'
   ui->leftLayout->insertWidget(1, ui->widgetLabelTimeseries);
   ui->leftLayout->removeWidget(_curvelist_widget);
   ui->leftLayout->insertWidget(2, _curvelist_widget, 1);
+  // Move rarely used dictionary import from the signal panel to File menu.
+  // Forward to the original import button so file encoding and persistence stay intact.
+  for (auto* panelButton : _curvelist_widget->findChildren<QPushButton*>()) {
+    if (panelButton->text() == QString::fromUtf8("导入标签映射")) {
+      auto* importAction = bladeFileMenu->addAction(QString::fromUtf8("导入中文标签映射..."));
+      connect(importAction, &QAction::triggered, panelButton, &QPushButton::click);
+      panelButton->hide();
+      break;
+    }
+  }
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
   ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
