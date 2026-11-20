@@ -166,16 +166,16 @@ $layoutReplacement = @'
   goldwindToolbar->setHorizontalSpacing(5);
   goldwindToolbar->setVerticalSpacing(5);
   goldwindToolbar->addWidget(goldwindMode, 0, 0);
-  auto* goldwindGroup = new QPushButton(QString::fromUtf8("按系统分类"), this);
+  auto* goldwindGroup = new QPushButton(QString::fromUtf8("系统分类"), this);
   goldwindGroup->setCheckable(true);
   goldwindToolbar->addWidget(goldwindGroup, 0, 1);
   auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
   goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
-  goldwindToolbar->addWidget(goldwindSelect, 1, 0);
+  goldwindSelect->hide(); // Search box replaces the separate selection button.
   layout1->addLayout(goldwindToolbar);
   auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
   goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
-  goldwindToolbar->addWidget(goldwindImport, 1, 1);
+  goldwindImport->hide(); // Available from File menu.
   connect(goldwindImport, &QPushButton::clicked, this, [this]() {
     const QString path = QFileDialog::getOpenFileName(
         this, QString::fromUtf8("选择新的标签映射 CSV"), QString(),
@@ -329,10 +329,12 @@ $src = $src.Replace($layoutNeedle, $layoutReplacement)
 $localizationNeedle = '  ui->setupUi(this);'
 $localizationReplacement = @'
   ui->setupUi(this);
-  ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
+  ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("⌕  搜索中文标签或测点编码..."));
   ui->lineEditFilter->setToolTip(QString::fromUtf8("支持中文描述、英文编码及空格分隔的多个关键词"));
   ui->lineEditCustomFilter->setPlaceholderText(QString::fromUtf8("搜索自定义曲线..."));
   ui->lineEditFilter->setClearButtonEnabled(true);
+  ui->checkBoxShowValues->setChecked(false);
+  ui->checkBoxShowValues->hide();
   ui->lineEditCustomFilter->setClearButtonEnabled(true);
   auto* goldwindSearchTimer = new QTimer(this);
   goldwindSearchTimer->setObjectName("goldwindSearchTimer");
@@ -624,11 +626,11 @@ $curvePanelLayout = @'
   // Compact left signal pane and give the time-series canvas the remaining width.
   ui->mainSplitter->setStretchFactor(0, 0);
   ui->mainSplitter->setStretchFactor(1, 1);
-  ui->mainSplitter->setSizes(QList<int>{275, 1165});
+  ui->mainSplitter->setSizes(QList<int>{265, 1175});
   ui->mainSplitter->setHandleWidth(5);
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
-  ui->leftMainWindowFrame->setMaximumWidth(420);
+  ui->leftMainWindowFrame->setMaximumWidth(350);
   // Keep advanced panels available but collapsed for the normal viewer workflow.
   // Move file/layout and advanced functions to the main menu row.
   // Keep their widgets alive (menu actions forward to the original buttons).
@@ -656,6 +658,12 @@ $curvePanelLayout = @'
       break;
     }
   }
+  // Data loading stays one click away in the signal sidebar.
+  auto* bladeLoadData = new QPushButton(QString::fromUtf8("加载数据"), ui->leftMainWindowFrame);
+  bladeLoadData->setObjectName("BladeScopeLoadData");
+  bladeLoadData->setToolTip(QString::fromUtf8("打开风机录波数据文件"));
+  ui->leftLayout->insertWidget(1, bladeLoadData);
+  connect(bladeLoadData, &QPushButton::clicked, ui->buttonLoadDatafile, &QPushButton::click);
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
   ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
