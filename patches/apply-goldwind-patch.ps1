@@ -26,6 +26,7 @@ $src = $src.Replace($includeNeedle, @'
 #include <QFileDialog>
 #include <QStandardPaths>
 #include <QSaveFile>
+#include <QTextCodec>
 #include <QDir>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
@@ -183,19 +184,44 @@ $layoutReplacement = @'
       QMessageBox::warning(this, QString::fromUtf8("导入失败"), input.errorString());
       return;
     }
-    QTextStream in(&input);
-    in.setCodec("UTF-8");
-    QHash<QString, QString> checked;
-    bool first = true;
-    while (!in.atEnd())
+    // Detect UTF-8 (with or without BOM) first; fall back to GB18030/GBK.
+    QByteArray rawBytes = input.readAll();
+    if (rawBytes.startsWith("\xEF\xBB\xBF")) rawBytes.remove(0, 3);
+    QTextCodec::ConverterState utf8State;
+    QTextCodec* utf8Codec = QTextCodec::codecForName("UTF-8");
+    QString decoded = utf8Codec->toUnicode(rawBytes.constData(), rawBytes.size(), &utf8State);
+    QString detectedEncoding = "UTF-8";
+    if (utf8State.invalidChars > 0)
     {
-      QString line = in.readLine();
+      QTextCodec* chineseCodec = QTextCodec::codecForName("GB18030");
+      if (!chineseCodec)
+      {
+        QMessageBox::warning(this, QString::fromUtf8("导入失败"),
+                             QString::fromUtf8("当前程序不支持 GB18030 编码，文件未被修改。"));
+        return;
+      }
+      QTextCodec::ConverterState gbState;
+      decoded = chineseCodec->toUnicode(rawBytes.constData(), rawBytes.size(), &gbState);
+      if (gbState.invalidChars > 0 || decoded.contains(QChar::ReplacementCharacter))
+      {
+        QMessageBox::warning(this, QString::fromUtf8("编码识别失败"),
+                             QString::fromUtf8("文件既不是有效 UTF-8，也无法按 GB18030 解码。原映射保持不变。"));
+        return;
+      }
+      detectedEncoding = "GB18030/GBK";
+    }
+    QHash<QString, QString> checked;
+    const QStringList lines = decoded.split('\n');
+    bool first = true;
+    for (QString line : lines)
+    {
+      if (line.endsWith('\r')) line.chop(1);
       if (first)
       {
         first = false;
-        if (!line.isEmpty() && line.front() == QChar(0xFEFF)) line.remove(0, 1);
-        if (line.trimmed() == "raw_tag,cn_name") continue;
+        if (line.trimmed().compare("raw_tag,cn_name", Qt::CaseInsensitive) == 0) continue;
       }
+      if (line.trimmed().isEmpty()) continue;
       const int comma = line.indexOf(',');
       if (comma <= 0) continue;
       const QString key = line.left(comma).trimmed();
@@ -244,7 +270,7 @@ $layoutReplacement = @'
     _tree_view->setUpdatesEnabled(true);
     refreshColumns();
     QMessageBox::information(this, QString::fromUtf8("导入成功"),
-                             QString::fromUtf8("已全部替换为 %1 条标签映射").arg(checked.size()));
+                             QString::fromUtf8("已全部替换为 %1 条标签映射（识别编码：%2）").arg(checked.size()).arg(detectedEncoding));
   });
   layout1->addWidget(_tree_view, 1);
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
