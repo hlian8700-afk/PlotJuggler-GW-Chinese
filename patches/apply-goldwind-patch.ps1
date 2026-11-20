@@ -869,6 +869,16 @@ $uiSrc = $uiSrc.Replace('<string>PlotJuggler</string>', '<string>BladeScope é£Žæ
 Set-Content -Path $uiFile -Value $uiSrc -Encoding UTF8
 Write-Host "Goldwind main-window Chinese localization applied."
 
+# Soften the native Qwt grid without changing plot samples or axes.
+$plotWidgetFile = "plotjuggler_app/plotwidget.cpp"
+$plotWidgetSrc = (Get-Content -Raw -Encoding UTF8 $plotWidgetFile).Replace("`r`n", "`n")
+$gridAnchor = '  _grid->setPen(QPen(Qt::gray, 0.0, Qt::DotLine));'
+if (!$plotWidgetSrc.Contains($gridAnchor)) { throw "Plot grid pen anchor missing" }
+$plotWidgetSrc = $plotWidgetSrc.Replace($gridAnchor,
+    '  _grid->setPen(QPen(QColor(188, 174, 162, 125), 0.0, Qt::DotLine));')
+Set-Content -Path $plotWidgetFile -Value $plotWidgetSrc -Encoding UTF8
+Write-Host "BladeScope subtle time-series grid styling applied."
+
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
 $panelUi = (Get-Content -Raw -Encoding UTF8 $panelUiFile).Replace("`r`n", "`n")
