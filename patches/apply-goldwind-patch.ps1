@@ -163,6 +163,7 @@ $layoutReplacement = @'
   // Start with raw identifiers, matching the default state requested in the review.
   goldwindMode->setCurrentIndex(1);
   goldwindLabelMode() = 1;
+  QCoreApplication::instance()->setProperty("bladeScopeLabelMode", 1);
   goldwindMode->setMinimumHeight(30);
   goldwindMode->setStyleSheet(
       "QComboBox{background:#fffaf5;border:1px solid #ead9ca;"
@@ -280,6 +281,12 @@ $layoutReplacement = @'
       return;
     }
     goldwindReloadChineseNames();
+    {
+      QVariantMap aliases;
+      for (auto it = goldwindChineseNames().cbegin(); it != goldwindChineseNames().cend(); ++it)
+        aliases.insert(it.key(), it.value());
+      QCoreApplication::instance()->setProperty("bladeScopeTagAliases", aliases);
+    }
     goldwindReloadSearchAliases();
     const auto existing = _tree_view_items;
     _tree_view->setUpdatesEnabled(false);
@@ -295,6 +302,7 @@ $layoutReplacement = @'
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, [this](int mode) {
     goldwindLabelMode() = mode;
+    QCoreApplication::instance()->setProperty("bladeScopeLabelMode", mode);
     const auto existing = _tree_view_items;
     _tree_view->setUpdatesEnabled(false);
     _tree_view->clear();
@@ -346,6 +354,12 @@ $localizationNeedle = '  ui->setupUi(this);'
 $localizationReplacement = @'
   ui->setupUi(this);
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
+  {
+    QVariantMap aliases;
+    for (auto it = goldwindChineseNames().cbegin(); it != goldwindChineseNames().cend(); ++it)
+      aliases.insert(it.key(), it.value());
+    QCoreApplication::instance()->setProperty("bladeScopeTagAliases", aliases);
+  }
   // Real leading search icon/action, independent of placeholder text.
   auto* goldwindSearchIcon = new QAction(QString::fromUtf8("⌕"), ui->lineEditFilter);
   QPixmap goldwindSearchPixmap(18, 18);
@@ -917,6 +931,8 @@ $tabInsert = @'
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   _tabWidget->tabBar()->setStyleSheet(
+      "QTabWidget::pane{background:#f6f0e9;border:1px solid #e5d7ca;}"
+      "QTabBar{background:#eee5db;}"
       "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
       "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
       "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
@@ -928,6 +944,39 @@ $tabInsert = @'
 $tabSrc = $tabSrc.Replace($tabAnchor, $tabInsert.TrimEnd())
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
+
+# Keep plot legends synchronized with the left-side label mode and CSV aliases.
+$plotSyncFile = "plotjuggler_app/plotwidget.cpp"
+$plotSyncSrc = (Get-Content -Raw -Encoding UTF8 $plotSyncFile).Replace("`r`n", "`n")
+$plotSyncAnchor = '  _grid = new QwtPlotGrid();'
+if (!$plotSyncSrc.Contains($plotSyncAnchor)) { throw "Plot legend sync anchor missing" }
+$plotSyncInsert = @'
+  // Poll lightweight UI metadata, not the recording samples.
+  auto* bladeLegendSync = new QTimer(this);
+  connect(bladeLegendSync, &QTimer::timeout, this, [this]() {
+    const int mode = QCoreApplication::instance()->property("bladeScopeLabelMode").toInt();
+    const QVariantMap aliases = QCoreApplication::instance()->property("bladeScopeTagAliases").toMap();
+    bool changed = false;
+    for (auto& item : curveList()) {
+      const QString raw = QString::fromStdString(item.src_name);
+      const QString chinese = aliases.value(raw).toString();
+      const QString title = (mode == 1 || chinese.isEmpty()) ? raw :
+                            (mode == 2 ? chinese + " (" + raw + ")" : chinese);
+      if (item.curve->title().text() != title) {
+        item.curve->setTitle(title);
+        changed = true;
+      }
+    }
+    if (changed) qwtPlot()->replot();
+  });
+  bladeLegendSync->start(450);
+
+  _grid = new QwtPlotGrid();
+'@
+$plotSyncSrc = $plotSyncSrc.Replace($plotSyncAnchor, $plotSyncInsert.TrimEnd())
+$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n" + $plotSyncSrc
+Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
+Write-Host "BladeScope legend follows label mode and Chinese aliases."
 
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
