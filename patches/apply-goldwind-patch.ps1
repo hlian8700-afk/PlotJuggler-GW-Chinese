@@ -520,6 +520,24 @@ $mainUiAnchor = "  ui->setupUi(this);"
 if (!$mainSrc.Contains($mainUiAnchor)) { throw "MainWindow setupUi anchor missing" }
 $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->setupUi(this);
+  // BladeScope compact viewer layout: preserve all upstream widgets and signals.
+  // The left pane stays resizable; the chart gets the majority of the workspace.
+  ui->leftLayout->setContentsMargins(10, 8, 10, 8);
+  ui->leftLayout->setSpacing(5);
+  ui->verticalLayout_2->setContentsMargins(8, 8, 8, 6);
+  ui->plottingLayout->setSpacing(5);
+  auto* signalHeader = new QLabel(QString::fromUtf8("测点列表"), ui->leftMainWindowFrame);
+  signalHeader->setObjectName("BladeScopeSignalHeader");
+  signalHeader->setStyleSheet("font-size:16px;font-weight:600;padding:9px 4px;");
+  ui->leftLayout->insertWidget(0, signalHeader);
+  auto* chartHeader = new QLabel(QString::fromUtf8("风机运行数据  /  时序曲线"), ui->plotPage);
+  chartHeader->setObjectName("BladeScopeChartHeader");
+  chartHeader->setAlignment(Qt::AlignCenter);
+  chartHeader->setStyleSheet("font-size:14px;font-weight:600;padding:7px 0;");
+  ui->plottingLayout->insertWidget(0, chartHeader);
+  ui->mainSplitter->setHandleWidth(5);
+  ui->mainSplitter->setChildrenCollapsible(false);
+  ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope quick-access toolbar; create only after Qt widgets exist.
   auto* bladeScopeToolbar = new QToolBar(QString::fromUtf8("BladeScope 快捷工具"), this);
   bladeScopeToolbar->setObjectName("BladeScopeQuickToolbar");
@@ -595,7 +613,7 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>')
+  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>')
   foreach ($header in $extraIncludes) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
@@ -680,6 +698,10 @@ foreach ($entry in $translations.GetEnumerator()) {
 # plot rendering and mouse interaction remain unchanged.
 $uiSrc = $uiSrc.Replace('<width>1058</width>', '<width>1440</width>')
 $uiSrc = $uiSrc.Replace('<height>830</height>', '<height>900</height>')
+# Give the chart more room while keeping the familiar resizable left-side signal panel.
+$uiSrc = $uiSrc.Replace('<width>300</width>', '<width>260</width>')
+$uiSrc = $uiSrc.Replace('<number>1</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">', '<number>5</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">')
+
 $uiSrc = $uiSrc.Replace('<widget class="QSplitter" name="mainSplitter">', '<widget class="QSplitter" name="mainSplitter">')
 $uiSrc = $uiSrc.Replace('<number>1</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">', '<number>5</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">')
 $bladeScopeStyle = @'
@@ -696,6 +718,12 @@ QMenuBar::item:selected { background: #d7e9f7; }
 QMenu { background: #ffffff; color: #203b55; border: 1px solid #dce6f0; }
 QMenu::item:selected { background: #e0f1fc; }
 QToolTip { background: #fffef1; color: #273a50; border: 1px solid #cedbe6; }
+QLabel#BladeScopeSignalHeader { font-size: 16px; font-weight: 600; padding: 8px 4px; }
+QLabel#BladeScopeChartHeader { font-size: 14px; font-weight: 600; padding: 7px 0; }
+QFrame#tabsFrame { border: 1px solid #e5e8ec; border-radius: 7px; }
+QWidget#widgetTimescale { background: #fffdfa; border-top: 1px solid #e7e0da; }
+QSplitter::handle { background: #ece5df; }
+
 '@
 $styleAnchor = '<string notr="true"/>'
 if (!$uiSrc.Contains($styleAnchor)) { throw "BladeScope styleSheet anchor missing" }
