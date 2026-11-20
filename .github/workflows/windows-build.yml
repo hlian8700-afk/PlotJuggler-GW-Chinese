@@ -55,6 +55,19 @@ jobs:
           # Qt WebSockets is included in the Qt 5.15 desktop archive; avoid unavailable add-on packages.
           cache: true
 
+      - name: Embed approved BladeScope icon in Windows EXE resources
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python customization/assets/render_icon.py
+          if ($LASTEXITCODE -ne 0) { throw "BladeScope icon rendering failed" }
+          $icon = "customization/assets/BladeScope.ico"
+          if (!(Test-Path $icon)) { throw "BladeScope.ico missing" }
+          # Upstream plotjuggler_app/plotjuggler.rc embeds ../plotjuggler.ico.
+          # Replace that source icon BEFORE CMake compiles the .rc resource.
+          Copy-Item $icon "upstream/plotjuggler.ico" -Force
+          Write-Host "BladeScope ICO embedded as the Windows executable icon resource."
+
       - name: Configure
         shell: pwsh
         run: |
