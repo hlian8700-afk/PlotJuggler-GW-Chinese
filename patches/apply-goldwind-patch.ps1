@@ -902,6 +902,29 @@ $plotLegendSrc = $plotLegendSrc.Replace('  font.setPointSize(9);', '  font.setPo
 Set-Content -Path $plotLegendFile -Value $plotLegendSrc -Encoding UTF8
 Write-Host "BladeScope compact rounded plot legend styling applied."
 
+# Compact the real QTabWidget tab bar (the green-marked area), not only its outer frame.
+$tabFile = "plotjuggler_app/tabbedplotwidget.cpp"
+$tabSrc = (Get-Content -Raw -Encoding UTF8 $tabFile).Replace("`r`n", "`n")
+$tabAnchor = "  _tabWidget->setMovable(true);"
+if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
+$tabInsert = @'
+  _tabWidget->setMovable(true);
+  _tabWidget->setDocumentMode(true);
+  _tabWidget->tabBar()->setExpanding(false);
+  _tabWidget->tabBar()->setUsesScrollButtons(true);
+  _tabWidget->tabBar()->setStyleSheet(
+      "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
+      "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
+      "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
+      "background:#f7f1eb;color:#735a46;}"
+      "QTabBar::tab:selected{background:#ffffff;color:#4e3929;font-weight:600;}"
+      "QTabBar::tab:hover:!selected{background:#efe4d9;}"
+      "QTabBar::close-button{margin-left:4px;}");
+'@
+$tabSrc = $tabSrc.Replace($tabAnchor, $tabInsert.TrimEnd())
+Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
+Write-Host "BladeScope native tab bar spacing and style applied."
+
 # Localize remaining common Timeseries List labels and short search tooltips.
 $panelUiFile = "plotjuggler_app/curvelist_panel.ui"
 $panelUi = (Get-Content -Raw -Encoding UTF8 $panelUiFile).Replace("`r`n", "`n")
