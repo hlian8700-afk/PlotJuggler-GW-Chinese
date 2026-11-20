@@ -7,6 +7,8 @@ on:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
       - 'data/**'
+      - 'assets/**'
+      - 'installer/**'
       - 'PROJECT_SPEC.md'
   workflow_dispatch:
 
@@ -118,11 +120,11 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check pillow
-          python assets/render_icon.py
+          python customization/assets/render_icon.py
           if ($LASTEXITCODE -ne 0) { throw "BladeScope icon generation failed" }
           $exe = Get-ChildItem "$env:GITHUB_WORKSPACE\stage" -Recurse -Filter plotjuggler.exe | Select-Object -First 1
           if (!$exe) { throw "Executable missing while deploying BladeScope icon" }
-          Copy-Item assets/BladeScope.ico $exe.DirectoryName -Force
+          Copy-Item customization/assets/BladeScope.ico $exe.DirectoryName -Force
           Write-Host "BladeScope multi-resolution icon generated and deployed."
           
       - name: Package portable x64 build
