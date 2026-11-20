@@ -594,7 +594,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
 
   ui->mainSplitter->setHandleWidth(1);
-  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#e8dcd0;border:0px;margin:0px;width:1px;} QSplitter#mainSplitter::handle:vertical{background:#e8dcd0;border:0px;margin:0px;height:1px;}");
+  // Splitter colors inherit from the active global theme.
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope: one menu row only, no second-row quick toolbar.
@@ -641,6 +641,19 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QMenu::item{background:transparent;color:%4;padding:5px 22px;}"
     "QToolButton,QPushButton{color:%4;background:%2;border:1px solid %6;border-radius:5px;padding:5px 9px;}"
     "QToolButton:hover,QPushButton:hover{background:%5;border-color:%5;color:%4;}"
+    "QToolButton:checked,QToolButton:pressed,QPushButton:checked,QPushButton:pressed{background:%5;color:%4;border:1px solid %5;}"
+    "QGroupBox{color:%4;border:1px solid %6;border-radius:5px;margin-top:8px;padding-top:7px;}"
+    "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%4;}"
+    "QTabWidget::pane{background:%3;color:%4;border:1px solid %6;}"
+    "QTabBar{background:%3;color:%4;}"
+    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:4px 10px;margin-right:2px;border-top-left-radius:4px;border-top-right-radius:4px;}"
+    "QTabBar::tab:selected{background:%1;color:%4;border-bottom:2px solid %5;font-weight:600;}"
+    "QTabBar::tab:hover:!selected{background:%5;color:%4;}"
+    "QToolTip{background:%2;color:%4;border:1px solid %6;padding:4px;}"
+    "QStatusBar{background:%3;color:%4;border-top:1px solid %6;}"
+    "QStatusBar::item{border:0px;}"
+    "QProgressBar{background:%2;color:%4;border:1px solid %6;border-radius:4px;text-align:center;}"
+    "QProgressBar::chunk{background:%5;border-radius:3px;}"
     "QToolButton:pressed,QPushButton:pressed,QToolButton:checked,QPushButton:checked{background:%5;border-color:%5;color:%4;}"
     "QToolButton:disabled,QPushButton:disabled{background:%3;color:%6;border-color:%6;}"
     "QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:5px;selection-background-color:%5;selection-color:%4;}"
@@ -687,7 +700,17 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     palette.setColor(QPalette::HighlightedText, QColor(p[3]));
     palette.setColor(QPalette::Highlight, QColor(p[4]));
     palette.setColor(QPalette::Mid, QColor(p[5]));
+    palette.setColor(QPalette::Light, QColor(p[2]));
+    palette.setColor(QPalette::Dark, QColor(p[5]));
+    palette.setColor(QPalette::Shadow, QColor(p[0]));
+    palette.setColor(QPalette::Link, QColor(p[4]));
+    palette.setColor(QPalette::LinkVisited, QColor(p[4]));
     this->setPalette(palette);
+    QCoreApplication::instance()->setProperty("bladeScopeCanvasTop", p[6]);
+    QCoreApplication::instance()->setProperty("bladeScopeCanvasBottom", p[7]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemeText", p[3]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemeAccent", p[4]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemeBorder", p[5]);
     this->setAutoFillBackground(true);
     for (auto* child : this->findChildren<QWidget*>()) child->setPalette(palette);
     themeSettings->setValue("appearance/theme_index", index);
@@ -725,7 +748,7 @@ $curvePanelLayout = @'
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{265, 1175});
   ui->mainSplitter->setHandleWidth(1);
-  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#e8dcd0;border:0px;margin:0px;width:1px;} QSplitter#mainSplitter::handle:vertical{background:#e8dcd0;border:0px;margin:0px;height:1px;}");
+  // Splitter colors inherit from the active global theme.
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(350);
@@ -763,11 +786,7 @@ $curvePanelLayout = @'
   auto* bladeActionRow = new QHBoxLayout(bladeSignalActions);
   bladeActionRow->setContentsMargins(0, 2, 0, 4);
   bladeActionRow->setSpacing(5);
-  bladeSignalActions->setStyleSheet(
-      "QPushButton{background:#fff9f3;border:1px solid #e8d8c9;"
-      "border-radius:5px;color:#704e38;padding:6px 2px;min-height:24px;}"
-      "QPushButton:hover{background:#f5e5d6;border-color:#c9946b;}"
-      "QPushButton:pressed{background:#ebd2bd;}");
+  // Button colors inherit from the active global theme.
   auto* bladeLoadData = new QPushButton(QString::fromUtf8("加载数据"), bladeSignalActions);
   bladeLoadData->setToolTip(QString::fromUtf8("打开风机录波文件"));
   auto* bladeFilterData = new QPushButton(QString::fromUtf8("筛选"), bladeSignalActions);
@@ -804,13 +823,13 @@ $curvePanelLayout = @'
   ui->horizontalLayout_5->setSpacing(3);
   ui->verticalLayout_5->setContentsMargins(0, 0, 0, 0);
   ui->verticalLayout_5->setSpacing(0);
-  ui->plottingArea->setStyleSheet("QWidget#plottingArea{background:#f7f1eb;border:0px;}");
-  ui->plotPage->setStyleSheet("QWidget#plotPage{background:#f7f1eb;border:0px;}");
-  ui->plottingAreaH->setStyleSheet("QWidget#plottingAreaH{background:#f7f1eb;border:0px;}");
+
+
+
   ui->tabsFrame->setMinimumHeight(0);
   ui->tabsFrame->setMaximumHeight(QWIDGETSIZE_MAX);
   ui->tabsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-  ui->tabsFrame->setStyleSheet("QFrame#tabsFrame{background:#f7f1eb;border:0px;}");
+
   ui->plottingAreaH->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
@@ -981,17 +1000,7 @@ $tabInsert = @'
   _tabWidget->setDocumentMode(true);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
-  _tabWidget->setStyleSheet(
-      "QTabWidget::pane{background:#fffdfa;border:1px solid #e5d7ca;border-top:0px;}"
-      "QTabBar{background:#f7f1eb;border:0px;}"
-      "QTabWidget::tab-bar{subcontrol-origin:margin; left:0px;}"
-      "QTabBar::tab{min-height:22px;max-height:25px;min-width:48px;"
-      "padding:3px 11px;margin-right:3px;border:1px solid #e6d7ca;"
-      "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
-      "background:#f7f1eb;color:#735a46;}"
-      "QTabBar::tab:selected{background:#ffffff;color:#4e3929;font-weight:600;}"
-      "QTabBar::tab:hover:!selected{background:#efe4d9;}"
-      "QTabBar::close-button{margin-left:4px;}");
+  // Tab colors inherit from the active global theme stylesheet.
 '@
 $tabSrc = $tabSrc.Replace($tabAnchor, $tabInsert.TrimEnd())
 # The upstream paintEvent moves the add-tab button relative to the tab bar width.
@@ -1015,8 +1024,28 @@ $plotSyncInsert = @'
   // Poll lightweight UI metadata, not the recording samples.
   auto* bladeLegendSync = new QTimer(this);
   connect(bladeLegendSync, &QTimer::timeout, this, [this]() {
-    const int mode = QCoreApplication::instance()->property("bladeScopeLabelMode").toInt();
-    const QVariantMap aliases = QCoreApplication::instance()->property("bladeScopeTagAliases").toMap();
+    auto* app = QCoreApplication::instance();
+    const int mode = app->property("bladeScopeLabelMode").toInt();
+    const QVariantMap aliases = app->property("bladeScopeTagAliases").toMap();
+    const QColor canvasTop(app->property("bladeScopeCanvasTop").toString());
+    const QColor canvasBottom(app->property("bladeScopeCanvasBottom").toString());
+    const QColor axisText(app->property("bladeScopeThemeText").toString());
+    const QColor gridColor(app->property("bladeScopeThemeBorder").toString());
+    if (canvasTop.isValid() && canvasBottom.isValid()) {
+      QLinearGradient canvasGradient(0, 0, 0, qMax(1, qwtPlot()->canvas()->height()));
+      canvasGradient.setColorAt(0.0, canvasTop);
+      canvasGradient.setColorAt(1.0, canvasBottom);
+      qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
+      for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
+        QwtText title = qwtPlot()->axisTitle(axis);
+        title.setColor(axisText);
+        qwtPlot()->setAxisTitle(axis, title);
+        QPen axisPen(axisText);
+        qwtPlot()->setAxisPen(axis, axisPen);
+        qwtPlot()->setAxisLabelPen(axis, axisPen);
+      }
+      _grid->setPen(QPen(gridColor, 0.0, Qt::DotLine));
+    }
     bool changed = false;
     for (auto& item : curveList()) {
       const QString raw = QString::fromStdString(item.src_name);
