@@ -582,6 +582,33 @@ foreach ($entry in $translations.GetEnumerator()) {
   $uiSrc = $uiSrc.Replace('&lt;p&gt;' + $entry.Key + '&lt;/p&gt;',
                           '&lt;p&gt;' + $entry.Value + '&lt;/p&gt;')
 }
+# BladeScope phase 1 visual refresh: scoped Qt stylesheet and a wider work area.
+# Restrict selectors to chrome and left panels, not plotting widgets, so existing
+# plot rendering and mouse interaction remain unchanged.
+$uiSrc = $uiSrc.Replace('<width>1058</width>', '<width>1440</width>')
+$uiSrc = $uiSrc.Replace('<height>830</height>', '<height>900</height>')
+$uiSrc = $uiSrc.Replace('<widget class="QSplitter" name="mainSplitter">', '<widget class="QSplitter" name="mainSplitter">')
+$uiSrc = $uiSrc.Replace('<number>1</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">', '<number>5</number>' + "`n" + '      </property>' + "`n" + '      <property name="childrenCollapsible">')
+$bladeScopeStyle = @'
+QMainWindow#MainWindow { background: #f3f7fb; color: #22354b; }
+QFrame#leftMainWindowFrame { background: #ffffff; border-right: 1px solid #dce6f0; }
+QWidget#widgetLabelLoad { background: #eaf2fa; }
+QPushButton { border: 1px solid #d7e3ef; border-radius: 5px; padding: 3px 8px; background: #ffffff; color: #27415e; }
+QPushButton:hover { background: #e8f4fc; border-color: #8dc4e8; }
+QPushButton:pressed { background: #d6eafa; }
+QLineEdit { background: #ffffff; border: 1px solid #cdddeb; border-radius: 5px; padding: 4px; color: #203b55; }
+QLineEdit:focus { border: 1px solid #2389ce; }
+QMenuBar { background: #eaf2fa; color: #254361; padding: 3px; }
+QMenuBar::item:selected { background: #d7e9f7; }
+QMenu { background: #ffffff; color: #203b55; border: 1px solid #dce6f0; }
+QMenu::item:selected { background: #e0f1fc; }
+QToolTip { background: #fffef1; color: #273a50; border: 1px solid #cedbe6; }
+'@
+$styleAnchor = '<string notr="true"/>'
+if (!$uiSrc.Contains($styleAnchor)) { throw "BladeScope styleSheet anchor missing" }
+$uiSrc = $uiSrc.Replace($styleAnchor, '<string notr="true">' + $bladeScopeStyle + '</string>')
+Write-Host "BladeScope light UI chrome, menu and signal-list styling applied."
+
 # BladeScope branding: use the Qt main window title without changing application
 # settings identity, preserving users' existing imported mapping CSV paths.
 $uiSrc = $uiSrc.Replace('<string>PlotJuggler</string>', '<string>BladeScope 风机录波数据分析工具</string>')
