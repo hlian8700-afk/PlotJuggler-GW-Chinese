@@ -618,10 +618,13 @@ if ($mainSrc.Contains($mainInclude)) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
 }
-# Move the existing functional curve list to the top of the left pane.
-# Preserve the upstream panel instance, search, drag/drop, signals and shortcuts.
-$curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);
-  // Set a practical first-launch split: compact signal sidebar, wide plot canvas.
+# Configure the real curve-list panel and the initial splitter proportions.
+# Keep this as an exact one-line anchor; do not include injected code in the anchor.
+$curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);'
+if (!$mainSrc.Contains($curvePanelAnchor)) { throw "Curve list layout anchor missing in upstream MainWindow source" }
+$curvePanelLayout = @'
+  ui->leftLayout->addWidget(_curvelist_widget, 1);
+  // Compact left signal pane and give the time-series canvas the remaining width.
   ui->mainSplitter->setStretchFactor(0, 0);
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{275, 1165});
@@ -629,20 +632,13 @@ $curvePanelAnchor = '  ui->leftLayout->addWidget(_curvelist_widget, 1);
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(420);
-'
-if (!$mainSrc.Contains($curvePanelAnchor)) { throw "Curve list layout anchor missing" }
-$curvePanelLayout = @'
-  ui->leftLayout->addWidget(_curvelist_widget, 1);
-  // Keep the daily workflow compact: file/layout stays visible; streaming
-  // and publisher panels are collapsed by default but remain one-click accessible.
+  // Keep advanced panels available but collapsed for the normal viewer workflow.
   ui->frameStreaming->hide();
   ui->buttonHideStreamingFrame->setText(QString::fromUtf8("实时数据 +"));
   ui->framePublishers->hide();
   ui->buttonHidePublishersFrame->setText(QString::fromUtf8("数据发布 +"));
   ui->buttonHideStreamingFrame->setToolTip(QString::fromUtf8("展开实时数据高级功能"));
   ui->buttonHidePublishersFrame->setToolTip(QString::fromUtf8("展开数据发布高级功能"));
-  // Place the real signal tree directly below the BladeScope signal heading.
-  // Existing file, streaming and publisher controls remain accessible below.
   ui->leftLayout->removeWidget(ui->widgetLabelTimeseries);
   ui->leftLayout->insertWidget(1, ui->widgetLabelTimeseries);
   ui->leftLayout->removeWidget(_curvelist_widget);
