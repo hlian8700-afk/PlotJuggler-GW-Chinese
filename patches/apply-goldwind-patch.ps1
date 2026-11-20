@@ -574,10 +574,10 @@ foreach ($entry in $translations.GetEnumerator()) {
   $needle = '<string>' + $entry.Key + '</string>'
   $replacement = '<string>' + $entry.Value + '</string>'
   $uiSrc = $uiSrc.Replace($needle, $replacement)
-  # Qt Designer stores tooltip text as escaped HTML inside <string> elements.
-  $escapedNeedle = [System.Security.SecurityElement]::Escape($entry.Key)
-  $escapedReplacement = [System.Security.SecurityElement]::Escape($entry.Value)
-  $uiSrc = $uiSrc.Replace($escapedNeedle, $escapedReplacement)
+  # Only translate visible text between <p> tags; never replace identifiers,
+  # objectName properties, actions or Qt-generated C++ member names.
+  $uiSrc = $uiSrc.Replace('&lt;p&gt;' + $entry.Key + '&lt;/p&gt;',
+                          '&lt;p&gt;' + $entry.Value + '&lt;/p&gt;')
 }
 # BladeScope branding: use the Qt main window title without changing application
 # settings identity, preserving users' existing imported mapping CSV paths.
