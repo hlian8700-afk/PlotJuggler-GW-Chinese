@@ -545,11 +545,39 @@ $translations = [ordered]@{
   'Share the love' = '分享 PlotJuggler'
   'Load StyleSheet' = '加载界面样式'
   'ColorMap Editor' = '颜色映射编辑器'
+  'Hide/Show' = '隐藏/显示'
+  'Recent data files' = '最近打开的文件'
+  'Show/Hide the grid' = '显示/隐藏网格'
+  'Zoom Out All' = '全部缩小'
+  'Loop' = '循环播放'
+  'Zoom In' = '放大'
+  'Zoom Out' = '缩小'
+  'Pause' = '暂停'
+  'Play' = '播放'
+  'Load data' = '加载数据'
+  'Save layout' = '保存布局'
+  'Load layout' = '加载布局'
+  'Reset layout' = '重置布局'
+  'Remove' = '移除'
+  'Rename' = '重命名'
+  'Duplicate' = '复制'
+  'Undo' = '撤销'
+  'Redo' = '重做'
+  'Select all' = '全选'
+  'Deselect all' = '取消全选'
+  'Open' = '打开'
+  'Save' = '保存'
+  'Cancel' = '取消'
+  'OK' = '确定'
 }
 foreach ($entry in $translations.GetEnumerator()) {
   $needle = '<string>' + $entry.Key + '</string>'
   $replacement = '<string>' + $entry.Value + '</string>'
   $uiSrc = $uiSrc.Replace($needle, $replacement)
+  # Qt Designer stores tooltip text as escaped HTML inside <string> elements.
+  $escapedNeedle = [System.Security.SecurityElement]::Escape($entry.Key)
+  $escapedReplacement = [System.Security.SecurityElement]::Escape($entry.Value)
+  $uiSrc = $uiSrc.Replace($escapedNeedle, $escapedReplacement)
 }
 Set-Content -Path $uiFile -Value $uiSrc -Encoding UTF8
 Write-Host "Goldwind main-window Chinese localization applied."
