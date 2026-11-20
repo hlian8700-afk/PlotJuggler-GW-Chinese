@@ -618,11 +618,11 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
   const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
   const QList<QStringList> palettes = {
-    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa"},
-    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#edf4fa","#ffffff"},
-    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#f0f1ef","#ffffff"},
-    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#f4eee5","#fffdf9"},
-    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#2d3b4b","#202b38"}};
+    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa","#49382d","#e9ded4"},
+    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#edf4fa","#ffffff","#29445d","#dce6ef"},
+    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#f0f1ef","#ffffff","#3d4540","#e1e6e2"},
+    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#f4eee5","#fffdf9","#514538","#e7ddd0"},
+    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#f5f8fb","#eaf0f5","#405366","#d8e1e9"}};
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
@@ -701,12 +701,23 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     this->setPalette(palette);
     QCoreApplication::instance()->setProperty("bladeScopeCanvasTop", p[6]);
     QCoreApplication::instance()->setProperty("bladeScopeCanvasBottom", p[7]);
-    QCoreApplication::instance()->setProperty("bladeScopeThemeText", p[3]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemeText", p[8]);
+    QCoreApplication::instance()->setProperty("bladeScopeThemeGrid", p[9]);
     QCoreApplication::instance()->setProperty("bladeScopeThemePanel", p[1]);
     QCoreApplication::instance()->setProperty("bladeScopeThemeAccent", p[4]);
     QCoreApplication::instance()->setProperty("bladeScopeThemeBorder", p[5]);
     this->setAutoFillBackground(true);
     for (auto* child : this->findChildren<QWidget*>()) child->setPalette(palette);
+    // The native signal tree stores explicit item brushes, so refresh them as well
+    // as the inherited palette; this prevents brown/dark labels on dark panels.
+    for (auto* tree : this->findChildren<QTreeWidget*>()) {
+      QTreeWidgetItemIterator itemIt(tree);
+      while (*itemIt) {
+        for (int column = 0; column < tree->columnCount(); ++column)
+          (*itemIt)->setForeground(column, QBrush(QColor(p[3])));
+        ++itemIt;
+      }
+    }
     // Re-tint monochrome toolbar glyphs so dark themes never leave black icons
     // on dark button tiles; preserve each original icon for later theme switches.
     for (auto* tool : this->findChildren<QToolButton*>()) {
@@ -1040,6 +1051,7 @@ $plotSyncInsert = @'
     const QColor canvasTop(app->property("bladeScopeCanvasTop").toString());
     const QColor canvasBottom(app->property("bladeScopeCanvasBottom").toString());
     const QColor axisText(app->property("bladeScopeThemeText").toString());
+    const QColor plotGrid(app->property("bladeScopeThemeGrid").toString());
     const QColor panelColor(app->property("bladeScopeThemePanel").toString());
     const QColor gridColor(app->property("bladeScopeThemeBorder").toString());
     if (canvasTop.isValid() && canvasBottom.isValid()) {
@@ -1056,7 +1068,7 @@ $plotSyncInsert = @'
         axisPalette.setColor(QPalette::Text, axisText);
         qwtPlot()->axisWidget(axis)->setPalette(axisPalette);
       }
-      _grid->setPen(QPen(gridColor, 0.0, Qt::DotLine));
+      _grid->setPen(QPen(plotGrid.isValid() ? plotGrid : gridColor, 0.0, Qt::DotLine));
       for (auto* item : qwtPlot()->itemList()) {
         if (auto* legend = dynamic_cast<QwtPlotLegendItem*>(item)) {
           legend->setTextPen(QPen(axisText));
