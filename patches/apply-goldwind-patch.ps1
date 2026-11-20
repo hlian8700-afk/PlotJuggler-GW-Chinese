@@ -593,8 +593,8 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->buttonPlay->setToolTip(QString::fromUtf8("播放或暂停时间轴"));
   ui->playbackLoop->setToolTip(QString::fromUtf8("循环播放"));
 
-  ui->mainSplitter->setHandleWidth(3);
-  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#eadfd4;border:0px; margin:0px; width:3px;} QSplitter#mainSplitter::handle:vertical{background:#eadfd4;border:0px; margin:0px; height:3px;}");
+  ui->mainSplitter->setHandleWidth(1);
+  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#e8dcd0;border:0px;margin:0px;width:1px;} QSplitter#mainSplitter::handle:vertical{background:#e8dcd0;border:0px;margin:0px;height:1px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->mainSplitter->setSizes(QList<int>{290, 1150});
   // BladeScope: one menu row only, no second-row quick toolbar.
@@ -649,7 +649,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QWidget#widgetTimescale QLineEdit{min-height:25px;max-height:29px;padding:2px 5px;}"
     "QWidget#widgetTimescale QSlider::groove:horizontal{height:4px;background:%6;border-radius:2px;}"
     "QWidget#widgetTimescale QSlider::handle:horizontal{width:12px;margin:-5px 0;border-radius:6px;background:%5;}"
-    "QFrame#tabsFrame{border:1px solid %6;border-radius:6px;}"
+    "QFrame#tabsFrame{background:%3;border:0px;border-radius:0px;}"
     "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
   QStringList themeStyles;
   for (const auto& p : palettes) {
@@ -693,8 +693,8 @@ $curvePanelLayout = @'
   ui->mainSplitter->setStretchFactor(0, 0);
   ui->mainSplitter->setStretchFactor(1, 1);
   ui->mainSplitter->setSizes(QList<int>{265, 1175});
-  ui->mainSplitter->setHandleWidth(3);
-  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#eadfd4;border:0px; margin:0px; width:3px;} QSplitter#mainSplitter::handle:vertical{background:#eadfd4;border:0px; margin:0px; height:3px;}");
+  ui->mainSplitter->setHandleWidth(1);
+  ui->mainSplitter->setStyleSheet("QSplitter#mainSplitter{background:#f7f1eb;border:0px;} QSplitter#mainSplitter::handle:horizontal{background:#e8dcd0;border:0px;margin:0px;width:1px;} QSplitter#mainSplitter::handle:vertical{background:#e8dcd0;border:0px;margin:0px;height:1px;}");
   ui->mainSplitter->setChildrenCollapsible(false);
   ui->leftMainWindowFrame->setMinimumWidth(235);
   ui->leftMainWindowFrame->setMaximumWidth(350);
@@ -889,7 +889,7 @@ QMenu::item:selected { background: #e0f1fc; }
 QToolTip { background: #fffef1; color: #273a50; border: 1px solid #cedbe6; }
 QLabel#BladeScopeSignalHeader { font-size: 16px; font-weight: 600; padding: 8px 4px; }
 QLabel#BladeScopeChartHeader { font-size: 14px; font-weight: 600; padding: 7px 0; }
-QFrame#tabsFrame { border: 1px solid #e5e8ec; border-radius: 7px; }
+QFrame#tabsFrame { background: #f7f1eb; border: 0px; border-radius: 0px; }
 QWidget#widgetTimescale { background: #fffdfa; border-top: 1px solid #e7e0da; }
 QSplitter::handle { background: #ece5df; }
 QFrame#frameFile { background: #fffdfa; border: 1px solid #eadfd4; border-radius: 7px; }
