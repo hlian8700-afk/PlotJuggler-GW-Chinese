@@ -624,7 +624,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
   auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
   const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
-  const QStringList palettes[] = {
+  const QList<QStringList> palettes = {
     QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#fbf1e9","#fffdfa"},
     QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#edf4fa","#ffffff"},
     QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#f0f1ef","#ffffff"},
