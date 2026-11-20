@@ -329,7 +329,13 @@ $src = $src.Replace($layoutNeedle, $layoutReplacement)
 $localizationNeedle = '  ui->setupUi(this);'
 $localizationReplacement = @'
   ui->setupUi(this);
-  ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("⌕  搜索中文标签或测点编码..."));
+  ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
+  // Real leading search icon/action, independent of placeholder text.
+  auto* goldwindSearchIcon = ui->lineEditFilter->addAction(
+      QString::fromUtf8("⌕"), QLineEdit::LeadingPosition);
+  goldwindSearchIcon->setToolTip(QString::fromUtf8("搜索测点（支持中文和原始编码）"));
+  connect(goldwindSearchIcon, &QAction::triggered, ui->lineEditFilter,
+          static_cast<void (QWidget::*)()>(&QWidget::setFocus));
   ui->lineEditFilter->setToolTip(QString::fromUtf8("支持中文描述、英文编码及空格分隔的多个关键词"));
   ui->lineEditCustomFilter->setPlaceholderText(QString::fromUtf8("搜索自定义曲线..."));
   ui->lineEditFilter->setClearButtonEnabled(true);
@@ -665,6 +671,11 @@ $curvePanelLayout = @'
   auto* bladeActionRow = new QHBoxLayout(bladeSignalActions);
   bladeActionRow->setContentsMargins(0, 2, 0, 4);
   bladeActionRow->setSpacing(5);
+  bladeSignalActions->setStyleSheet(
+      "QPushButton{background:#fff9f3;border:1px solid #e8d8c9;"
+      "border-radius:5px;color:#704e38;padding:6px 2px;min-height:24px;}"
+      "QPushButton:hover{background:#f5e5d6;border-color:#c9946b;}"
+      "QPushButton:pressed{background:#ebd2bd;}");
   auto* bladeLoadData = new QPushButton(QString::fromUtf8("加载数据"), bladeSignalActions);
   bladeLoadData->setToolTip(QString::fromUtf8("打开风机录波文件"));
   auto* bladeFilterData = new QPushButton(QString::fromUtf8("筛选"), bladeSignalActions);
