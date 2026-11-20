@@ -743,15 +743,19 @@ $curvePanelLayout = @'
   // Remove visually redundant headings and utility row marked in the review screenshot.
   signalHeader->hide();
   chartHeader->hide();
-  ui->label_7->hide();
+  ui->widgetLabelTimeseries->hide();
   if (auto* trash = _curvelist_widget->findChild<QPushButton*>("pushButtonTrash")) trash->hide();
   if (auto* count = _curvelist_widget->findChild<QLabel*>("labelNumberDisplayed")) count->hide();
   if (auto* values = _curvelist_widget->findChild<QCheckBox*>("checkBoxShowValues")) values->hide();
   // Reduce the tab strip height and surrounding whitespace; retain tab controls.
-  ui->tabsFrame->setContentsMargins(2, 1, 2, 1);
-  ui->tabsFrame->setMaximumHeight(42);
-  ui->tabsFrame->setMinimumHeight(38);
+  // tabsFrame contains the *entire* plotting widget, not just its tab strip.
+  // Never constrain its height: doing so hides the plot canvas.
+  ui->tabsFrame->setContentsMargins(0, 0, 0, 0);
+  ui->tabsFrame->setMinimumHeight(0);
+  ui->tabsFrame->setMaximumHeight(QWIDGETSIZE_MAX);
+  ui->tabsFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   ui->tabsFrame->setStyleSheet("QFrame#tabsFrame{background:transparent;border:0px;}");
+  ui->plottingAreaH->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   ui->label_7->setText(QString::fromUtf8("搜索并选择测点"));
   ui->label_5->setText(QString::fromUtf8("文件与布局"));
   ui->label_6->setText(QString::fromUtf8("实时数据（高级）"));
