@@ -332,6 +332,16 @@ $localizationReplacement = @'
   ui->lineEditFilter->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码..."));
   // Real leading search icon/action, independent of placeholder text.
   auto* goldwindSearchIcon = new QAction(QString::fromUtf8("⌕"), ui->lineEditFilter);
+  QPixmap goldwindSearchPixmap(18, 18);
+  goldwindSearchPixmap.fill(Qt::transparent);
+  {
+    QPainter painter(&goldwindSearchPixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#95745b"), 1.7));
+    painter.drawEllipse(QRectF(2.0, 2.0, 10.0, 10.0));
+    painter.drawLine(QPointF(11.0, 11.0), QPointF(16.0, 16.0));
+  }
+  goldwindSearchIcon->setIcon(QIcon(goldwindSearchPixmap));
   ui->lineEditFilter->addAction(goldwindSearchIcon, QLineEdit::LeadingPosition);
   goldwindSearchIcon->setToolTip(QString::fromUtf8("搜索测点（支持中文和原始编码）"));
   connect(goldwindSearchIcon, &QAction::triggered, ui->lineEditFilter,
@@ -618,7 +628,7 @@ $mainSrc = $mainSrc.Replace($mainAnchor, @'
 '@.TrimEnd())
 $mainInclude = '#include <QMainWindow>'
 if ($mainSrc.Contains($mainInclude)) {
-  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>', '#include <QHBoxLayout>', '#include <QLineEdit>')
+  $extraIncludes = @('#include <QToolButton>', '#include <QMenu>', '#include <QSettings>', '#include <QStringList>', '#include <QAction>', '#include <QLabel>', '#include <QList>', '#include <QSplitter>', '#include <QHBoxLayout>', '#include <QLineEdit>', '#include <QPainter>', '#include <QPixmap>', '#include <QPen>')
   foreach ($header in $extraIncludes) {
     if (!$mainSrc.Contains($header)) { $mainSrc = $mainSrc.Replace('#include <QPushButton>', '#include <QPushButton>' + [Environment]::NewLine + $header) }
   }
