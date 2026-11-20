@@ -160,6 +160,15 @@ $layoutReplacement = @'
   goldwindMode->addItem(QString::fromUtf8("中文标签"));
   goldwindMode->addItem(QString::fromUtf8("原始标签"));
   goldwindMode->addItem(QString::fromUtf8("中英文对照"));
+  // Start with raw identifiers, matching the default state requested in the review.
+  goldwindMode->setCurrentIndex(1);
+  goldwindLabelMode() = 1;
+  goldwindMode->setMinimumHeight(30);
+  goldwindMode->setStyleSheet(
+      "QComboBox{background:#fffaf5;border:1px solid #ead9ca;"
+      "border-radius:5px;padding:4px 8px;color:#59483c;}"
+      "QComboBox:hover{border-color:#c9946b;}");
+
   goldwindMode->setToolTip(QString::fromUtf8("金风标签显示模式"));
   auto* goldwindToolbar = new QGridLayout();
   goldwindToolbar->setContentsMargins(0, 0, 0, 0);
@@ -168,6 +177,13 @@ $layoutReplacement = @'
   goldwindToolbar->addWidget(goldwindMode, 0, 0);
   auto* goldwindGroup = new QPushButton(QString::fromUtf8("系统分类"), this);
   goldwindGroup->setCheckable(true);
+  goldwindGroup->setMinimumHeight(30);
+  goldwindGroup->setStyleSheet(
+      "QPushButton{background:#fffaf5;border:1px solid #ead9ca;"
+      "border-radius:5px;padding:4px 8px;color:#59483c;}"
+      "QPushButton:checked{background:#f2e2d4;border-color:#c9946b;color:#704e38;}"
+      "QPushButton:hover{border-color:#c9946b;}");
+
   goldwindToolbar->addWidget(goldwindGroup, 0, 1);
   auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
   goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
