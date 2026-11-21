@@ -672,7 +672,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QSplitter#mainSplitter{background:%3;border:0px;}"
     "QSplitter#mainSplitter::handle:horizontal{background:%6;width:1px;border:0px;}"
     "QSplitter#mainSplitter::handle:vertical{background:%6;height:1px;border:0px;}"
-    "QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %7,stop:1 %8);}");
+    "QWidget#qwtCanvas,QwtPlotCanvas#qwtCanvas,QwtPlotOpenGLCanvas#qwtCanvas{background:%7;border:0px;}");
   QStringList themeStyles;
   for (const auto& p : palettes) {
     themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7]);
@@ -1068,9 +1068,12 @@ $plotSyncInsert = @'
       canvasPalette.setColor(QPalette::Text, axisText);
       plotCanvas->setPalette(canvasPalette);
       plotCanvas->setAutoFillBackground(true);
-      plotCanvas->setStyleSheet(QString("QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %1,stop:1 %2);}")
-                                .arg(canvasTop.name(), canvasBottom.name()));
-      qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
+      // QwtPlotOpenGLCanvas does not reliably honor stylesheet gradients.
+      // Use an opaque solid palette/brush for both OpenGL and raster canvases.
+      plotCanvas->setStyleSheet(QString("background-color:%1;border:0px;").arg(canvasTop.name()));
+      qwtPlot()->setCanvasBackground(QBrush(canvasTop));
+      plotCanvas->update();
+      qwtPlot()->updateCanvasMargins();
       for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
         QwtText title = qwtPlot()->axisTitle(axis);
         title.setColor(axisText);
