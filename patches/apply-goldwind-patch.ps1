@@ -1706,3 +1706,25 @@ Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '  ui->setupUi(this);'; New = "  ui->setupUi(this);`n  setWindowTitle(QStringLiteral(`"BladeScope 3.17.0.1`"));" }
 )
+
+# Replace the FFT layout while retaining the upstream controls and signals.
+$fftUi = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "toolbox_FFT.ui")
+Set-Content -Path "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.ui" -Value $fftUi -Encoding UTF8
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
+  @{ Old = '  ui->setupUi(_widget);'; New = @'
+  ui->setupUi(_widget);
+  ui->plotSplitter->setStretchFactor(0, 1);
+  ui->plotSplitter->setStretchFactor(1, 1);
+  ui->plotSplitter->setSizes({ 1, 1 });
+  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QString::fromUtf8("关闭"));
+'@ }
+  @{ Old = '  preview_layout_A->setMargin(6);'; New = '  preview_layout_A->setContentsMargins(0, 0, 0, 0);' }
+  @{ Old = '  preview_layout_B->setMargin(6);'; New = '  preview_layout_B->setContentsMargins(0, 0, 0, 0);' }
+)
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '    connect(action, &QAction::triggered, toolbox_ptr, &ToolboxPlugin::onShowWidget);'; New = @'
+    if (toolbox_name == QStringLiteral("Fast Fourier Transform"))
+      action->setText(QString::fromUtf8("FFT 频谱分析"));
+    connect(action, &QAction::triggered, toolbox_ptr, &ToolboxPlugin::onShowWidget);
+'@ }
+)
