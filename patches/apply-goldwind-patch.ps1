@@ -1066,13 +1066,22 @@ $plotSyncInsert = @'
     const QColor plotGrid(app->property("bladeScopeThemeGrid").toString());
     const QColor panelColor(app->property("bladeScopeThemePanel").toString());
     const QColor gridColor(app->property("bladeScopeThemeBorder").toString());
-    if (canvasTop.isValid() && canvasBottom.isValid()) {
-      QLinearGradient canvasGradient(0, 0, 0, qMax(1, qwtPlot()->canvas()->height()));
+    auto* plotCanvas = qwtPlot()->canvas();
+    const QString themeSignature = canvasTop.name() + "|" + canvasBottom.name() +
+                                   "|" + axisText.name() + "|" + plotGrid.name() +
+                                   "|" + gridColor.name();
+    if (canvasTop.isValid() && canvasBottom.isValid() && axisText.isValid() &&
+        plotCanvas->property("bladeScopeAppliedTheme").toString() != themeSignature) {
+      // Object-bounding coordinates keep the gradient correct after canvas resize.
+      QLinearGradient canvasGradient(0.0, 0.0, 0.0, 1.0);
+      canvasGradient.setCoordinateMode(QGradient::ObjectBoundingMode);
       canvasGradient.setColorAt(0.0, canvasTop);
       canvasGradient.setColorAt(1.0, canvasBottom);
-      auto* plotCanvas = qwtPlot()->canvas();
-      // Apply the canvas surface directly: the app-wide QWidget theme must not
-      // repaint the plotting surface with the surrounding dark panel color.
+
+      // A transparent child stylesheet can override Qwt's own canvas paint path
+      // and reveal the dark parent panel on Windows. Clear it and let Qwt paint.
+      plotCanvas->setStyleSheet(QString());
+      plotCanvas->setAttribute(Qt::WA_StyledBackground, false);
       QPalette canvasPalette = plotCanvas->palette();
       canvasPalette.setColor(QPalette::Window, canvasTop);
       canvasPalette.setColor(QPalette::Base, canvasTop);
@@ -1080,27 +1089,23 @@ $plotSyncInsert = @'
       canvasPalette.setColor(QPalette::Text, axisText);
       plotCanvas->setPalette(canvasPalette);
       plotCanvas->setAutoFillBackground(true);
-      // Raster Qwt canvas paints the Qwt canvas brush, including gradients.
-      plotCanvas->setStyleSheet("background:transparent;border:0px;");
       qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
-      plotCanvas->update();
-      qwtPlot()->replot();
+
       for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
-        QwtText title = qwtPlot()->axisTitle(axis);
-        title.setColor(axisText);
-        qwtPlot()->setAxisTitle(axis, title);
-        QPalette axisPalette = qwtPlot()->axisWidget(axis)->palette();
+        auto* axisWidget = qwtPlot()->axisWidget(axis);
+        QPalette axisPalette = axisWidget->palette();
         axisPalette.setColor(QPalette::WindowText, axisText);
         axisPalette.setColor(QPalette::Text, axisText);
         axisPalette.setColor(QPalette::ButtonText, axisText);
         axisPalette.setColor(QPalette::Foreground, axisText);
-        auto* axisWidget = qwtPlot()->axisWidget(axis);
         axisWidget->setPalette(axisPalette);
-        axisWidget->setAutoFillBackground(true);
+        axisWidget->setAutoFillBackground(false);
         axisWidget->setStyleSheet(QString("QwtScaleWidget{color:%1;background:transparent;} QWidget{color:%1;}").arg(axisText.name()));
         axisWidget->update();
       }
-      _grid->setPen(QPen(plotGrid.isValid() ? plotGrid : gridColor, 0.0, Qt::DotLine));
+      QColor gridPenColor = plotGrid.isValid() ? plotGrid : gridColor;
+      gridPenColor.setAlpha(115);
+      _grid->setPen(QPen(gridPenColor, 0.0, Qt::DotLine));
       for (auto* item : qwtPlot()->itemList()) {
         if (auto* legend = dynamic_cast<QwtPlotLegendItem*>(item)) {
           legend->setTextPen(QPen(axisText));
@@ -1109,6 +1114,9 @@ $plotSyncInsert = @'
           legend->setBorderPen(QPen(Qt::NoPen));
         }
       }
+      plotCanvas->setProperty("bladeScopeAppliedTheme", themeSignature);
+      plotCanvas->update();
+      qwtPlot()->replot();
     }
     bool changed = false;
     for (auto& item : curveList()) {
