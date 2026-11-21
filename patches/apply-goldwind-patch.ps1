@@ -649,7 +649,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QProgressBar{background:%2;color:%4;border:1px solid %6;border-radius:4px;text-align:center;}"
     "QProgressBar::chunk{background:%5;border-radius:3px;}"
     "QToolButton:pressed,QPushButton:pressed,QToolButton:checked,QPushButton:checked{background:%5;border-color:%5;color:%4;}"
-    "QToolButton:disabled,QPushButton:disabled{background:%3;color:%6;border-color:%6;}"
+    "QToolButton:disabled,QPushButton:disabled{background:%3;color:%9;border-color:%6;}"
     "QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:%2;color:%4;border:1px solid %6;border-radius:4px;padding:2px 4px;font-size:9pt;selection-background-color:%5;selection-color:%4;}"
     "QComboBox QAbstractItemView{background:%2;color:%4;selection-background-color:%5;selection-color:%4;border:1px solid %6;}"
     "QTreeView,QTreeWidget,QListView,QListWidget,QTableView,QTableWidget{background:%2;alternate-background-color:%3;color:%4;gridline-color:%6;border:1px solid %6;font-size:9pt;}"
@@ -676,12 +676,18 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QWidget#qwtCanvas,QwtPlotCanvas#qwtCanvas,QwtPlotOpenGLCanvas#qwtCanvas{background:%7;border:0px;}");
   QStringList themeStyles;
   for (const auto& p : palettes) {
-    themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7]);
+    const bool dark = QColor(p[0]).lightness() < 128;
+    themeStyles << styleTemplate.arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]).arg(p[4]).arg(p[5]).arg(p[6]).arg(p[7])
+        .arg(dark ? "#a2b3c4" : "#566575") +
+        (dark ? QStringLiteral(
+            "QPushButton:checked:enabled,QPushButton:hover:enabled,"
+            "QToolButton:checked:enabled,QToolButton:hover:enabled{color:#241b14;}") : QString());
   }
   auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
   auto applyBladeTheme = [this, themeSettings, themeStyles, palettes](int index) {
     if (index < 0 || index >= themeStyles.size()) index = 0;
     const auto p = palettes[index];
+    const bool dark = QColor(p[0]).lightness() < 128;
     this->setStyleSheet(themeStyles[index]);
     QPalette palette = this->palette();
     palette.setColor(QPalette::Window, QColor(p[0]));
@@ -699,6 +705,10 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     palette.setColor(QPalette::Shadow, QColor(p[0]));
     palette.setColor(QPalette::Link, QColor(p[4]));
     palette.setColor(QPalette::LinkVisited, QColor(p[4]));
+    const QColor disabledText(dark ? "#a2b3c4" : "#566575");
+    palette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
     this->setPalette(palette);
     QCoreApplication::instance()->setProperty("bladeScopeCanvasTop", p[6]);
     QCoreApplication::instance()->setProperty("bladeScopeCanvasBottom", p[7]);
@@ -719,22 +729,8 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
         ++itemIt;
       }
     }
-    // Re-tint monochrome toolbar glyphs so dark themes never leave black icons
-    // on dark button tiles; preserve each original icon for later theme switches.
-    for (auto* tool : this->findChildren<QToolButton*>()) {
-      if (!tool->property("bladeScopeOriginalIcon").isValid())
-        tool->setProperty("bladeScopeOriginalIcon", QVariant::fromValue(tool->icon()));
-      const QIcon original = qvariant_cast<QIcon>(tool->property("bladeScopeOriginalIcon"));
-      if (!original.isNull()) {
-        const QSize iconSize = tool->iconSize().expandedTo(QSize(16, 16));
-        QPixmap tinted = original.pixmap(iconSize);
-        QPainter painter(&tinted);
-        painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        painter.fillRect(tinted.rect(), QColor(p[3]));
-        painter.end();
-        tool->setIcon(QIcon(tinted));
-      }
-    }
+    BladePlotTheme::interfaceChanged(dark);
+    BladePlotTheme::refreshButtonIcons(this, dark);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
@@ -743,6 +739,12 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     connect(themeAction, &QAction::triggered, this, [applyBladeTheme, i]() { applyBladeTheme(i); });
   }
   applyBladeTheme(themeSettings->value("appearance/theme_index", 0).toInt());
+  auto* themeIconTimer = new QTimer(this);
+  connect(themeIconTimer, &QTimer::timeout, this, [this] {
+    if (QCoreApplication::instance()->property("bladeScopeDarkInterface").toBool())
+      BladePlotTheme::refreshButtonIcons(this, true);
+  });
+  themeIconTimer->start(200);
 '@.TrimEnd())
 $mainSrc = $mainSrc.Replace($mainAnchor, @'
   const QString bladeScopeIconPath = QCoreApplication::applicationDirPath() + "/BladeScope.ico";

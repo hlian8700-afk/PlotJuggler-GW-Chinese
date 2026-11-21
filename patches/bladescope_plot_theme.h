@@ -1,6 +1,9 @@
 #pragma once
 
 #include <QApplication>
+#include <QAbstractButton>
+#include <QIcon>
+#include <QImage>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -80,6 +83,7 @@ inline Theme preset(int index)
   if (index == 1)
   {
     t.mode = Linear;
+    t.stops = { { 0, QColor("#45586f") }, { 1, QColor("#576c81") } };
     for (auto& axis : t.axes)
       axis = {{ QColor("#9cb0c8"), QColor("#edf4ff"), QColor("#9cb0c8") }};
     t.gridColor = {{ QColor("#669ab5d1"), QColor("#669ab5d1") }};
@@ -360,7 +364,20 @@ public:
     QPen pen = painter->pen();
     pen.setWidthF(penWidthF());
     pen.setCapStyle(Qt::FlatCap);
-    const auto& colors = current().axes[axis];
+    auto colors = current().axes[axis];
+    const bool dark = qApp->property("bladeScopeDarkInterface").toBool();
+    if (dark)
+    {
+      for (size_t i = 0; i < colors.size(); ++i)
+      {
+        if (colors[i].alpha() > 0 && colors[i].lightness() < 145)
+        {
+          QColor corrected(i == AxisText ? "#e8edf2" : "#a8bbcf");
+          corrected.setAlpha(colors[i].alpha());
+          colors[i] = corrected;
+        }
+      }
+    }
     if (hasComponent(Backbone))
     {
       pen.setColor(colors[AxisLine]);
@@ -450,8 +467,83 @@ inline void install(QwtPlot* plot, Grid* grid)
   refresh(plot);
 }
 
+inline bool& customized()
+{
+  static bool value = QFileInfo::exists(settingsPath());
+  return value;
+}
+
+inline void interfaceChanged(bool dark)
+{
+  qApp->setProperty("bladeScopeDarkInterface", dark);
+  if (!customized())
+  {
+    auto theme = preset(dark ? 1 : 0);
+    theme.grid = current().grid;
+    if (activeBackground(current()) != activeBackground(theme))
+      ++backgroundRevision();
+    current() = theme;
+  }
+  refreshAll();
+}
+
+inline void refreshButtonIcons(QWidget* root, bool dark)
+{
+  for (auto* button : root->findChildren<QAbstractButton*>())
+  {
+    const QIcon shown = button->icon();
+    const auto tintedKey = button->property("bladeScopeTintedIconKey").toLongLong();
+    if (!dark)
+    {
+      if (tintedKey && shown.cacheKey() == tintedKey)
+        button->setIcon(qvariant_cast<QIcon>(button->property("bladeScopeOriginalIcon")));
+      button->setProperty("bladeScopeTintedIconKey", QVariant());
+      button->setProperty("bladeScopeOriginalIcon", QVariant());
+      button->setProperty("bladeScopeInspectedIconKey", QVariant());
+      continue;
+    }
+    if (shown.isNull() || shown.cacheKey() == tintedKey ||
+        shown.cacheKey() == button->property("bladeScopeInspectedIconKey").toLongLong())
+      continue;
+    button->setProperty("bladeScopeInspectedIconKey", shown.cacheKey());
+    const QPixmap source = shown.pixmap(button->iconSize());
+    const QImage image = source.toImage().convertToFormat(QImage::Format_ARGB32);
+    bool colored = false;
+    for (int y = 0; y < image.height() && !colored; ++y)
+    {
+      const auto* pixels = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+      for (int x = 0; x < image.width() && !colored; ++x)
+      {
+        const auto pixel = pixels[x];
+        colored = qAlpha(pixel) > 32 && QColor::fromRgb(pixel).saturation() > 40;
+      }
+    }
+    if (colored || source.isNull())
+      continue;
+
+    auto tint = [&](const QColor& color) {
+      QPixmap result = source;
+      QPainter painter(&result);
+      painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+      painter.fillRect(result.rect(), color);
+      return result;
+    };
+    QIcon icon;
+    icon.addPixmap(tint(QColor("#edf3fa")), QIcon::Normal, QIcon::Off);
+    icon.addPixmap(tint(QColor("#241b14")), QIcon::Normal, QIcon::On);
+    icon.addPixmap(tint(QColor("#241b14")), QIcon::Active, QIcon::Off);
+    icon.addPixmap(tint(QColor("#241b14")), QIcon::Active, QIcon::On);
+    icon.addPixmap(tint(QColor("#a2b3c4")), QIcon::Disabled, QIcon::Off);
+    icon.addPixmap(tint(QColor("#a2b3c4")), QIcon::Disabled, QIcon::On);
+    button->setProperty("bladeScopeOriginalIcon", QVariant::fromValue(shown));
+    button->setProperty("bladeScopeTintedIconKey", icon.cacheKey());
+    button->setIcon(icon);
+  }
+}
+
 inline void apply(const Theme& theme)
 {
+  customized() = true;
   if (activeBackground(current()) != activeBackground(theme))
     ++backgroundRevision();
   current() = theme;
