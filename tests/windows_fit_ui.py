@@ -38,6 +38,8 @@ def run(executable):
     desktop = Desktop(backend="uia")
 
     def windows():
+        if process.poll() is not None:
+            raise RuntimeError(f'BladeScope exited with Windows status {process.returncode:#x}')
         return desktop.windows(process=process.pid, visible_only=True)
 
     def find(name, control=None):
@@ -49,7 +51,7 @@ def run(executable):
 
     def click(name):
         element = wait_for(lambda: find(name, "Button"))
-        element.invoke()
+        element.click_input()
 
     try:
         wait_for(lambda: find("曲线分析", "Button"), 80)
@@ -71,8 +73,9 @@ def run(executable):
         wait_for(lambda: find("曲线分析", "Button"))
         print("Installed GUI opened analysis, computed M01, opened statistics and formula tables, and returned to the plot.")
     finally:
-        process.terminate()
-        process.wait(timeout=10)
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
         if existed:
             settings.setValue(key, previous)
         else:

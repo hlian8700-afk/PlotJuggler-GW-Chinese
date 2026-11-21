@@ -619,7 +619,7 @@ public:
     compareMenu->addSeparator();
     plot=new AnalysisPlot(shown,this);layout->addWidget(plot,1);plot->activateGrid(true);plot->activateLegend(true);
     plot->setContextMenuEnabled(false);plot->qwtPlot()->setAcceptDrops(false);
-    canvas=plot->qwtPlot()->canvas();canvas->installEventFilter(this);rubber=new SelectionGuide(canvas);
+    canvas=plot->qwtPlot()->canvas();rubber=new SelectionGuide(canvas);
     auto* tools=new QHBoxLayout;layout->addLayout(tools);select=new QComboBox;
     select->addItems({"浏览","框选排除","框选标注","上界线以上排除","下界线以下排除"});tools->addWidget(select);
     button(tools,"撤销",[this]{if(!current||undoStack.empty())return;
@@ -662,9 +662,10 @@ public:
     refreshTimer=new QTimer(this);refreshTimer->setSingleShot(true);refreshTimer->setInterval(150);
     connect(refreshTimer,&QTimer::timeout,this,[this]{if(dirty&&isVisible())reload();});
     density->hide();roseMetric->hide();
+    canvas->installEventFilter(this);
   }
   void invalidate(){dirty=true;++loadGeneration;++generation;if(stop)stop->store(true);if(isVisible())refreshTimer->start();}
   void enter(){refreshKinds();if(dirty||!current)reload();}
-  ~Panel() override {if(stop)stop->store(true);delete plot;}
+  ~Panel() override {if(stop)stop->store(true);canvas->removeEventFilter(this);delete plot;}
 };
 }
