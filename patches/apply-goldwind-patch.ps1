@@ -1118,6 +1118,9 @@ void TabbedPlotWidget::updateHeaderToolbar()
       _headerToolbar->setFixedWidth(198);
       _headerToolbar->show();
       _headerToolbarOwner = next_owner;
+      connect(_headerToolbar->buttonClose(), &QPushButton::clicked, this, [this]() {
+        QTimer::singleShot(0, this, [this]() { updateHeaderToolbar(); });
+      });
     }
   }
   update();
