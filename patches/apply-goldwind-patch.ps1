@@ -1229,66 +1229,6 @@ $plotSyncInsert = @'
     auto* app = QCoreApplication::instance();
     const int mode = app->property("bladeScopeLabelMode").toInt();
     const QVariantMap aliases = app->property("bladeScopeTagAliases").toMap();
-    const QColor canvasTop(app->property("bladeScopeCanvasTop").toString());
-    const QColor canvasBottom(app->property("bladeScopeCanvasBottom").toString());
-    const QColor axisText(app->property("bladeScopeThemeText").toString());
-    const QColor plotGrid(app->property("bladeScopeThemeGrid").toString());
-    const QColor panelColor(app->property("bladeScopeThemePanel").toString());
-    const QColor gridColor(app->property("bladeScopeThemeBorder").toString());
-    auto* plotCanvas = qwtPlot()->canvas();
-    const QString themeSignature = canvasTop.name() + "|" + canvasBottom.name() +
-                                   "|" + axisText.name() + "|" + plotGrid.name() +
-                                   "|" + gridColor.name();
-    if (canvasTop.isValid() && canvasBottom.isValid() && axisText.isValid() &&
-        plotCanvas->property("bladeScopeAppliedTheme").toString() != themeSignature) {
-      // Object-bounding coordinates keep the gradient correct after canvas resize.
-      QLinearGradient canvasGradient(0.0, 0.0, 0.0, 1.0);
-      canvasGradient.setCoordinateMode(QGradient::ObjectBoundingMode);
-      canvasGradient.setColorAt(0.0, canvasTop);
-      canvasGradient.setColorAt(1.0, canvasBottom);
-
-      // The application-wide QWidget rule otherwise paints the dark panel over
-      // the canvas palette. Give the real Qwt canvas the object name targeted by
-      // the theme's explicit light-canvas selector, then clear child overrides.
-      plotCanvas->setObjectName("qwtCanvas");
-      plotCanvas->setStyleSheet(QString());
-      plotCanvas->setAttribute(Qt::WA_StyledBackground, false);
-      QPalette canvasPalette = plotCanvas->palette();
-      canvasPalette.setColor(QPalette::Window, canvasTop);
-      canvasPalette.setColor(QPalette::Base, canvasTop);
-      canvasPalette.setColor(QPalette::WindowText, axisText);
-      canvasPalette.setColor(QPalette::Text, axisText);
-      plotCanvas->setPalette(canvasPalette);
-      plotCanvas->setAutoFillBackground(true);
-      qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
-
-      for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
-        auto* axisWidget = qwtPlot()->axisWidget(axis);
-        QPalette axisPalette = axisWidget->palette();
-        axisPalette.setColor(QPalette::WindowText, axisText);
-        axisPalette.setColor(QPalette::Text, axisText);
-        axisPalette.setColor(QPalette::ButtonText, axisText);
-        axisPalette.setColor(QPalette::Foreground, axisText);
-        axisWidget->setPalette(axisPalette);
-        axisWidget->setAutoFillBackground(false);
-        axisWidget->setStyleSheet(QString("QwtScaleWidget{color:%1;background:transparent;} QWidget{color:%1;}").arg(axisText.name()));
-        axisWidget->update();
-      }
-      QColor gridPenColor = plotGrid.isValid() ? plotGrid : gridColor;
-      gridPenColor.setAlpha(115);
-      _grid->setPen(QPen(gridPenColor, 0.0, Qt::DotLine));
-      for (auto* item : qwtPlot()->itemList()) {
-        if (auto* legend = dynamic_cast<QwtPlotLegendItem*>(item)) {
-          legend->setTextPen(QPen(axisText));
-          // Transparent floating legend: keep labels readable without covering signal traces.
-          legend->setBackgroundBrush(QBrush(Qt::NoBrush));
-          legend->setBorderPen(QPen(Qt::NoPen));
-        }
-      }
-      plotCanvas->setProperty("bladeScopeAppliedTheme", themeSignature);
-      plotCanvas->update();
-      qwtPlot()->replot();
-    }
     bool changed = false;
     for (auto& item : curveList()) {
       const QString raw = QString::fromStdString(item.src_name);
@@ -1307,8 +1247,7 @@ $plotSyncInsert = @'
   _grid = new QwtPlotGrid();
 '@
 $plotSyncSrc = $plotSyncSrc.Replace($plotSyncAnchor, $plotSyncInsert.TrimEnd())
-$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <QColor>`n#include <QBrush>`n#include <QLinearGradient>`n#include <QPen>`n#include <QPalette>`n#include <qwt_text.h>
-#include <qwt_plot_legenditem.h>`n" + $plotSyncSrc
+$plotSyncSrc = "#include <QTimer>`n#include <QCoreApplication>`n#include <QVariantMap>`n#include <qwt_text.h>`n" + $plotSyncSrc
 Set-Content -Path $plotSyncFile -Value $plotSyncSrc -Encoding UTF8
 Write-Host "BladeScope legend follows label mode and Chinese aliases."
 
@@ -1366,3 +1305,167 @@ $panelUi = $panelUi.Replace('<string>Filter...</string>', '<string>筛选...</st
 $panelUi = $panelUi.Replace('<string>  Filter...</string>', '<string>  筛选...</string>')
 Set-Content -Path $panelUiFile -Value $panelUi -Encoding UTF8
 Write-Host "Goldwind Timeseries List UI labels localized."
+
+# Keep the theme implementation alongside the customization sources.
+$themeHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_plot_theme.h")
+Set-Content -Path "plotjuggler_app/bladescope_plot_theme.h" -Value $themeHeader -Encoding UTF8BOM
+
+function Update-BladeThemeSource($Path, $Replacements) {
+  $source = (Get-Content -Raw -Encoding UTF8 $Path).Replace("`r`n", "`n")
+  foreach ($replacement in $Replacements) {
+    $old = $replacement.Old.Replace("`r`n", "`n").TrimEnd()
+    $new = $replacement.New.Replace("`r`n", "`n").TrimEnd()
+    if ([regex]::Matches($source, [regex]::Escape($old)).Count -ne 1) {
+      throw "Expected one BladeScope theme anchor in ${Path}: $old"
+    }
+    $source = $source.Replace($old, $new)
+  }
+  Set-Content -Path $Path -Value $source -Encoding UTF8BOM
+}
+
+$gridFunction = @'
+  _grid->enableX(activate);
+  _grid->enableXMin(activate);
+  _grid->enableY(activate);
+  _grid->enableYMin(activate);
+  _grid->attach(qwtPlot());
+'@
+Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
+  @{ Old = '#include "statistics_dialog.h"'; New = "#include `"statistics_dialog.h`"`n#include `"bladescope_plot_theme.h`"" }
+  @{ Old = 'class TimeScaleDraw : public QwtScaleDraw'; New = 'class TimeScaleDraw : public BladePlotTheme::ScaleDraw' }
+  @{ Old = '  _grid = new QwtPlotGrid();'; New = '  _grid = new BladePlotTheme::Grid();' }
+  @{ Old = '  _show_point_text->attach(qwtPlot());'; New = @'
+  _show_point_text->attach(qwtPlot());
+  BladePlotTheme::install(qwtPlot(), static_cast<BladePlotTheme::Grid*>(_grid));
+'@ }
+  @{ Old = $gridFunction; New = '  Q_UNUSED(activate); // The shared theme controls each grid direction.' }
+  @{ Old = 'qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new QwtScaleDraw);'; New = 'qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new BladePlotTheme::ScaleDraw);' }
+  @{ Old = '  auto documentRect = qwtPlot()->canvas()->rect();'; New = '  const QRect documentRect(QPoint(), qwtPlot()->size());' }
+  @{ Old = '  QPixmap pixmap(documentRect.width(), documentRect.height());'; New = @'
+  rend.setDiscardFlag(QwtPlotRenderer::DiscardBackground);
+  rend.setDiscardFlag(QwtPlotRenderer::DiscardCanvasBackground);
+  QPixmap pixmap(documentRect.size());
+  pixmap.fill(Qt::transparent);
+'@ }
+  @{ Old = '  clipboard->setPixmap(pixmap);'; New = "  painter.end();`n  clipboard->setImage(pixmap.toImage());" }
+)
+
+$gridStartup = @'
+  bool activate_grid = settings.value("MainWindow.activateGrid", false).toBool();
+  ui->buttonActivateGrid->setChecked(activate_grid);
+'@
+$gridToggle = @'
+  forEachWidget([checked](PlotWidget* plot) {
+    plot->activateGrid(checked);
+    plot->replot();
+  });
+'@
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_plot_theme.h`"" }
+  @{ Old = '  bladeSettingsMenu->addAction(ui->actionColorMap_Editor);'; New = @'
+  bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
+  auto* plotThemeAction = bladeSettingsMenu->addAction(QString::fromUtf8("绘图主题调色盘"));
+  connect(plotThemeAction, &QAction::triggered, this, [this] {
+    BladePlotTheme::openPanel(this);
+    const QSignalBlocker blocked(ui->buttonActivateGrid);
+    const auto& grid = BladePlotTheme::current().grid;
+    ui->buttonActivateGrid->setChecked(grid[0] || grid[1]);
+  });
+'@ }
+  @{ Old = $gridStartup; New = @'
+  {
+    const QSignalBlocker blocked(ui->buttonActivateGrid);
+    const auto& grid = BladePlotTheme::current().grid;
+    ui->buttonActivateGrid->setChecked(grid[0] || grid[1]);
+  }
+'@ }
+  @{ Old = $gridToggle; New = @'
+  auto theme = BladePlotTheme::current();
+  theme.grid = {{ checked, checked }};
+  BladePlotTheme::apply(theme);
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_base/src/save_plot.cpp" @(
+  @{ Old = '    auto* pixmap = new QPixmap(dims.width(), dims.height());'; New = @'
+    auto* pixmap = new QPixmap(dims.width(), dims.height());
+    const QString suffix = QFileInfo(_save_filename).suffix().toLower();
+    pixmap->fill(suffix == "jpg" || suffix == "jpeg" ? parent->palette().window().color()
+                                                     : QColor(Qt::transparent));
+'@ }
+  @{ Old = '  _painter->fillRect(rect, parent->palette().window());'; New = '' }
+  @{ Old = 'PlotSaveHelper::~PlotSaveHelper()' + "`n{"; New = @'
+PlotSaveHelper::~PlotSaveHelper()
+{
+  if (_painter)
+    _painter->end();
+'@ }
+  @{ Old = '  _renderer->render(plot, _painter.get(), paint_at);'; New = @'
+  const bool themed = plot->property("bladeScopePlotTheme").toBool();
+  _renderer->setDiscardFlag(QwtPlotRenderer::DiscardBackground, themed);
+  _renderer->setDiscardFlag(QwtPlotRenderer::DiscardCanvasBackground, themed);
+  _renderer->render(plot, _painter.get(), paint_at);
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/curve_tracker.cpp" @(
+  @{ Old = '  _line_marker->attach(plot);'; New = "  _line_marker->setZ(100);`n  _line_marker->attach(plot);" }
+  @{ Old = '  _text_marker->attach(plot);'; New = "  _text_marker->setZ(102);`n  _text_marker->attach(plot);" }
+  @{ Old = '    _point_markers[i]->attach(_plot);'; New = "    _point_markers[i]->setZ(101);`n    _point_markers[i]->attach(_plot);" }
+)
+Write-Host "BladeScope plot theme controls and transparent rendering applied."
+
+# Qwt's standard exporter paints all canvas items before the native scales.
+# For themed plots split those items into two passes around the scale drawing.
+$drawItemsAnchor = @'
+    const QwtPlotItemList& itmList = itemList();
+    for ( QwtPlotItemIterator it = itmList.begin();
+        it != itmList.end(); ++it )
+    {
+        QwtPlotItem* item = *it;
+        if ( item && item->isVisible() )
+'@
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
+  @{ Old = $drawItemsAnchor; New = @'
+    const int exportPass = property( "bladeScopeExportPass" ).toInt();
+    const QwtPlotItemList& itmList = itemList();
+    for ( QwtPlotItemIterator it = itmList.begin();
+        it != itmList.end(); ++it )
+    {
+        QwtPlotItem* item = *it;
+        if ( item && item->isVisible() &&
+            ( exportPass == 0 || ( item->z() < 0.0 ) == ( exportPass == 1 ) ) )
+'@ }
+)
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_renderer.cpp" @(
+  @{ Old = '    renderCanvas( plot, painter, layout->canvasRect(), maps );'; New = @'
+    const bool themed = plot->property( "bladeScopePlotTheme" ).toBool();
+    if ( themed )
+        plot->setProperty( "bladeScopeExportPass", 1 );
+    renderCanvas( plot, painter, layout->canvasRect(), maps );
+'@ }
+  @{ Old = @'
+    painter->restore();
+
+    // restore all setting to their original attributes.
+'@; New = @'
+    if ( themed )
+    {
+        plot->setProperty( "bladeScopeExportPass", 2 );
+        renderCanvas( plot, painter, layout->canvasRect(), maps );
+        plot->setProperty( "bladeScopeExportPass", QVariant() );
+    }
+
+    painter->restore();
+
+    // restore all setting to their original attributes.
+'@ }
+)
+$rendererPath = "3rdparty/qwt/src/qwt_plot_renderer.cpp"
+$rendererSource = (Get-Content -Raw -Encoding UTF8 $rendererPath).Replace("`r`n", "`n")
+$canvasBackground = 'if ( !( m_data->discardFlags & DiscardCanvasBackground ) )'
+if ([regex]::Matches($rendererSource, [regex]::Escape($canvasBackground)).Count -ne 3) {
+  throw "Expected three Qwt export canvas background checks"
+}
+$rendererSource = $rendererSource.Replace($canvasBackground,
+  'if ( !( m_data->discardFlags & DiscardCanvasBackground ) &&
+             plot->property( "bladeScopeExportPass" ).toInt() != 2 )')
+Set-Content -Path $rendererPath -Value $rendererSource -Encoding UTF8
