@@ -1037,7 +1037,18 @@ $tabPaintBlock = @'
 $tabPaintBlock = $tabPaintBlock.Replace("`r`n", "`n")
 if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; cannot position add-tab button" }
 $tabPaintReplacement = @'
-  Q_UNUSED(margin); // QTabWidget lays out the corner controls and reserves tab space.
+  Q_UNUSED(margin);
+  auto* bar = tabWidget()->tabBar();
+  for (int i = 0; i < bar->count(); ++i)
+  {
+    if (auto* close = bar->tabButton(i, QTabBar::RightSide))
+    {
+      const QRect tab = bar->tabRect(i);
+      const int y = tab.top() + (tab.height() - close->height()) / 2;
+      if (close->y() != y)
+        close->move(close->x(), y);
+    }
+  }
 '@
 $tabSrc = $tabSrc.Replace($tabPaintBlock, $tabPaintReplacement.TrimEnd())
 $tabSrc = $tabSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));",
@@ -1055,6 +1066,11 @@ $tabCorner = @'
   _tabWidget->setCornerWidget(corner, Qt::TopRightCorner);
 '@
 $tabSrc = $tabSrc.Replace($tabButtonConnect, $tabCorner + "`n" + $tabButtonConnect)
+$tabSrc = $tabSrc.Replace('  layout->addWidget(close_button);', @'
+  button_widget->setFixedSize(16, 16);
+  close_button->setIconSize(QSize(12, 12));
+  layout->addWidget(close_button, 0, Qt::AlignCenter);
+'@)
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
@@ -1355,6 +1371,7 @@ Set-Content -Path $rendererPath -Value $rendererSource -Encoding UTF8
 # Float each original DockToolbar inside its own canvas. Leave its button
 # enter/leave, fullscreen and drag/drop handlers in charge of visibility.
 Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
+  @{ Old = '      this->toolBar()->buttonClose()->setHidden(fullscreen);'; New = '' }
   @{ Old = '  this->layout()->setMargin(10);'; New = '  this->layout()->setContentsMargins(2, 0, 2, 2);' }
   @{ Old = '  qobject_cast<QBoxLayout*>(layout())->insertWidget(0, _toolbar);'; New = @'
   if (auto* canvas = _plot_widget->findChild<QWidget*>("qwtCanvas"))
@@ -1377,6 +1394,17 @@ Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
 '@ }
 )
 Update-BladeThemeSource "plotjuggler_app/plot_docker_toolbar.cpp" @(
+  @{ Old = 'void DockToolbar::enterEvent(QEvent* ev)' + "`n{"; New = @'
+void DockToolbar::enterEvent(QEvent* ev)
+{
+  ui->buttonClose->setVisible(!_fullscreen_mode);
+'@ }
+  @{ Old = 'void DockToolbar::leaveEvent(QEvent* ev)' + "`n{"; New = @'
+void DockToolbar::leaveEvent(QEvent* ev)
+{
+  ui->buttonClose->hide();
+'@ }
+  @{ Old = '  ui->buttonClose->setHidden(_fullscreen_mode);'; New = '  ui->buttonClose->setVisible(!_fullscreen_mode && underMouse());' }
   @{ Old = '  ui->setupUi(this);'; New = @'
   ui->setupUi(this);
 
@@ -1397,6 +1425,7 @@ Update-BladeThemeSource "plotjuggler_app/plot_docker_toolbar.cpp" @(
   }
   ui->buttonClose->setFixedSize(22, 22);
   ui->buttonClose->setIconSize(QSize(16, 16));
+  ui->buttonClose->hide();
 '@ }
   @{ Old = '  if (event->type() == QEvent::MouseButtonDblClick)'; New = @'
   if (object == parentWidget() && object != _parent)
