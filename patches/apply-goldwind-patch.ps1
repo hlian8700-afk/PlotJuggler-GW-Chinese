@@ -1029,10 +1029,146 @@ $tabSrc = $tabSrc.Replace($tabAnchor, $tabInsert.TrimEnd())
 # Pin it to the far right and keep the full strip aligned with the plot container.
 $tabPaintAnchor = "  int button_pos = std::min(width_tabbar + margin, max_width_tabbar);"
 if (!$tabSrc.Contains($tabPaintAnchor)) { throw "Tab paintEvent button anchor missing" }
-$tabSrc = $tabSrc.Replace($tabPaintAnchor,
-    "  int button_pos = std::max(0, width() - _buttonAddTab->width() - margin);")
+$tabSrc = $tabSrc.Replace($tabPaintAnchor, @'
+  const int toolbar_width = _headerToolbar ? _headerToolbar->width() : 0;
+  const int header_gap = 4;
+  int max_width_tabbar = std::max(0, width() - _buttonAddTab->width() - margin - toolbar_width - header_gap);
+  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);
+  if (_headerToolbar) {
+    _headerToolbar->setGeometry(max_width_tabbar + margin, 0, toolbar_width, 28);
+    _headerToolbar->raise();
+  }
+  _buttonAddTab->move(QPoint(max_width_tabbar + margin + toolbar_width + header_gap, 0));
+'@.TrimEnd())
 $tabSrc = $tabSrc.Replace("  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);",
     "  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);")
+
+
+# Merge the active plot's real DockToolbar into the tab header row.
+$tabHeaderFile = "plotjuggler_app/tabbedplotwidget.h"
+$tabHeaderSrc = Get-Content -Raw -Encoding UTF8 $tabHeaderFile
+$tabHeaderAnchor = "  QTabWidget* _tabWidget;"
+if (!$tabHeaderSrc.Contains($tabHeaderAnchor)) { throw "Tab header member anchor missing" }
+$tabHeaderReplacement = @'
+  QTabWidget* _tabWidget;
+  QPointer<DockWidget> _headerToolbarOwner;
+  QPointer<DockToolbar> _headerToolbar;
+  void updateHeaderToolbar();
+'@
+$tabHeaderSrc = $tabHeaderSrc.Replace($tabHeaderAnchor, $tabHeaderReplacement.TrimEnd())
+Set-Content -Path $tabHeaderFile -Value $tabHeaderSrc -Encoding UTF8
+
+$tabCppFile = "plotjuggler_app/tabbedplotwidget.cpp"
+$tabCppSrc = Get-Content -Raw -Encoding UTF8 $tabCppFile
+$tabCppMarker = "void TabbedPlotWidget::paintEvent(QPaintEvent* event)"
+if (!$tabCppSrc.Contains($tabCppMarker)) { throw "Tab header method anchor missing" }
+$tabCppMethod = @'
+void TabbedPlotWidget::updateHeaderToolbar()
+{
+  DockWidget* next_owner = nullptr;
+  if (auto* docker = currentTab())
+  {
+    if (docker->dockAreaCount() > 0)
+    {
+      auto* area = docker->dockArea(0);
+      next_owner = dynamic_cast<DockWidget*>(area->currentDockWidget());
+    }
+  }
+
+  if (_headerToolbarOwner == next_owner && _headerToolbar)
+  {
+    update();
+    return;
+  }
+
+  if (_headerToolbar)
+  {
+    if (_headerToolbarOwner)
+    {
+      auto* old_layout = qobject_cast<QBoxLayout*>(_headerToolbarOwner->layout());
+      _headerToolbar->setCompactHeaderMode(false);
+      _headerToolbar->setParent(_headerToolbarOwner);
+      if (old_layout) old_layout->insertWidget(0, _headerToolbar);
+    }
+    else
+    {
+      _headerToolbar->deleteLater();
+    }
+  }
+
+  _headerToolbar = nullptr;
+  _headerToolbarOwner = nullptr;
+
+  if (next_owner && next_owner->toolBar())
+  {
+    auto* owner_layout = qobject_cast<QBoxLayout*>(next_owner->layout());
+    if (owner_layout)
+    {
+      _headerToolbar = next_owner->toolBar();
+      owner_layout->removeWidget(_headerToolbar);
+      _headerToolbar->setParent(this);
+      _headerToolbar->setCompactHeaderMode(true);
+      _headerToolbar->setFixedHeight(28);
+      _headerToolbar->setFixedWidth(198);
+      _headerToolbar->show();
+      _headerToolbarOwner = next_owner;
+    }
+  }
+  update();
+}
+
+'@
+$tabCppSrc = $tabCppSrc.Replace($tabCppMarker, $tabCppMethod + $tabCppMarker)
+$tabCppSrc = "#include <QBoxLayout>" + [Environment]::NewLine + "#include <QTimer>" + [Environment]::NewLine + "#include <QPointer>" + [Environment]::NewLine + $tabCppSrc
+$tabCppSrc = $tabCppSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));", "  _buttonAddTab->setFixedSize(QSize(28, 28));")
+$tabCppSrc = $tabCppSrc.Replace("  connect(_buttonAddTab, &QPushButton::pressed, this, &TabbedPlotWidget::on_addTabButton_pressed);",
+  "  connect(_buttonAddTab, &QPushButton::pressed, this, &TabbedPlotWidget::on_addTabButton_pressed);" + [Environment]::NewLine + "  updateHeaderToolbar();")
+$tabCppSrc = $tabCppSrc.Replace("  tabWidget()->setCurrentWidget(docker);",
+  "  tabWidget()->setCurrentWidget(docker);" + [Environment]::NewLine +
+  "  connect(docker, &PlotDocker::plotWidgetAdded, this, [this](PlotWidget*) {" + [Environment]::NewLine +
+  "    QTimer::singleShot(0, this, [this]() { updateHeaderToolbar(); });" + [Environment]::NewLine + "  });")
+$tabCurrentAnchor = "  for (int i = 0; i < tabWidget()->count(); i++)"
+$tabCurrentPos = $tabCppSrc.LastIndexOf($tabCurrentAnchor)
+if ($tabCurrentPos -lt 0) { throw "Current tab synchronization anchor missing" }
+$tabCloseMarker = "void TabbedPlotWidget::on_tabWidget_tabCloseRequested(int index)"
+$tabClosePos = $tabCppSrc.IndexOf($tabCloseMarker, $tabCurrentPos)
+if ($tabClosePos -lt 0) { throw "Current tab method boundary missing" }
+$tabCppSrc = $tabCppSrc.Insert($tabClosePos, "  updateHeaderToolbar();" + [Environment]::NewLine + "}" + [Environment]::NewLine + [Environment]::NewLine)
+# Remove the closing brace that originally ended on_tabWidget_currentChanged immediately before insertion.
+$tabCppSrc = $tabCppSrc.Remove($tabClosePos - 2, 2)
+Set-Content -Path $tabCppFile -Value $tabCppSrc -Encoding UTF8
+
+$toolbarHeaderFile = "plotjuggler_app/plot_docker_toolbar.h"
+$toolbarHeaderSrc = Get-Content -Raw -Encoding UTF8 $toolbarHeaderFile
+$toolbarHeaderSrc = $toolbarHeaderSrc.Replace("  void toggleFullscreen();", "  void toggleFullscreen();" + [Environment]::NewLine + "  void setCompactHeaderMode(bool enabled);")
+$toolbarHeaderSrc = $toolbarHeaderSrc.Replace("  bool _fullscreen_mode;", "  bool _fullscreen_mode;" + [Environment]::NewLine + "  bool _compact_header_mode = false;")
+Set-Content -Path $toolbarHeaderFile -Value $toolbarHeaderSrc -Encoding UTF8
+
+$toolbarCppFile = "plotjuggler_app/plot_docker_toolbar.cpp"
+$toolbarCppSrc = Get-Content -Raw -Encoding UTF8 $toolbarCppFile
+$toolbarMethodAnchor = "void DockToolbar::toggleFullscreen()"
+if (!$toolbarCppSrc.Contains($toolbarMethodAnchor)) { throw "Compact toolbar method anchor missing" }
+$toolbarMethod = @'
+void DockToolbar::setCompactHeaderMode(bool enabled)
+{
+  _compact_header_mode = enabled;
+  ui->label->setVisible(!enabled);
+  ui->buttonBackground->setVisible(enabled);
+  ui->buttonSplitHorizontal->setVisible(enabled && !_fullscreen_mode);
+  ui->buttonSplitVertical->setVisible(enabled && !_fullscreen_mode);
+  ui->buttonFullscreen->setVisible(enabled);
+  ui->buttonClose->setVisible(true);
+  updateGeometry();
+}
+
+'@
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMethodAnchor, $toolbarMethod + $toolbarMethodAnchor)
+$toolbarMouseAnchor = "  if (auto* area = _parent->dockAreaWidget())" + [Environment]::NewLine + "  {" + [Environment]::NewLine + "    QCoreApplication::sendEvent(area->titleBar(), ev);" + [Environment]::NewLine + "  }"
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMouseAnchor, "  if (!_compact_header_mode) { if (auto* area = _parent->dockAreaWidget()) QCoreApplication::sendEvent(area->titleBar(), ev); }")
+$toolbarVisibility = "  ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(!_fullscreen_mode);"
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarVisibility, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  }")
+Set-Content -Path $toolbarCppFile -Value $toolbarCppSrc -Encoding UTF8
+Write-Host "BladeScope active DockToolbar merged into the tab header."
 
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
