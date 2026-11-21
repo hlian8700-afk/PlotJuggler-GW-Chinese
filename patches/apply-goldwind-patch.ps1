@@ -622,7 +622,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#ffffff","#fcfdff","#29445d","#e4eaf0"},
     QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#ffffff","#fdfefe","#3d4540","#e5e9e6"},
     QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
-    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#ffffff","#fcfdff","#405366","#e4eaf0"}};
+    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#ffffff","#fcfdff","#e8edf2","#566779"}};
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
@@ -1067,8 +1067,12 @@ $plotSyncInsert = @'
         axisPalette.setColor(QPalette::WindowText, axisText);
         axisPalette.setColor(QPalette::Text, axisText);
         axisPalette.setColor(QPalette::ButtonText, axisText);
-        qwtPlot()->axisWidget(axis)->setPalette(axisPalette);
-        qwtPlot()->axisWidget(axis)->setStyleSheet(QString("color:%1;").arg(axisText.name()));
+        axisPalette.setColor(QPalette::Foreground, axisText);
+        auto* axisWidget = qwtPlot()->axisWidget(axis);
+        axisWidget->setPalette(axisPalette);
+        axisWidget->setAutoFillBackground(true);
+        axisWidget->setStyleSheet(QString("QwtScaleWidget{color:%1;background:transparent;} QWidget{color:%1;}").arg(axisText.name()));
+        axisWidget->update();
       }
       _grid->setPen(QPen(plotGrid.isValid() ? plotGrid : gridColor, 0.0, Qt::DotLine));
       for (auto* item : qwtPlot()->itemList()) {
