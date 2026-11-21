@@ -1101,9 +1101,16 @@ $plotBaseSrc = (Get-Content -Raw -Encoding UTF8 $plotBaseFile).Replace("`r`n", "
 $openGlAnchor = '  bool use_opengl = settings.value("Preferences::use_opengl", true).toBool();'
 if (!$plotBaseSrc.Contains($openGlAnchor)) { throw "Qwt OpenGL canvas selection anchor missing" }
 $plotBaseSrc = $plotBaseSrc.Replace($openGlAnchor,
-    '  bool use_opengl = false; // BladeScope: reliable theme-aware raster canvas on Windows.')
+@'
+  static const bool nativeRendering = settings.value("BladeScope/nativeRendering", false).toBool();
+  const bool use_opengl = nativeRendering && settings.value("Preferences::use_opengl", true).toBool();
+'@)
+$plotBaseSrc = $plotBaseSrc.Replace('  abs_canvas->setObjectName("qwtCanvas");', @'
+  abs_canvas->setObjectName("qwtCanvas");
+  abs_canvas->setProperty("bladeScopeNativeRendering", nativeRendering);
+'@)
 Set-Content -Path $plotBaseFile -Value $plotBaseSrc -Encoding UTF8
-Write-Host "BladeScope uses theme-aware raster Qwt canvas."
+Write-Host "BladeScope rendering mode selected at startup."
 
 $plotSyncFile = "plotjuggler_app/plotwidget.cpp"
 $plotSyncSrc = (Get-Content -Raw -Encoding UTF8 $plotSyncFile).Replace("`r`n", "`n")
@@ -1220,17 +1227,33 @@ $gridFunction = @'
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = '#include "statistics_dialog.h"'; New = "#include `"statistics_dialog.h`"`n#include `"bladescope_plot_theme.h`"" }
   @{ Old = 'class TimeScaleDraw : public QwtScaleDraw'; New = 'class TimeScaleDraw : public BladePlotTheme::ScaleDraw' }
-  @{ Old = '  _grid = new QwtPlotGrid();'; New = '  _grid = new BladePlotTheme::Grid();' }
+  @{ Old = '  _grid = new QwtPlotGrid();'; New = @'
+  if (qwtPlot()->canvas()->property("bladeScopeNativeRendering").toBool())
+    _grid = new QwtPlotGrid();
+  else
+    _grid = new BladePlotTheme::Grid();
+'@ }
   @{ Old = '  _show_point_text->attach(qwtPlot());'; New = @'
   _show_point_text->attach(qwtPlot());
-  BladePlotTheme::install(qwtPlot(), static_cast<BladePlotTheme::Grid*>(_grid));
+  if (auto* grid = dynamic_cast<BladePlotTheme::Grid*>(_grid))
+    BladePlotTheme::install(qwtPlot(), grid);
 '@ }
-  @{ Old = $gridFunction; New = '  Q_UNUSED(activate); // The shared theme controls each grid direction.' }
+  @{ Old = $gridFunction; New = @'
+  if (!qwtPlot()->property("bladeScopePlotTheme").toBool())
+  {
+    _grid->enableX(activate);
+    _grid->enableXMin(activate);
+    _grid->enableY(activate);
+    _grid->enableYMin(activate);
+    _grid->attach(qwtPlot());
+  }
+'@ }
   @{ Old = 'qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new QwtScaleDraw);'; New = 'qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new BladePlotTheme::ScaleDraw);' }
   @{ Old = '  auto documentRect = qwtPlot()->canvas()->rect();'; New = '  const QRect documentRect(QPoint(), qwtPlot()->size());' }
   @{ Old = '  QPixmap pixmap(documentRect.width(), documentRect.height());'; New = @'
-  rend.setDiscardFlag(QwtPlotRenderer::DiscardBackground);
-  rend.setDiscardFlag(QwtPlotRenderer::DiscardCanvasBackground);
+  const bool themed = qwtPlot()->property("bladeScopePlotTheme").toBool();
+  rend.setDiscardFlag(QwtPlotRenderer::DiscardBackground, themed);
+  rend.setDiscardFlag(QwtPlotRenderer::DiscardCanvasBackground, themed);
   QPixmap pixmap(documentRect.size());
   pixmap.fill(Qt::transparent);
 '@ }
@@ -1277,10 +1300,51 @@ $gridToggle = @'
   });
 '@
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_plot_theme.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_plot_theme.h`"`n#include <QOpenGLWidget>" }
   @{ Old = '  bladeSettingsMenu->addAction(ui->actionColorMap_Editor);'; New = @'
   bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
   auto* plotThemeAction = bladeSettingsMenu->addAction(QString::fromUtf8("绘图主题调色盘"));
+  const bool nativeRendering = QSettings().value("BladeScope/nativeRendering", false).toBool();
+  plotThemeAction->setEnabled(!nativeRendering);
+  auto* renderMode = bladeSettingsMenu->addAction(
+      QString::fromUtf8("原版渲染（重启生效）"));
+  renderMode->setCheckable(true);
+  renderMode->setChecked(nativeRendering);
+  connect(renderMode, &QAction::toggled, this, [this, nativeRendering](bool enabled) {
+    QSettings().setValue("BladeScope/nativeRendering", enabled);
+    if (enabled != nativeRendering)
+      QMessageBox::information(this, QString::fromUtf8("绘图渲染"),
+                               QString::fromUtf8("请重启 BladeScope 以切换渲染模式。"));
+  });
+  auto* measure = bladeSettingsMenu->addAction(QString::fromUtf8("记录绘图耗时"));
+  measure->setCheckable(true);
+  connect(measure, &QAction::toggled, this, [this](bool enabled) {
+    auto* app = QCoreApplication::instance();
+    app->setProperty("bladeScopeMeasurePaint", enabled);
+    if (enabled)
+    {
+      app->setProperty("bladeScopePaintCount", 0LL);
+      app->setProperty("bladeScopePaintTotal", 0LL);
+      app->setProperty("bladeScopePaintMax", 0LL);
+      return;
+    }
+    QString backend;
+    forEachWidget([&](PlotWidget* plot) {
+      if (!plot->isVisible() || !backend.isEmpty())
+        return;
+      if (auto* gl = plot->findChild<QOpenGLWidget*>("qwtCanvas"))
+        backend = gl->isValid() ? "OpenGL" : "OpenGL (invalid context)";
+      else
+        backend = "Raster";
+    });
+    const auto count = app->property("bladeScopePaintCount").toLongLong();
+    const double total = app->property("bladeScopePaintTotal").toLongLong() / 1e6;
+    const double max = app->property("bladeScopePaintMax").toLongLong() / 1e6;
+    QString report = QString::fromUtf8("后端：%1\n绘制次数：%2\n平均 CPU 绘制：%3 ms\n最长 CPU 绘制：%4 ms")
+                         .arg(backend.isEmpty() ? QStringLiteral("—") : backend)
+                         .arg(count).arg(count ? total / count : 0, 0, 'f', 2).arg(max, 0, 'f', 2);
+    QMessageBox::information(this, QString::fromUtf8("绘图耗时"), report);
+  });
   connect(plotThemeAction, &QAction::triggered, this, [this] {
     BladePlotTheme::openPanel(this);
     const QSignalBlocker blocked(ui->buttonActivateGrid);
@@ -1299,6 +1363,11 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   auto theme = BladePlotTheme::current();
   theme.grid = {{ checked, checked }};
   BladePlotTheme::apply(theme);
+  forEachWidget([checked](PlotWidget* plot) {
+    plot->activateGrid(checked);
+    if (plot->findChild<QWidget*>("qwtCanvas")->property("bladeScopeNativeRendering").toBool())
+      plot->replot();
+  });
 '@ }
 )
 Update-BladeThemeSource "plotjuggler_base/src/save_plot.cpp" @(
@@ -1534,7 +1603,8 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
              ( m_data->style == Lines || m_data->style == LinesAndDots ) &&
              !m_data->symbol && !testCurveAttribute( Fitted ) &&
              m_data->brush.style() == Qt::NoBrush &&
-             plot() && ( painter->device() == plot()->canvas() ||
+             plot() && plot()->property( "bladeScopePlotTheme" ).toBool() &&
+             ( painter->device() == plot()->canvas() ||
                          plot()->property( "bladeScopeCanvasPass" ).toInt() == 1 ) )
         {
             const double left = qMin( xMap.s1(), xMap.s2() );
@@ -1571,8 +1641,21 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 # Cache the gradient, grid and waveforms on the raster canvas. Cursor markers
 # and the legend are composited afterwards, in the existing Z order.
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
-  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qpixmap.h>`n#include <qvariant.h>" }
+  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qpixmap.h>`n#include <qvariant.h>`n#include <QElapsedTimer>`n#include <QScopeGuard>" }
   @{ Old = '    drawItems( painter, m_data->canvas->contentsRect(), maps );'; New = @'
+    auto* app = QCoreApplication::instance();
+    QElapsedTimer timer;
+    if (app->property("bladeScopeMeasurePaint").toBool())
+        timer.start();
+    const auto measure = qScopeGuard([&] {
+        if (!timer.isValid())
+            return;
+        const qint64 ns = timer.nsecsElapsed();
+        app->setProperty("bladeScopePaintCount", app->property("bladeScopePaintCount").toLongLong() + 1);
+        app->setProperty("bladeScopePaintTotal", app->property("bladeScopePaintTotal").toLongLong() + ns);
+        app->setProperty("bladeScopePaintMax", qMax(app->property("bladeScopePaintMax").toLongLong(), ns));
+    });
+
     auto* canvas = m_data->canvas.data();
     const QRect rect = canvas->contentsRect();
     if ( !property( "bladeScopePlotTheme" ).toBool() ||
@@ -1628,7 +1711,10 @@ Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = 'void PlotWidget::setTrackerPosition(double abs_time)'; New = @'
 void PlotWidget::refreshTrackerOverlay()
 {
-  qwtPlot()->canvas()->update();
+  if (qwtPlot()->property("bladeScopePlotTheme").toBool())
+    qwtPlot()->canvas()->update();
+  else
+    replot();
 }
 
 void PlotWidget::setTrackerPosition(double abs_time)
