@@ -1350,6 +1350,35 @@ Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = '  clipboard->setPixmap(pixmap);'; New = "  painter.end();`n  clipboard->setImage(pixmap.toImage());" }
 )
 
+# Keep the current tracker state in both capture paths so the legend can
+# remain above a visible tracker in the exported result.
+$themePlotPath = "plotjuggler_app/plotwidget.cpp"
+$themePlotSource = (Get-Content -Raw -Encoding UTF8 $themePlotPath).Replace("`r`n", "`n")
+$trackerSuspend = @'
+  bool tracker_enabled = _tracker->isEnabled();
+  if (tracker_enabled)
+  {
+    this->enableTracker(false);
+    replot();
+  }
+
+'@
+$trackerResume = @'
+
+  if (tracker_enabled)
+  {
+    this->enableTracker(true);
+    replot();
+  }
+'@
+foreach ($fragment in @(($trackerSuspend.TrimEnd() + "`n`n"), $trackerResume)) {
+  if ([regex]::Matches($themePlotSource, [regex]::Escape($fragment)).Count -ne 2) {
+    throw "Expected both BladeScope image capture tracker anchors"
+  }
+  $themePlotSource = $themePlotSource.Replace($fragment, "")
+}
+Set-Content -Path $themePlotPath -Value $themePlotSource -Encoding UTF8BOM
+
 $gridStartup = @'
   bool activate_grid = settings.value("MainWindow.activateGrid", false).toBool();
   ui->buttonActivateGrid->setChecked(activate_grid);
