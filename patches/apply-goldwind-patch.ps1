@@ -1727,6 +1727,103 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '    connect(action, &QAction::triggered, toolbox_ptr, &ToolboxPlugin::onShowWidget);'; New = @'
     if (toolbox_name == QStringLiteral("Fast Fourier Transform"))
       action->setText(QString::fromUtf8("FFT 频谱分析"));
+    else if (toolbox_name == QStringLiteral("CSV/Parquet Exporter"))
+      action->setText(QStringLiteral("CSV / Parquet \u5bfc\u51fa"));
+    else if (toolbox_name == QStringLiteral("Reactive Script Editor"))
+      action->setText(QStringLiteral("Lua \u811a\u672c\u7f16\u8f91\u5668"));
+    else if (toolbox_name == QStringLiteral("Quaternion to RPY"))
+      action->setText(QStringLiteral("\u56db\u5143\u6570\u8f6c\u6b27\u62c9\u89d2"));
     connect(action, &QAction::triggered, toolbox_ptr, &ToolboxPlugin::onShowWidget);
 '@ }
 )
+
+# Localized layouts for the remaining built-in tools.
+$toolUi = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "toolbox_csv.ui")
+Set-Content -Path "plotjuggler_plugins/ToolboxCSV/toolbox_csv.ui" -Value $toolUi -Encoding UTF8
+$toolUi = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "lua_editor.ui")
+Set-Content -Path "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.ui" -Value $toolUi -Encoding UTF8
+$toolUi = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "quaternion_to_rpy.ui")
+Set-Content -Path "plotjuggler_plugins/ToolboxQuaternion/quaternion_to_rpy.ui" -Value $toolUi -Encoding UTF8
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxCSV/toolbox_ui.cpp" @(
+  @{ Old = @'
+  ui->setupUi(_widget);
+'@; New = @'
+  ui->setupUi(_widget);
+  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
+  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
+'@ }
+  @{ Old = @'
+"Export data"
+'@; New = @'
+QStringLiteral("\u5bfc\u51fa\u6570\u636e")
+'@ }
+  @{ Old = @'
+"Select export directory"
+'@; New = @'
+QStringLiteral("\u9009\u62e9\u5bfc\u51fa\u6587\u4ef6\u5939")
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxQuaternion/toolbox_quaternion.cpp" @(
+  @{ Old = @'
+  ui->setupUi(_widget);
+'@; New = @'
+  ui->setupUi(_widget);
+  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
+  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
+'@ }
+  @{ Old = @'
+new PJ::PlotWidgetBase(ui->frame);
+'@; New = @'
+new PJ::PlotWidgetBase(ui->framePlotPreview);
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
+  @{ Old = @'
+  ui->setupUi(_widget);
+'@; New = @'
+  ui->setupUi(_widget);
+  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
+  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
+  ui->scriptSplitter->setStretchFactor(0, 0);
+  ui->scriptSplitter->setStretchFactor(1, 1);
+  ui->scriptSplitter->setSizes({ 230, 700 });
+  ui->codeSplitter->setStretchFactor(0, 1);
+  ui->codeSplitter->setStretchFactor(1, 2);
+  ui->codeSplitter->setSizes({ 180, 360 });
+'@ }
+  @{ Old = @'
+"Do you want to save the current active scripts?\n\n"
+'@; New = @'
+QStringLiteral("\u662f\u5426\u4fdd\u5b58\u5f53\u524d\u4f7f\u7528\u7684\u811a\u672c\uff1f\n\n")
+'@ }
+  @{ Old = @'
+tr("Overwrite")
+'@; New = @'
+QStringLiteral("\u8986\u76d6")
+'@ }
+  @{ Old = @'
+    msgBox.setText(tr("A dfunction with the same name exists already.\n"
+                      " Do you want to overwrite it?\n"));
+'@; New = @'
+    msgBox.setText(QStringLiteral("\u5df2\u6709\u540c\u540d\u811a\u672c\uff0c\u662f\u5426\u8986\u76d6\uff1f"));
+'@ }
+  @{ Old = @'
+"Everything is fine :)"
+'@; New = @'
+QStringLiteral("\u51fd\u6570\u5e93\u9a8c\u8bc1\u901a\u8fc7")
+'@ }
+)
+$toolSource = (Get-Content -Raw -Encoding UTF8 "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp").Replace("`r`n", "`n")
+$toolSource = $toolSource.Replace('"Error in Lua code"', 'QStringLiteral("Lua \u4ee3\u7801\u9519\u8bef")')
+$toolSource = $toolSource.Replace('QMessageBox::question(nullptr, this->name(), msg)', 'QMessageBox::question(nullptr, QStringLiteral("Lua \u811a\u672c\u7f16\u8f91\u5668"), msg)')
+Set-Content -Path "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" -Value $toolSource -Encoding UTF8BOM
+$toolSource = (Get-Content -Raw -Encoding UTF8 "plotjuggler_plugins/ToolboxCSV/toolbox_csv.cpp").Replace("`r`n", "`n")
+$toolSource = $toolSource.Replace('"Export"', 'QStringLiteral("\u5bfc\u51fa")')
+$toolSource = $toolSource.Replace('"Can''t load Arrow/Parquet"', 'QStringLiteral("\u65e0\u6cd5\u52a0\u8f7d Arrow/Parquet")')
+$toolSource = $toolSource.Replace('"No topics selected."', 'QStringLiteral("\u672a\u9009\u62e9\u5f85\u5bfc\u51fa\u7684\u66f2\u7ebf\u5206\u7ec4\u3002")')
+$toolSource = $toolSource.Replace('"No samples found in the selected time range."', 'QStringLiteral("\u6240\u9009\u65f6\u95f4\u8303\u56f4\u5185\u6ca1\u6709\u91c7\u6837\u70b9\u3002")')
+$toolSource = $toolSource.Replace('"Failed to write the output file."', 'QStringLiteral("\u65e0\u6cd5\u5199\u5165\u8f93\u51fa\u6587\u4ef6\u3002")')
+$toolSource = $toolSource.Replace('"Failed to write file: %1"', 'QStringLiteral("\u65e0\u6cd5\u5199\u5165\u6587\u4ef6\uff1a%1")')
+$toolSource = $toolSource.Replace('QString("<b>File saved in folder:</b><br>%1<br><br><b>File name:</b><br>%2")', 'QStringLiteral("<b>\u4fdd\u5b58\u76ee\u5f55</b><br>%1<br><br><b>\u6587\u4ef6\u540d</b><br>%2")')
+$toolSource = $toolSource.Replace('QString("<b>Files saved in folder:</b><br>%1<br><br><b>%2</b><br>%3")', 'QStringLiteral("<b>\u4fdd\u5b58\u76ee\u5f55</b><br>%1<br><br><b>%2</b><br>%3")')
+Set-Content -Path "plotjuggler_plugins/ToolboxCSV/toolbox_csv.cpp" -Value $toolSource -Encoding UTF8BOM
