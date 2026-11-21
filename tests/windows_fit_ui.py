@@ -65,8 +65,8 @@ def run(executable):
         wait_for(lambda: not dialog_open(title))
 
     try:
-        wait_for(lambda: find("曲线分析", "Button"), 80)
-        main_window = next(w for w in windows() if 'BladeScope' in w.window_text())
+        analysis_button = wait_for(lambda: find("曲线分析", "Button"), 80)
+        main_window = analysis_button.top_level_parent()
         ctypes.windll.user32.ShowWindow(main_window.handle, 3)
         click("曲线分析")
         wait_for(lambda: find("分箱统计", "Button"))
