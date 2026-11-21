@@ -1034,6 +1034,7 @@ $tabPaintBlock = @'
   tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);
   _buttonAddTab->move(QPoint(button_pos, 0));
 '@
+$tabPaintBlock = $tabPaintBlock.Replace("`r`n", "`n")
 if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; refusing partial toolbar merge" }
 $tabPaintReplacement = @'
   const int toolbar_width = _headerToolbar ? _headerToolbar->width() : 0;
@@ -1065,7 +1066,7 @@ $tabHeaderSrc = $tabHeaderSrc.Replace($tabHeaderAnchor, $tabHeaderReplacement.Tr
 Set-Content -Path $tabHeaderFile -Value $tabHeaderSrc -Encoding UTF8
 
 $tabCppFile = "plotjuggler_app/tabbedplotwidget.cpp"
-$tabCppSrc = Get-Content -Raw -Encoding UTF8 $tabCppFile
+$tabCppSrc = $tabSrc
 $tabCppMarker = "void TabbedPlotWidget::paintEvent(QPaintEvent* event)"
 if (!$tabCppSrc.Contains($tabCppMarker)) { throw "Tab header method anchor missing" }
 $tabCppMethod = @'
@@ -1149,7 +1150,7 @@ $toolbarHeaderSrc = $toolbarHeaderSrc.Replace("  bool _fullscreen_mode;", "  boo
 Set-Content -Path $toolbarHeaderFile -Value $toolbarHeaderSrc -Encoding UTF8
 
 $toolbarCppFile = "plotjuggler_app/plot_docker_toolbar.cpp"
-$toolbarCppSrc = Get-Content -Raw -Encoding UTF8 $toolbarCppFile
+$toolbarCppSrc = (Get-Content -Raw -Encoding UTF8 $toolbarCppFile).Replace("`r`n", "`n")
 $toolbarMethodAnchor = "void DockToolbar::toggleFullscreen()"
 if (!$toolbarCppSrc.Contains($toolbarMethodAnchor)) { throw "Compact toolbar method anchor missing" }
 $toolbarMethod = @'
@@ -1189,20 +1190,20 @@ $toolbarFullscreenReplacement = @'
     ui->buttonFullscreen->setVisible(true);
   }
 '@
+$toolbarFullscreenBlock = $toolbarFullscreenBlock.Replace("`r`n", "`n")
 if (!$toolbarCppSrc.Contains($toolbarFullscreenBlock)) { throw "Fullscreen compact toolbar anchor missing" }
 $toolbarCppSrc = $toolbarCppSrc.Replace($toolbarFullscreenBlock, $toolbarFullscreenReplacement.TrimEnd())
 $toolbarMouseAnchor = "  if (auto* area = _parent->dockAreaWidget())" + [Environment]::NewLine + "  {" + [Environment]::NewLine + "    QCoreApplication::sendEvent(area->titleBar(), ev);" + [Environment]::NewLine + "  }"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMouseAnchor, "  if (!_compact_header_mode) { if (auto* area = _parent->dockAreaWidget()) QCoreApplication::sendEvent(area->titleBar(), ev); }")
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMouseAnchor.Replace("`r`n", "`n"), "  if (!_compact_header_mode) { if (auto* area = _parent->dockAreaWidget()) QCoreApplication::sendEvent(area->titleBar(), ev); }")
 $toolbarVisibility = "  ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(!_fullscreen_mode);"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarVisibility, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  }")
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarVisibility.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  }")
 $toolbarLeave = "  ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarLeave, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  }")
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarLeave.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  }")
 $toolbarDragLeave = "  ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarDragLeave, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  }")
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarDragLeave.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  }")
 Set-Content -Path $toolbarCppFile -Value $toolbarCppSrc -Encoding UTF8
 Write-Host "BladeScope active DockToolbar merged into the tab header."
 
-Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
 # Keep plot legends synchronized with the left-side label mode and CSV aliases.
@@ -1371,7 +1372,7 @@ $trackerResume = @'
     replot();
   }
 '@
-foreach ($fragment in @(($trackerSuspend.TrimEnd() + "`n`n"), $trackerResume)) {
+foreach ($fragment in @(($trackerSuspend.Replace("`r`n", "`n").TrimEnd() + "`n`n"), $trackerResume.Replace("`r`n", "`n"))) {
   if ([regex]::Matches($themePlotSource, [regex]::Escape($fragment)).Count -ne 2) {
     throw "Expected both BladeScope image capture tracker anchors"
   }
