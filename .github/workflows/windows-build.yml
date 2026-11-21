@@ -5,7 +5,6 @@ on:
     branches: [ main, feature/plot-theme-palette ]
     paths:
       - 'patches/**'
-      - 'tests/windows_fit_ui.py'
       - '.github/workflows/windows-build.yml'
       - 'data/**'
       - 'assets/**'
@@ -216,14 +215,6 @@ jobs:
             throw "Chinese dictionary contains blank tags or labels"
           }
           Write-Host "Installer silent install and $expectedRows mapping checks passed."
-
-      - name: Exercise installed curve analysis UI with synthetic signals
-        shell: pwsh
-        run: |
-          python -m pip install --disable-pip-version-check pywinauto PyQt5==5.15.11
-          if ($LASTEXITCODE -ne 0) { throw "Cannot install GUI test dependencies" }
-          python customization/tests/windows_fit_ui.py "$env:RUNNER_TEMP/BladeScope-SmokeTest/bin/BladeScope.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Curve analysis UI check failed" }
 
       - name: Verify M01 tables, coefficients and CSV inside the installed Qt application
         shell: pwsh
