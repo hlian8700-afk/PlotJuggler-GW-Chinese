@@ -1342,13 +1342,15 @@ $drawItemsAnchor = @'
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
   @{ Old = $drawItemsAnchor; New = @'
     const int exportPass = property( "bladeScopeExportPass" ).toInt();
+    const int canvasPass = property( "bladeScopeCanvasPass" ).toInt();
     const QwtPlotItemList& itmList = itemList();
     for ( QwtPlotItemIterator it = itmList.begin();
         it != itmList.end(); ++it )
     {
         QwtPlotItem* item = *it;
         if ( item && item->isVisible() &&
-            ( exportPass == 0 || ( item->z() < 0.0 ) == ( exportPass == 1 ) ) )
+            ( exportPass == 0 || ( item->z() < 0.0 ) == ( exportPass == 1 ) ) &&
+            ( canvasPass == 0 || ( item->z() < 100.0 ) == ( canvasPass == 1 ) ) )
 '@ }
 )
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_renderer.cpp" @(
@@ -1531,7 +1533,8 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
              ( m_data->style == Lines || m_data->style == LinesAndDots ) &&
              !m_data->symbol && !testCurveAttribute( Fitted ) &&
              m_data->brush.style() == Qt::NoBrush &&
-             plot() && painter->device() == plot()->canvas() )
+             plot() && ( painter->device() == plot()->canvas() ||
+                         plot()->property( "bladeScopeCanvasPass" ).toInt() == 1 ) )
         {
             const double left = qMin( xMap.s1(), xMap.s2() );
             const double right = qMax( xMap.s1(), xMap.s2() );
@@ -1562,4 +1565,85 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '    if (do_replot)'; New = '    if (do_replot && plot->isVisible())' }
+)
+
+# Cache the gradient, grid and waveforms on the raster canvas. Cursor markers
+# and the legend are composited afterwards, in the existing Z order.
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
+  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qpixmap.h>`n#include <qvariant.h>" }
+  @{ Old = '    drawItems( painter, m_data->canvas->contentsRect(), maps );'; New = @'
+    auto* canvas = m_data->canvas.data();
+    const QRect rect = canvas->contentsRect();
+    if ( !property( "bladeScopePlotTheme" ).toBool() ||
+         painter->device() != canvas || rect.isEmpty() )
+    {
+        drawItems( painter, rect, maps );
+        return;
+    }
+
+    const qreal dpr = canvas->devicePixelRatioF();
+    const QSize size = canvas->size() * dpr;
+    QPixmap layer = qvariant_cast<QPixmap>( canvas->property( "bladeScopeWaveformLayer" ) );
+    if ( layer.isNull() || layer.size() != size || layer.devicePixelRatioF() != dpr )
+    {
+        layer = QPixmap( size );
+        if ( layer.isNull() )
+        {
+            drawItems( painter, rect, maps );
+            return;
+        }
+        layer.setDevicePixelRatio( dpr );
+        layer.fill( Qt::transparent );
+        QPainter raster( &layer );
+        raster.setClipRect( rect );
+        setProperty( "bladeScopeCanvasPass", 1 );
+        drawItems( &raster, rect, maps );
+        raster.end();
+        canvas->setProperty( "bladeScopeWaveformLayer", QVariant::fromValue( layer ) );
+    }
+
+    painter->drawPixmap( QPoint( 0, 0 ), layer );
+    setProperty( "bladeScopeCanvasPass", 2 );
+    drawItems( painter, rect, maps );
+    setProperty( "bladeScopeCanvasPass", QVariant() );
+'@ }
+)
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_canvas.cpp" @(
+  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qvariant.h>" }
+  @{ Old = 'void QwtPlotCanvas::invalidateBackingStore()' + "`n{"; New = @'
+void QwtPlotCanvas::invalidateBackingStore()
+{
+    if ( property( "bladeScopeWaveformLayer" ).isValid() )
+        setProperty( "bladeScopeWaveformLayer", QVariant() );
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_base/src/plotwidget_base.cpp" @(
+  @{ Old = '  marker->attach(qwtPlot());'; New = "  marker->setZ(101);`n  marker->attach(qwtPlot());" }
+)
+Update-BladeThemeSource "plotjuggler_app/plotwidget.h" @(
+  @{ Old = '  void setTrackerPosition(double abs_time);'; New = "  void setTrackerPosition(double abs_time);`n  void refreshTrackerOverlay();" }
+)
+Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
+  @{ Old = 'void PlotWidget::setTrackerPosition(double abs_time)'; New = @'
+void PlotWidget::refreshTrackerOverlay()
+{
+  qwtPlot()->canvas()->update();
+}
+
+void PlotWidget::setTrackerPosition(double abs_time)
+'@ }
+)
+$trackerVisibleReplot = @'
+    if (do_replot && plot->isVisible())
+    {
+      plot->replot();
+    }
+'@
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = $trackerVisibleReplot; New = @'
+    if (do_replot && plot->isVisible())
+    {
+      plot->refreshTrackerOverlay();
+    }
+'@ }
 )
