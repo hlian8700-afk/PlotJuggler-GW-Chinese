@@ -563,18 +563,18 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   ui->setupUi(this);
   // BladeScope compact viewer layout: preserve all upstream widgets and signals.
   // The left pane stays resizable; the chart gets the majority of the workspace.
-  ui->leftLayout->setContentsMargins(10, 8, 10, 8);
-  ui->leftLayout->setSpacing(5);
+  ui->leftLayout->setContentsMargins(6, 4, 6, 4);
+  ui->leftLayout->setSpacing(3);
   ui->verticalLayout_2->setContentsMargins(0, 0, 0, 0);
-  ui->plottingLayout->setSpacing(5);
+  ui->plottingLayout->setSpacing(2);
   auto* signalHeader = new QLabel(QString::fromUtf8("测点列表"), ui->leftMainWindowFrame);
   signalHeader->setObjectName("BladeScopeSignalHeader");
-  signalHeader->setStyleSheet("font-size:16px;font-weight:600;padding:9px 4px;");
+  signalHeader->setStyleSheet("font-size:12px;font-weight:600;padding:3px 2px;");
   ui->leftLayout->insertWidget(0, signalHeader);
   auto* chartHeader = new QLabel(QString::fromUtf8("风机运行数据  /  时序曲线"), ui->plotPage);
   chartHeader->setObjectName("BladeScopeChartHeader");
   chartHeader->setAlignment(Qt::AlignCenter);
-  chartHeader->setStyleSheet("font-size:14px;font-weight:600;padding:7px 0;");
+  chartHeader->setStyleSheet("font-size:11px;font-weight:600;padding:2px 0;");
   ui->plottingLayout->insertWidget(0, chartHeader);
   // Compact and label the native timeline controls without changing playback behavior.
   ui->buttonTimeTracker->setToolTip(QString::fromUtf8("时间跟踪"));
@@ -624,7 +624,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
     QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#edf2f6","#e3eaf1","#35485b","#c5d1dc"}};
   const QString styleTemplate = QString::fromUtf8(
-    "QMainWindow,QWidget{background:%1;color:%4;}"
+    "QMainWindow,QWidget{background:%1;color:%4;font-size:9pt;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
     "QWidget#widgetLabelLoad,QWidget#BladeScopeSignalActions{background:%3;color:%4;}"
     "QToolBar,QMenuBar{background:%3;color:%4;border:0px;spacing:7px;padding:4px;}"
@@ -632,14 +632,14 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QMenuBar::item:selected,QMenu::item:selected{background:%5;color:%4;}"
     "QMenu{background:%2;color:%4;border:1px solid %6;}"
     "QMenu::item{background:transparent;color:%4;padding:5px 22px;}"
-    "QToolButton,QPushButton{color:%4;background:%2;border:1px solid %6;border-radius:5px;padding:5px 9px;}"
+    "QToolButton,QPushButton{color:%4;background:%2;border:1px solid %6;border-radius:4px;padding:3px 6px;font-size:9pt;min-height:20px;}"
     "QToolButton:hover,QPushButton:hover{background:%5;border-color:%5;color:%4;}"
     "QToolButton:checked,QToolButton:pressed,QPushButton:checked,QPushButton:pressed{background:%5;color:%4;border:1px solid %5;}"
     "QGroupBox{color:%4;border:1px solid %6;border-radius:5px;margin-top:8px;padding-top:7px;}"
     "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%4;}"
     "QTabWidget::pane{background:%3;color:%4;border:0px;}"
-    "QTabBar{background:%3;color:%4;max-height:34px;}"
-    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:2px 9px;margin-right:2px;min-height:25px;max-height:29px;border-top-left-radius:4px;border-top-right-radius:4px;}"
+    "QTabBar{background:%3;color:%4;max-height:27px;}"
+    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:1px 7px;margin-right:2px;min-height:20px;max-height:23px;font-size:9pt;border-top-left-radius:3px;border-top-right-radius:3px;}"
     "QTabBar::tab:selected{background:%1;color:%4;border-bottom:2px solid %5;font-weight:600;}"
     "QTabBar::tab:hover:!selected{background:%5;color:%4;}"
     "QToolTip{background:%2;color:%4;border:1px solid %6;padding:4px;}"
@@ -649,9 +649,9 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QProgressBar::chunk{background:%5;border-radius:3px;}"
     "QToolButton:pressed,QPushButton:pressed,QToolButton:checked,QPushButton:checked{background:%5;border-color:%5;color:%4;}"
     "QToolButton:disabled,QPushButton:disabled{background:%3;color:%6;border-color:%6;}"
-    "QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:5px;selection-background-color:%5;selection-color:%4;}"
+    "QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:%2;color:%4;border:1px solid %6;border-radius:4px;padding:2px 4px;font-size:9pt;selection-background-color:%5;selection-color:%4;}"
     "QComboBox QAbstractItemView{background:%2;color:%4;selection-background-color:%5;selection-color:%4;border:1px solid %6;}"
-    "QTreeView,QTreeWidget,QListView,QListWidget,QTableView,QTableWidget{background:%2;alternate-background-color:%3;color:%4;gridline-color:%6;border:1px solid %6;}"
+    "QTreeView,QTreeWidget,QListView,QListWidget,QTableView,QTableWidget{background:%2;alternate-background-color:%3;color:%4;gridline-color:%6;border:1px solid %6;font-size:9pt;}"
     "QTreeView::item:selected,QListView::item:selected,QTableView::item:selected{background:%5;color:%4;}"
     "QHeaderView::section{background:%3;color:%4;border:0px;border-bottom:1px solid %6;padding:4px;}"
     "QCheckBox,QRadioButton,QLabel{color:%4;}"
@@ -662,9 +662,9 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QSlider::handle:horizontal{width:12px;margin:-5px 0;border-radius:6px;background:%5;}"
     "QWidget#plotPage,QWidget#plottingArea,QWidget#plottingAreaH,QFrame#tabsFrame{background:%3;color:%4;border:0px;}"
     "QLabel#BladeScopeChartHeader{background:%3;color:%4;border-bottom:1px solid %6;padding:8px 4px;font-weight:600;}"
-    "QWidget#widgetTimescale{background:%3;color:%4;border-top:1px solid %6;padding:3px 5px;}"
-    "QWidget#widgetTimescale QPushButton{min-height:25px;max-height:29px;padding:3px 8px;border-radius:5px;}"
-    "QWidget#widgetTimescale QDoubleSpinBox{min-height:25px;max-height:29px;padding:2px 5px;border:1px solid %6;border-radius:4px;background:%2;color:%4;}"
+    "QWidget#widgetTimescale{background:%3;color:%4;border-top:1px solid %6;padding:1px 3px;}"
+    "QWidget#widgetTimescale QPushButton{min-height:20px;max-height:23px;padding:1px 5px;border-radius:4px;font-size:9pt;}"
+    "QWidget#widgetTimescale QDoubleSpinBox{min-height:20px;max-height:23px;padding:1px 3px;border:1px solid %6;border-radius:4px;background:%2;color:%4;font-size:9pt;}"
     "QWidget#widgetTimescale QLineEdit{min-height:25px;max-height:29px;padding:2px 5px;}"
     "QWidget#BladeScopeSignalActions QPushButton{background:%2;color:%4;border:1px solid %6;border-radius:5px;padding:6px 2px;min-height:24px;}"
     "QWidget#BladeScopeSignalActions QPushButton:hover{background:%5;border-color:%5;}"
@@ -767,12 +767,12 @@ $curvePanelLayout = @'
   // Compact left signal pane and give the time-series canvas the remaining width.
   ui->mainSplitter->setStretchFactor(0, 0);
   ui->mainSplitter->setStretchFactor(1, 1);
-  ui->mainSplitter->setSizes(QList<int>{265, 1175});
+  ui->mainSplitter->setSizes(QList<int>{235, 1450});
   ui->mainSplitter->setHandleWidth(1);
   // Splitter colors inherit from the active global theme.
   ui->mainSplitter->setChildrenCollapsible(false);
-  ui->leftMainWindowFrame->setMinimumWidth(235);
-  ui->leftMainWindowFrame->setMaximumWidth(350);
+  ui->leftMainWindowFrame->setMinimumWidth(205);
+  ui->leftMainWindowFrame->setMaximumWidth(295);
   // Keep advanced panels available but collapsed for the normal viewer workflow.
   // Move file/layout and advanced functions to the main menu row.
   // Keep their widgets alive (menu actions forward to the original buttons).
@@ -1019,6 +1019,7 @@ if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
 $tabInsert = @'
   _tabWidget->setMovable(true);
   _tabWidget->setDocumentMode(true);
+  _tabWidget->tabBar()->setFixedHeight(26);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   // Tab colors inherit from the active global theme stylesheet.
