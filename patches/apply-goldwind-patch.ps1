@@ -1964,7 +1964,11 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   connect(bladeIndex, &QAction::triggered, this, [this] {
     BladeRecordingIndex::open(this, [this](QStringList files) {
       loadDataFromFiles(files, files.size() > 1);
-    });
+    }, [this](PlotDataMapRef& data) {
+      importPlotDataMap(data, false);
+      _curvelist_widget->updateFilter();
+      updateDataAndReplot(true);
+    }, [this] { return _mapped_plot_data.getAllNames(); });
   });
   auto* bladeReload = bladeFileMenu->addAction
 '@ }

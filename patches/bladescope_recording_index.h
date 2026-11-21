@@ -1,5 +1,6 @@
 #pragma once
 #include <QtWidgets>
+#include <PlotJuggler/plotdata.h>
 #include <QDirIterator>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,6 +15,8 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <vector>
+#include <utility>
 
 namespace BladeRecordingIndex
 {
@@ -64,16 +67,15 @@ inline double timestamp(const QString& value)
                         : std::numeric_limits<double>::quiet_NaN();
 }
 
-inline QJsonObject inspect(const QFileInfo& info, const std::atomic_bool& stop)
+struct CsvHeader
 {
-  QJsonObject record{{"path", info.absoluteFilePath()}, {"size", QString::number(info.size())},
-                     {"mtime", QString::number(info.lastModified().toMSecsSinceEpoch())}};
-  QFile file(info.absoluteFilePath());
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-  {
-    record.insert("unreadable", true);
-    return record;
-  }
+  QStringList fields;
+  QTextCodec* codec;
+  QChar delimiter;
+};
+
+inline CsvHeader readHeader(QFile& file, const std::atomic_bool& stop)
+{
   QByteArray bytes;
   while (!file.atEnd() && !stop && bytes.trimmed().isEmpty())
     bytes = file.readLine(1024 * 1024);
@@ -101,6 +103,23 @@ inline QJsonObject inspect(const QFileInfo& info, const std::atomic_bool& stop)
       fields = split;
     }
   }
+  return {fields, codec, delimiter};
+}
+
+inline QJsonObject inspect(const QFileInfo& info, const std::atomic_bool& stop)
+{
+  QJsonObject record{{"path", info.absoluteFilePath()}, {"size", QString::number(info.size())},
+                     {"mtime", QString::number(info.lastModified().toMSecsSinceEpoch())}};
+  QFile file(info.absoluteFilePath());
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+  {
+    record.insert("unreadable", true);
+    return record;
+  }
+  const auto header = readHeader(file, stop);
+  const auto& fields = header.fields;
+  auto* codec = header.codec;
+  const auto delimiter = header.delimiter;
   record.insert("columns", QJsonArray::fromStringList(fields));
   record.insert("encoding", QString::fromLatin1(codec->name()));
   const QStringList knownTimes = {"time", "timestamp", "datetime", "date_time", "time(s)",
@@ -159,7 +178,166 @@ inline QString cachePath()
   return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/csv-recording-index.json";
 }
 
-inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFiles)
+struct SelectedSeries
+{
+  QString name;
+  std::vector<std::pair<double, double>> points;
+};
+
+inline PJ::PlotDataMapRef readSelection(QWidget* parent, const QJsonObject& entry,
+                                        const QVariantMap& aliases, double from, double to,
+                                        std::unordered_set<std::string> names)
+{
+  const QString path = entry.value("path").toString();
+  const QFileInfo info(path);
+  QFile file(path);
+  if (!info.exists() || entry.value("size").toString() != QString::number(info.size()) ||
+      entry.value("mtime").toString() != QString::number(info.lastModified().toMSecsSinceEpoch()) ||
+      !file.open(QIODevice::ReadOnly | QIODevice::Text))
+  {
+    QMessageBox::warning(parent, parent->windowTitle(), QString::fromUtf8("文件已变更或无法读取，请更新索引。"));
+    return {};
+  }
+
+  std::atomic_bool canceled{false};
+  const auto header = readHeader(file, canceled);
+  const auto timeColumn = header.fields.indexOf(entry.value("timeColumn").toString());
+  if (!entry.contains("start") || timeColumn < 0)
+  {
+    QMessageBox::information(parent, parent->windowTitle(), QString::fromUtf8("此文件没有可识别的时间列。"));
+    return {};
+  }
+
+  QDialog picker(parent);
+  picker.setWindowTitle(QString::fromUtf8("选择要加载的测点"));
+  picker.resize(620, 520);
+  auto* layout = new QVBoxLayout(&picker);
+  auto* search = new QLineEdit;
+  search->setPlaceholderText(QString::fromUtf8("搜索中文标签或测点编码"));
+  layout->addWidget(search);
+  auto* list = new QListWidget;
+  layout->addWidget(list);
+  for (int i = 0; i < header.fields.size(); ++i)
+  {
+    const auto name = header.fields.at(i);
+    if (i == timeColumn || name.isEmpty())
+      continue;
+    const auto alias = aliases.value(name).toString();
+    auto* item = new QListWidgetItem(alias.isEmpty() ? name : QString("%1 (%2)").arg(alias, name), list);
+    item->setData(Qt::UserRole, i);
+    item->setCheckState(Qt::Unchecked);
+  }
+  auto* buttons = new QDialogButtonBox;
+  auto* accept = buttons->addButton(QString::fromUtf8("加载"), QDialogButtonBox::AcceptRole);
+  auto* cancel = buttons->addButton(QString::fromUtf8("取消"), QDialogButtonBox::RejectRole);
+  accept->setEnabled(false);
+  layout->addWidget(buttons);
+  QObject::connect(search, &QLineEdit::textChanged, &picker, [list](const QString& value) {
+    for (int i = 0; i < list->count(); ++i)
+      list->item(i)->setHidden(!list->item(i)->text().contains(value.trimmed(), Qt::CaseInsensitive));
+  });
+  QObject::connect(list, &QListWidget::itemChanged, &picker, [list, accept] {
+    for (int i = 0; i < list->count(); ++i)
+      if (list->item(i)->checkState() == Qt::Checked)
+      {
+        accept->setEnabled(true);
+        return;
+      }
+    accept->setEnabled(false);
+  });
+  QObject::connect(accept, &QPushButton::clicked, &picker, &QDialog::accept);
+  QObject::connect(cancel, &QPushButton::clicked, &picker, &QDialog::reject);
+  file.close();
+  if (picker.exec() != QDialog::Accepted)
+    return {};
+  std::vector<int> columns;
+  std::vector<SelectedSeries> result;
+  for (int i = 0; i < list->count(); ++i)
+    if (list->item(i)->checkState() == Qt::Checked)
+    {
+      const auto column = list->item(i)->data(Qt::UserRole).toInt();
+      columns.push_back(column);
+      result.push_back({header.fields.at(column), {}});
+    }
+
+  QProgressDialog progress(QString::fromUtf8("正在读取选中的测点…"), QString::fromUtf8("取消"), 0, 0, parent);
+  progress.setWindowTitle(parent->windowTitle());
+  progress.setWindowModality(Qt::WindowModal);
+  bool failed = false;
+  PJ::PlotDataMapRef data;
+  std::unique_ptr<QThread> worker(QThread::create([&] {
+    const QFileInfo current(path);
+    QFile input(path);
+    if (current.size() != info.size() || current.lastModified() != info.lastModified() ||
+        !input.open(QIODevice::ReadOnly | QIODevice::Text) ||
+        readHeader(input, canceled).fields != header.fields)
+    {
+      failed = true;
+      return;
+    }
+    while (!input.atEnd() && !canceled)
+    {
+      const auto row = cells(header.codec->toUnicode(input.readLine(1024 * 1024)), header.delimiter);
+      const auto t = timestamp(row.value(timeColumn));
+      if (!std::isfinite(t) || (std::isfinite(from) && t < from) || (std::isfinite(to) && t > to))
+        continue;
+      for (std::size_t i = 0; i < columns.size(); ++i)
+      {
+        bool ok = false;
+        const auto y = row.value(columns[i]).toDouble(&ok);
+        if (ok && std::isfinite(y))
+          result[i].points.emplace_back(t, y);
+      }
+    }
+    const auto byTime = [](const auto& a, const auto& b) { return a.first < b.first; };
+    failed = input.error() != QFileDevice::NoError;
+    if (failed)
+      return;
+    for (auto& series : result)
+    {
+      if (canceled)
+        return;
+      if (series.points.empty())
+        continue;
+      if (!std::is_sorted(series.points.begin(), series.points.end(), byTime))
+        std::stable_sort(series.points.begin(), series.points.end(), byTime);
+      const auto base = series.name.toStdString();
+      auto name = base;
+      for (int suffix = 2; !names.insert(name).second; ++suffix)
+        name = base + " [" + std::to_string(suffix) + "]";
+      auto& curve = data.addNumeric(name)->second;
+      for (const auto& point : series.points)
+      {
+        if (canceled)
+          return;
+        curve.pushBack({point.first, point.second});
+      }
+      series.points = {};
+    }
+  }));
+  QEventLoop loop;
+  QObject::connect(worker.get(), &QThread::finished, &loop, &QEventLoop::quit);
+  QObject::connect(&progress, &QProgressDialog::canceled, &loop, [&] { canceled = true; });
+  progress.show();
+  worker->start();
+  loop.exec();
+  worker->wait();
+  progress.hide();
+  if (canceled)
+    return {};
+  if (failed)
+  {
+    QMessageBox::warning(parent, parent->windowTitle(), QString::fromUtf8("读取失败，请更新索引后重试。"));
+    return {};
+  }
+  if (data.numeric.empty())
+    QMessageBox::information(parent, parent->windowTitle(), QString::fromUtf8("所选时间范围内没有可加载的数值样本。"));
+  return data;
+}
+
+inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFiles,
+                 const std::function<void(PJ::PlotDataMapRef&)>& loadSelection,
+                 const std::function<std::unordered_set<std::string>()>& existingNames)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("CSV 录波目录索引"));
@@ -198,6 +376,9 @@ inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFi
   auto* actions = new QHBoxLayout;
   actions->addStretch();
   auto* openButton = new QPushButton(QString::fromUtf8("打开选中文件"));
+  auto* partial = new QPushButton(QString::fromUtf8("按时段和测点加载…"));
+  partial->setEnabled(false);
+  actions->addWidget(partial);
   auto* close = new QPushButton(QString::fromUtf8("关闭"));
   actions->addWidget(openButton);
   actions->addWidget(close);
@@ -218,8 +399,17 @@ inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFi
   const auto n = [](QJsonValue v) {
     return v.isDouble() ? QString::number(v.toDouble(), 'g', 16) : QStringLiteral("—");
   };
+  const auto selectedEntry = [&] {
+    const auto rows = table->selectionModel()->selectedRows();
+    return rows.size() == 1 ? table->item(rows.front().row(), 0)->data(Qt::UserRole + 1).toJsonObject()
+                            : QJsonObject{};
+  };
+  QObject::connect(table->selectionModel(), &QItemSelectionModel::selectionChanged, &dialog, [&] {
+    partial->setEnabled(selectedEntry().contains("start"));
+  });
   const auto populate = [&] {
     table->setRowCount(0);
+    partial->setEnabled(false);
     const double from = timestamp(first->text()), to = timestamp(last->text());
     if ((!first->text().trimmed().isEmpty() && !std::isfinite(from)) ||
         (!last->text().trimmed().isEmpty() && !std::isfinite(to)) ||
@@ -253,6 +443,7 @@ inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFi
       table->insertRow(row);
       auto* name = new QTableWidgetItem(QDir(directory->text()).relativeFilePath(path));
       name->setData(Qt::UserRole, path);
+      name->setData(Qt::UserRole + 1, QVariant::fromValue(e));
       name->setToolTip(path);
       table->setItem(row, 0, name);
       const QString state = e.value("unreadable").toBool() ? QString::fromUtf8("无法读取")
@@ -346,8 +537,20 @@ inline void open(QWidget* parent, const std::function<void(QStringList)>& loadFi
     else
       dialog.accept();
   });
+  PJ::PlotDataMapRef selectedSeries;
+  QObject::connect(partial, &QPushButton::clicked, &dialog, [&] {
+    selectedSeries = readSelection(&dialog, selectedEntry(), aliases,
+                                   timestamp(first->text()), timestamp(last->text()), existingNames());
+    if (!selectedSeries.numeric.empty())
+      dialog.accept();
+  });
   populate();
   if (dialog.exec() == QDialog::Accepted)
-    loadFiles(selected);
+  {
+    if (selectedSeries.numeric.empty())
+      loadFiles(selected);
+    else
+      loadSelection(selectedSeries);
+  }
 }
 }
