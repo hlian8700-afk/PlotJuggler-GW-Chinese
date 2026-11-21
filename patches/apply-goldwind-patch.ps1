@@ -637,9 +637,9 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QToolButton:checked,QToolButton:pressed,QPushButton:checked,QPushButton:pressed{background:%5;color:%4;border:1px solid %5;}"
     "QGroupBox{color:%4;border:1px solid %6;border-radius:5px;margin-top:8px;padding-top:7px;}"
     "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%4;}"
-    "QTabWidget::pane{background:%3;color:%4;border:1px solid %6;}"
-    "QTabBar{background:%3;color:%4;}"
-    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:4px 10px;margin-right:2px;border-top-left-radius:4px;border-top-right-radius:4px;}"
+    "QTabWidget::pane{background:%3;color:%4;border:0px;}"
+    "QTabBar{background:%3;color:%4;max-height:34px;}"
+    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:2px 9px;margin-right:2px;min-height:25px;max-height:29px;border-top-left-radius:4px;border-top-right-radius:4px;}"
     "QTabBar::tab:selected{background:%1;color:%4;border-bottom:2px solid %5;font-weight:600;}"
     "QTabBar::tab:hover:!selected{background:%5;color:%4;}"
     "QToolTip{background:%2;color:%4;border:1px solid %6;padding:4px;}"
@@ -1066,14 +1066,17 @@ $plotSyncInsert = @'
         QPalette axisPalette = qwtPlot()->axisWidget(axis)->palette();
         axisPalette.setColor(QPalette::WindowText, axisText);
         axisPalette.setColor(QPalette::Text, axisText);
+        axisPalette.setColor(QPalette::ButtonText, axisText);
         qwtPlot()->axisWidget(axis)->setPalette(axisPalette);
+        qwtPlot()->axisWidget(axis)->setStyleSheet(QString("color:%1;").arg(axisText.name()));
       }
       _grid->setPen(QPen(plotGrid.isValid() ? plotGrid : gridColor, 0.0, Qt::DotLine));
       for (auto* item : qwtPlot()->itemList()) {
         if (auto* legend = dynamic_cast<QwtPlotLegendItem*>(item)) {
           legend->setTextPen(QPen(axisText));
-          legend->setBackgroundBrush(QBrush(panelColor));
-          legend->setBorderPen(QPen(gridColor));
+          // Transparent floating legend: keep labels readable without covering signal traces.
+          legend->setBackgroundBrush(QBrush(Qt::NoBrush));
+          legend->setBorderPen(QPen(Qt::NoPen));
         }
       }
     }
