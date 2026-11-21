@@ -1161,12 +1161,36 @@ void DockToolbar::setCompactHeaderMode(bool enabled)
   ui->buttonSplitHorizontal->setVisible(enabled && !_fullscreen_mode);
   ui->buttonSplitVertical->setVisible(enabled && !_fullscreen_mode);
   ui->buttonFullscreen->setVisible(enabled);
-  ui->buttonClose->setVisible(true);
+  ui->buttonClose->setVisible(!enabled || !_fullscreen_mode);
   updateGeometry();
 }
 
 '@
 $toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMethodAnchor, $toolbarMethod + $toolbarMethodAnchor)
+$toolbarFullscreenBlock = @'
+  if (_fullscreen_mode)
+  {
+    ui->buttonSplitHorizontal->setVisible(false);
+    ui->buttonSplitVertical->setVisible(false);
+  }
+'@
+$toolbarFullscreenReplacement = @'
+  if (_fullscreen_mode)
+  {
+    ui->buttonSplitHorizontal->setVisible(false);
+    ui->buttonSplitVertical->setVisible(false);
+  }
+  if (_compact_header_mode)
+  {
+    ui->buttonBackground->setVisible(true);
+    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);
+    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);
+    ui->buttonClose->setVisible(!_fullscreen_mode);
+    ui->buttonFullscreen->setVisible(true);
+  }
+'@
+if (!$toolbarCppSrc.Contains($toolbarFullscreenBlock)) { throw "Fullscreen compact toolbar anchor missing" }
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarFullscreenBlock, $toolbarFullscreenReplacement.TrimEnd())
 $toolbarMouseAnchor = "  if (auto* area = _parent->dockAreaWidget())" + [Environment]::NewLine + "  {" + [Environment]::NewLine + "    QCoreApplication::sendEvent(area->titleBar(), ev);" + [Environment]::NewLine + "  }"
 $toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMouseAnchor, "  if (!_compact_header_mode) { if (auto* area = _parent->dockAreaWidget()) QCoreApplication::sendEvent(area->titleBar(), ev); }")
 $toolbarVisibility = "  ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(!_fullscreen_mode);"
