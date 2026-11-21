@@ -1037,13 +1037,23 @@ $tabPaintBlock = @'
 $tabPaintBlock = $tabPaintBlock.Replace("`r`n", "`n")
 if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; cannot position add-tab button" }
 $tabPaintReplacement = @'
-  const int button_pos = std::max(0, width() - _buttonAddTab->width() - margin);
-  tabWidget()->tabBar()->setMaximumWidth(button_pos);
-  _buttonAddTab->move(QPoint(button_pos, 0));
+  Q_UNUSED(margin); // QTabWidget lays out the corner controls and reserves tab space.
 '@
 $tabSrc = $tabSrc.Replace($tabPaintBlock, $tabPaintReplacement.TrimEnd())
 $tabSrc = $tabSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));",
                           "  _buttonAddTab->setFixedSize(QSize(22, 22));")
+# Use a native corner widget so QTabWidget reserves space for the right-side controls.
+$tabButtonConnect = '  connect(_buttonAddTab, &QPushButton::pressed, this, &TabbedPlotWidget::on_addTabButton_pressed);'
+if (!$tabSrc.Contains($tabButtonConnect)) { throw "Add-tab button connection missing" }
+$tabCorner = @'
+  auto* corner = new QWidget(_tabWidget);
+  auto* cornerLayout = new QHBoxLayout(corner);
+  cornerLayout->setContentsMargins(0, 0, 2, 0);
+  cornerLayout->setSpacing(2);
+  cornerLayout->addWidget(_buttonAddTab);
+  _tabWidget->setCornerWidget(corner, Qt::TopRightCorner);
+'@
+$tabSrc = $tabSrc.Replace($tabButtonConnect, $tabCorner + "`n" + $tabButtonConnect)
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
@@ -1381,5 +1391,50 @@ Update-BladeThemeSource "plotjuggler_app/plot_docker_toolbar.cpp" @(
   }
 
   if (event->type() == QEvent::MouseButtonDblClick)
+'@ }
+)
+
+# Reuse the original buttons so shortcuts, checked states and slots stay wired.
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include <QTabWidget>" }
+  @{ Old = '  ui->tabsFrame->layout()->addWidget(_main_tabbed_widget);'; New = @'
+  ui->tabsFrame->layout()->addWidget(_main_tabbed_widget);
+  auto* tabCorner = _main_tabbed_widget->tabWidget()->cornerWidget(Qt::TopRightCorner);
+  auto* tabCornerLayout = static_cast<QHBoxLayout*>(tabCorner->layout());
+  int headerButtonIndex = 0;
+  for (auto* button : {ui->buttonLink, ui->buttonTimeTracker, ui->buttonShowpoint,
+                       ui->buttonReferencePoint, ui->buttonLegend, ui->buttonActivateGrid,
+                       ui->buttonRatio, ui->buttonRemoveTimeOffset, ui->buttonUseDateTime,
+                       ui->buttonZoomOut, ui->buttonDots})
+  {
+    ui->verticalLayoutButtons->removeWidget(button);
+    button->setFixedSize(22, 22);
+    button->setIconSize(QSize(16, 16));
+    tabCornerLayout->insertWidget(headerButtonIndex++, button);
+  }
+  delete ui->verticalLayoutButtons;
+  ui->verticalLayoutButtons = nullptr;
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_base/src/plotlegend.h" @(
+  @{ Old = '  QRectF hideButtonRect() const;'; New = @'
+  QRectF hideButtonRect() const;
+  QRect geometry(const QRectF& canvasRect) const override;
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_base/src/plotlegend.cpp" @(
+  @{ Old = 'QRectF PlotLegend::hideButtonRect() const'; New = @'
+QRect PlotLegend::geometry(const QRectF& canvasRect) const
+{
+  QRectF available = canvasRect;
+  if (alignmentInCanvas().testFlag(Qt::AlignTop) && alignmentInCanvas().testFlag(Qt::AlignRight))
+  {
+    // Leave room for the 28 px toolbar, its inset and the collapse handle.
+    available.adjust(0, 38, 0, 0);
+  }
+  return QwtPlotLegendItem::geometry(available);
+}
+
+QRectF PlotLegend::hideButtonRect() const
 '@ }
 )
