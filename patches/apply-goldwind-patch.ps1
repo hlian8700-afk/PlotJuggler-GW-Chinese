@@ -639,8 +639,8 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%4;}"
     "QTabWidget::pane{background:%3;color:%4;border:0px;}"
     "QTabBar{background:%3;color:%4;max-height:22px;}"
-    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:0px 6px;margin-right:2px;min-height:16px;max-height:18px;font-size:9pt;border-top-left-radius:3px;border-top-right-radius:3px;}"
-    "QTabBar::tab:selected{background:%1;color:%4;border-bottom:2px solid %5;font-weight:600;}"
+    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:0px 5px;margin-right:2px;min-height:18px;max-height:18px;font-size:8pt;border-radius:4px;}"
+    "QTabBar::tab:selected{background:%1;color:%4;border:1px solid %5;font-weight:600;}"
     "QTabBar::tab:hover:!selected{background:%5;color:%4;}"
     "QToolTip{background:%2;color:%4;border:1px solid %6;padding:4px;}"
     "QStatusBar{background:%3;color:%4;border-top:1px solid %6;}"
@@ -1018,7 +1018,7 @@ $tabAnchor = "  _tabWidget->setMovable(true);"
 if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
 $tabInsert = @'
   _tabWidget->setMovable(true);
-  _tabWidget->setDocumentMode(true);
+  _tabWidget->setDocumentMode(false);
   _tabWidget->tabBar()->setFixedHeight(22);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
@@ -1047,6 +1047,7 @@ $tabButtonConnect = '  connect(_buttonAddTab, &QPushButton::pressed, this, &Tabb
 if (!$tabSrc.Contains($tabButtonConnect)) { throw "Add-tab button connection missing" }
 $tabCorner = @'
   auto* corner = new QWidget(_tabWidget);
+  corner->setFixedHeight(22);
   auto* cornerLayout = new QHBoxLayout(corner);
   cornerLayout->setContentsMargins(0, 0, 2, 0);
   cornerLayout->setSpacing(2);
@@ -1365,7 +1366,7 @@ Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
         "{ background: transparent; }"
         "#bladeScopeCanvasToolbar QPushButton:hover "
         "{ background: rgba(128, 128, 128, 45); }");
-    _toolbar->setFixedHeight(28);
+    _toolbar->setFixedHeight(24);
     canvas->installEventFilter(_toolbar);
     _toolbar->show();
   }
@@ -1376,14 +1377,36 @@ Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
 '@ }
 )
 Update-BladeThemeSource "plotjuggler_app/plot_docker_toolbar.cpp" @(
+  @{ Old = '  ui->setupUi(this);'; New = @'
+  ui->setupUi(this);
+
+  // Give every control its own cell, including Close. Designer's nested
+  // button container otherwise caps the width of the four hover controls.
+  ui->label->hide();
+  ui->horizontalSpacer->changeSize(0, 0, QSizePolicy::Fixed, QSizePolicy::Fixed);
+  ui->mainHorizontalLayout->setContentsMargins(1, 1, 1, 1);
+  ui->mainHorizontalLayout->setSpacing(1);
+  ui->widgetButtons->hide();
+  int controlIndex = ui->mainHorizontalLayout->indexOf(ui->buttonClose);
+  for (auto* button : {ui->buttonBackground, ui->buttonSplitHorizontal,
+                       ui->buttonSplitVertical, ui->buttonFullscreen})
+  {
+    ui->mainHorizontalLayout->insertWidget(controlIndex++, button);
+    button->setFixedSize(22, 22);
+    button->setIconSize(QSize(16, 16));
+  }
+  ui->buttonClose->setFixedSize(22, 22);
+  ui->buttonClose->setIconSize(QSize(16, 16));
+'@ }
   @{ Old = '  if (event->type() == QEvent::MouseButtonDblClick)'; New = @'
   if (object == parentWidget() && object != _parent)
   {
     if (event->type() == QEvent::Resize || event->type() == QEvent::Show)
     {
-      const int inset = 3;
+      const int inset = 2;
       const int available = qMax(0, parentWidget()->width() - 2 * inset);
-      const int toolbarWidth = qMin(available, 190);
+      // Five 22 px controls, four 1 px gaps and two 1 px margins.
+      const int toolbarWidth = qMin(available, 116);
       setGeometry(parentWidget()->width() - toolbarWidth - inset, inset, toolbarWidth, height());
       raise();
     }
