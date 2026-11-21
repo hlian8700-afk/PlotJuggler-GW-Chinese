@@ -1018,7 +1018,16 @@ $tabAnchor = "  _tabWidget->setMovable(true);"
 if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
 $tabInsert = @'
   _tabWidget->setMovable(true);
-  _tabWidget->setDocumentMode(false);
+  _tabWidget->setDocumentMode(true);
+  _tabWidget->setStyleSheet(
+      "QTabWidget::pane { border: 0; }"
+      "QTabBar::tab { background: palette(base); color: palette(text); "
+      "border: 1px solid palette(midlight); border-radius: 4px; "
+      "padding: 0 5px; margin-right: 2px; height: 18px; "
+      "min-height: 18px; max-height: 18px; font-size: 8pt; }"
+      "QTabBar::tab:selected { border-color: palette(highlight); font-weight: 600; }"
+      "QTabBar::tab:hover:!selected { background: palette(alternate-base); }"
+      "QTabBar::scroller { width: 28px; }");
   _tabWidget->tabBar()->setFixedHeight(22);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
@@ -1038,7 +1047,14 @@ $tabPaintBlock = $tabPaintBlock.Replace("`r`n", "`n")
 if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; cannot position add-tab button" }
 $tabPaintReplacement = @'
   Q_UNUSED(margin);
-  auto* bar = tabWidget()->tabBar();
+  auto* tabs = tabWidget();
+  auto* bar = tabs->tabBar();
+  if (auto* corner = tabs->cornerWidget(Qt::TopRightCorner))
+  {
+    const int y = bar->y() + (bar->height() - corner->height()) / 2;
+    if (corner->y() != y)
+      corner->move(corner->x(), y);
+  }
   for (int i = 0; i < bar->count(); ++i)
   {
     if (auto* close = bar->tabButton(i, QTabBar::RightSide))
@@ -1481,8 +1497,8 @@ QRect PlotLegend::geometry(const QRectF& canvasRect) const
   QRectF available = canvasRect;
   if (alignmentInCanvas().testFlag(Qt::AlignTop) && alignmentInCanvas().testFlag(Qt::AlignRight))
   {
-    // Leave room for the 28 px toolbar, its inset and the collapse handle.
-    available.adjust(0, 38, 0, 0);
+    // The legend already has a canvas inset; add only the clearance needed.
+    available.adjust(0, qMax(0, 33 - offsetInCanvas(Qt::Vertical)), 0, 0);
   }
   return QwtPlotLegendItem::geometry(available);
 }
