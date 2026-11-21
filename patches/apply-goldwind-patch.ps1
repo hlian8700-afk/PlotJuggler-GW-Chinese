@@ -1078,8 +1078,10 @@ $plotSyncInsert = @'
       canvasGradient.setColorAt(0.0, canvasTop);
       canvasGradient.setColorAt(1.0, canvasBottom);
 
-      // A transparent child stylesheet can override Qwt's own canvas paint path
-      // and reveal the dark parent panel on Windows. Clear it and let Qwt paint.
+      // The application-wide QWidget rule otherwise paints the dark panel over
+      // the canvas palette. Give the real Qwt canvas the object name targeted by
+      // the theme's explicit light-canvas selector, then clear child overrides.
+      plotCanvas->setObjectName("qwtCanvas");
       plotCanvas->setStyleSheet(QString());
       plotCanvas->setAttribute(Qt::WA_StyledBackground, false);
       QPalette canvasPalette = plotCanvas->palette();
