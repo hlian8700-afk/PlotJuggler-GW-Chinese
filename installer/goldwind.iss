@@ -1,5 +1,5 @@
 #define AppName "BladeScope 风机录波数据分析工具"
-#define AppVersion "3.17.0"
+#define AppVersion "3.17.0.1"
 #ifndef StageDir
   #error StageDir must be supplied by the build workflow
 #endif
@@ -7,11 +7,12 @@
 AppId={{C716EDB0-6F30-46C7-86E4-2E2C1D4A3B60}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 AppPublisher=BladeScope
 DefaultDirName={autopf}\PlotJuggler-GW-Chinese
 DefaultGroupName={#AppName}
 OutputDir=.
-OutputBaseFilename=BladeScope-3.17.0-win64-Setup
+OutputBaseFilename=BladeScope-3.17.0.1-win64-Setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

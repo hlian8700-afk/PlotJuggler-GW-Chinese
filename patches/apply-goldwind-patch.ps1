@@ -1433,7 +1433,11 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
         QwtPlotItem* item = *it;
         if ( item && item->isVisible() &&
             ( exportPass == 0 || ( item->z() < 0.0 ) == ( exportPass == 1 ) ) &&
-            ( canvasPass == 0 || ( item->z() < 100.0 ) == ( canvasPass == 1 ) ) )
+            ( canvasPass == 0 ||
+              ( canvasPass == 1 && item->z() < 100.0 ) ||
+              ( canvasPass == 2 && item->z() >= 100.0 ) ||
+              ( canvasPass == 3 && item->z() == -100.0 ) ||
+              ( canvasPass == 4 && item->z() != -100.0 ) ) )
 '@ }
 )
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_renderer.cpp" @(
@@ -1618,6 +1622,7 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
              !m_data->symbol && !testCurveAttribute( Fitted ) &&
              m_data->brush.style() == Qt::NoBrush &&
              plot() && plot()->property( "bladeScopePlotTheme" ).toBool() &&
+             !plot()->canvas()->property( "bladeScopeOpenGLCanvas" ).toBool() &&
              ( painter->device() == plot()->canvas() ||
                          plot()->property( "bladeScopeCanvasPass" ).toInt() == 1 ) )
         {
@@ -1672,9 +1677,18 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
 
     auto* canvas = m_data->canvas.data();
     const QRect rect = canvas->contentsRect();
-    if ( !property( "bladeScopePlotTheme" ).toBool() ||
-         canvas->property( "bladeScopeOpenGLCanvas" ).toBool() ||
-         painter->device() != canvas || rect.isEmpty() )
+    const bool themed = property( "bladeScopePlotTheme" ).toBool();
+    if ( themed && canvas->property( "bladeScopeOpenGLCanvas" ).toBool() && !rect.isEmpty() )
+    {
+        // Composite the cached theme backdrop, then draw the original Qwt items.
+        setProperty( "bladeScopeCanvasPass", 3 );
+        drawItems( painter, rect, maps );
+        setProperty( "bladeScopeCanvasPass", 4 );
+        drawItems( painter, rect, maps );
+        setProperty( "bladeScopeCanvasPass", QVariant() );
+        return;
+    }
+    if ( !themed || painter->device() != canvas || rect.isEmpty() )
     {
         drawItems( painter, rect, maps );
         return;
@@ -1750,4 +1764,11 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       plot->refreshTrackerOverlay();
     }
 '@ }
+)
+
+Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.1"));' }
+)
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '  ui->setupUi(this);'; New = "  ui->setupUi(this);`n  setWindowTitle(QStringLiteral(`"BladeScope 3.17.0.1`"));" }
 )

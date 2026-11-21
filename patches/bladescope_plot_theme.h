@@ -283,8 +283,10 @@ public:
     const bool screen = painter->device()->devType() == QInternal::Widget ||
                         painter->device()->devType() == QInternal::Pixmap;
     // Keep one cache for interactive paints and one for different export resolutions.
-    auto& cache = screen && plot() && qAbs(rect.width() - plot()->canvas()->width()) < 3 &&
-                  qAbs(rect.height() - plot()->canvas()->height()) < 3 ? screenCache : exportCache;
+    const bool openGLBackdrop = plot() && plot()->property("bladeScopeCanvasPass").toInt() == 3;
+    const bool canvasPaint = screen && plot() && qAbs(rect.width() - plot()->canvas()->width()) < 3 &&
+                             qAbs(rect.height() - plot()->canvas()->height()) < 3;
+    auto& cache = openGLBackdrop || canvasPaint ? screenCache : exportCache;
     if (cache.pixmap.size() != pixels || cache.size != rect.size() || cache.revision != revision)
     {
       cache.pixmap = QPixmap(pixels);
