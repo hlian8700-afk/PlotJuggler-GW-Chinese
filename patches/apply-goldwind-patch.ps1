@@ -1103,11 +1103,15 @@ if (!$plotBaseSrc.Contains($openGlAnchor)) { throw "Qwt OpenGL canvas selection 
 $plotBaseSrc = $plotBaseSrc.Replace($openGlAnchor,
 @'
   static const bool nativeRendering = settings.value("BladeScope/nativeRendering", false).toBool();
-  const bool use_opengl = nativeRendering && settings.value("Preferences::use_opengl", true).toBool();
+  static const bool softwareTheme = settings.value("BladeScope/softwareTheme", false).toBool();
+  const bool use_opengl = nativeRendering
+      ? settings.value("Preferences::use_opengl", true).toBool()
+      : !softwareTheme;
 '@)
 $plotBaseSrc = $plotBaseSrc.Replace('  abs_canvas->setObjectName("qwtCanvas");', @'
   abs_canvas->setObjectName("qwtCanvas");
   abs_canvas->setProperty("bladeScopeNativeRendering", nativeRendering);
+  abs_canvas->setProperty("bladeScopeOpenGLCanvas", use_opengl);
 '@)
 Set-Content -Path $plotBaseFile -Value $plotBaseSrc -Encoding UTF8
 Write-Host "BladeScope rendering mode selected at startup."
@@ -1315,6 +1319,16 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     if (enabled != nativeRendering)
       QMessageBox::information(this, QString::fromUtf8("绘图渲染"),
                                QString::fromUtf8("请重启 BladeScope 以切换渲染模式。"));
+  });
+  auto* software = bladeSettingsMenu->addAction(
+      QString::fromUtf8("主题使用软件渲染（重启生效）"));
+  software->setCheckable(true);
+  software->setChecked(QSettings().value("BladeScope/softwareTheme", false).toBool());
+  software->setEnabled(!nativeRendering);
+  connect(software, &QAction::toggled, this, [this](bool enabled) {
+    QSettings().setValue("BladeScope/softwareTheme", enabled);
+    QMessageBox::information(this, QString::fromUtf8("绘图渲染"),
+                             QString::fromUtf8("重启 BladeScope 后，主题将使用所选渲染方式。"));
   });
   auto* measure = bladeSettingsMenu->addAction(QString::fromUtf8("记录绘图耗时"));
   measure->setCheckable(true);
@@ -1659,6 +1673,7 @@ Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
     auto* canvas = m_data->canvas.data();
     const QRect rect = canvas->contentsRect();
     if ( !property( "bladeScopePlotTheme" ).toBool() ||
+         canvas->property( "bladeScopeOpenGLCanvas" ).toBool() ||
          painter->device() != canvas || rect.isEmpty() )
     {
         drawItems( painter, rect, maps );
@@ -1711,10 +1726,12 @@ Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = 'void PlotWidget::setTrackerPosition(double abs_time)'; New = @'
 void PlotWidget::refreshTrackerOverlay()
 {
-  if (qwtPlot()->property("bladeScopePlotTheme").toBool())
-    qwtPlot()->canvas()->update();
+  auto* canvas = qwtPlot()->canvas();
+  if (qwtPlot()->property("bladeScopePlotTheme").toBool() &&
+      !canvas->property("bladeScopeOpenGLCanvas").toBool())
+    canvas->update();
   else
-    replot();
+    qwtPlot()->replot();
 }
 
 void PlotWidget::setTrackerPosition(double abs_time)

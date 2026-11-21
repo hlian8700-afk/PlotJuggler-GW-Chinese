@@ -424,13 +424,16 @@ inline void refreshAll()
 
 inline void install(QwtPlot* plot, Grid* grid)
 {
-  auto* canvas = static_cast<QwtPlotCanvas*>(plot->canvas());
+  auto* canvas = plot->canvas();
   canvas->setStyleSheet("#qwtCanvas { background: transparent; border: none; }");
-  canvas->setPaintAttribute(QwtPlotCanvas::Opaque, false);
-  canvas->setPaintAttribute(QwtPlotCanvas::BackingStore, false);
   canvas->setAutoFillBackground(false);
-  canvas->setAttribute(Qt::WA_OpaquePaintEvent, false);
-  canvas->setFrameStyle(QFrame::NoFrame);
+  if (auto* raster = qobject_cast<QwtPlotCanvas*>(canvas))
+  {
+    raster->setPaintAttribute(QwtPlotCanvas::Opaque, false);
+    raster->setPaintAttribute(QwtPlotCanvas::BackingStore, false);
+    raster->setAttribute(Qt::WA_OpaquePaintEvent, false);
+    raster->setFrameStyle(QFrame::NoFrame);
+  }
   plot->setCanvasBackground(QBrush(Qt::transparent));
   auto* background = new Background;
   background->attach(plot);
