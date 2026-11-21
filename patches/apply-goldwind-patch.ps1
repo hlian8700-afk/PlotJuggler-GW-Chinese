@@ -1037,6 +1037,18 @@ Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
 # Keep plot legends synchronized with the left-side label mode and CSV aliases.
+# Use the raster Qwt canvas so the theme brush is painted by Qwt itself.
+# The upstream OpenGL canvas ignores the normal QWidget/Qwt background styling
+# on some Windows drivers, leaving the plot surface in the dark panel color.
+$plotBaseFile = "plotjuggler_base/src/plotwidget_base.cpp"
+$plotBaseSrc = (Get-Content -Raw -Encoding UTF8 $plotBaseFile).Replace("`r`n", "`n")
+$openGlAnchor = '  bool use_opengl = settings.value("Preferences::use_opengl", true).toBool();'
+if (!$plotBaseSrc.Contains($openGlAnchor)) { throw "Qwt OpenGL canvas selection anchor missing" }
+$plotBaseSrc = $plotBaseSrc.Replace($openGlAnchor,
+    '  bool use_opengl = false; // BladeScope: reliable theme-aware raster canvas on Windows.')
+Set-Content -Path $plotBaseFile -Value $plotBaseSrc -Encoding UTF8
+Write-Host "BladeScope uses theme-aware raster Qwt canvas."
+
 $plotSyncFile = "plotjuggler_app/plotwidget.cpp"
 $plotSyncSrc = (Get-Content -Raw -Encoding UTF8 $plotSyncFile).Replace("`r`n", "`n")
 $plotSyncAnchor = '  _grid = new QwtPlotGrid();'
@@ -1068,10 +1080,9 @@ $plotSyncInsert = @'
       canvasPalette.setColor(QPalette::Text, axisText);
       plotCanvas->setPalette(canvasPalette);
       plotCanvas->setAutoFillBackground(true);
-      // QwtPlotOpenGLCanvas does not reliably honor stylesheet gradients.
-      // Use an opaque solid palette/brush for both OpenGL and raster canvases.
-      plotCanvas->setStyleSheet(QString("background-color:%1;border:0px;").arg(canvasTop.name()));
-      qwtPlot()->setCanvasBackground(QBrush(canvasTop));
+      // Raster Qwt canvas paints the Qwt canvas brush, including gradients.
+      plotCanvas->setStyleSheet("background:transparent;border:0px;");
+      qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
       plotCanvas->update();
       qwtPlot()->replot();
       for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
