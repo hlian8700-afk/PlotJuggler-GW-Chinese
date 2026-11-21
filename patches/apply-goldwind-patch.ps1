@@ -1857,6 +1857,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
   ui->menuBar->removeAction(ui->menuCloudData->menuAction());
+  auto* bladeGroupManager = bladePlotMenu->addAction(QString::fromUtf8("测点组管理..."));
+  connect(bladeGroupManager, &QAction::triggered, this, [this] {
+    BladeAnalysis::openGroupManager(this, _mapped_plot_data);
+  });
   auto* bladeAnalysis = bladePlotMenu->addAction(QString::fromUtf8("测点组与录波分析..."));
   connect(bladeAnalysis, &QAction::triggered, this, [this] {
     if (_mapped_plot_data.numeric.empty())
@@ -1887,7 +1891,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab) {
+        [this, plot](const QStringList& names, bool newTab, double first, double last) {
           auto* target = plot;
           if (newTab || !target || target->isXYPlot())
             target = _main_tabbed_widget->addTab({})->plotAt(0);
@@ -1901,6 +1905,14 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
               target->addCurve(raw);
           }
           target->zoomOut(false);
+          if (first < last)
+          {
+            auto rect = target->currentBoundingRect();
+            rect.setLeft(first - target->timeOffset());
+            rect.setRight(last - target->timeOffset());
+            target->setZoomRectangle(rect, false);
+            target->on_zoomOutVertical_triggered(false);
+          }
           target->replot();
           onUndoableChange();
         });
