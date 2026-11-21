@@ -1738,10 +1738,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.1"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.2"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '  ui->setupUi(this);'; New = "  ui->setupUi(this);`n  setWindowTitle(QStringLiteral(`"BladeScope 3.17.0.1`"));" }
+  @{ Old = '  ui->setupUi(this);'; New = "  ui->setupUi(this);`n  setWindowTitle(QStringLiteral(`"BladeScope 3.17.0.2`"));" }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2022,8 +2022,22 @@ Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
       const auto raw = entry.src_name;
       if (!_mapped_data.numeric.count(raw)) continue;
       connect(trends->addAction(entry.curve->title().text()), &QAction::triggered, this,
-              [this, raw] { BladeTrend::open(this, raw); });
+              [this, raw] { BladeTrend::open(this, qwtPlot(), raw); });
     }
   }
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '  if (curve_updated)'; New = @'
+  if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
+    static_cast<BladeFitUI::Panel*>(fit)->invalidate();
+  if (curve_updated)
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '  _mapped_plot_data.clear();'; New = @'
+  _mapped_plot_data.clear();
+  if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
+    static_cast<BladeFitUI::Panel*>(fit)->invalidate();
 '@ }
 )

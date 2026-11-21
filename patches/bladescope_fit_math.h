@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -102,7 +103,7 @@ inline Points average(const Points& p, size_t width)
 }
 
 enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
-            Status, Temp, NRoles };
+            Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, NRoles };
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,
             M51,M52,M53,M55, NKind };
 struct Params
@@ -110,8 +111,8 @@ struct Params
   double rated=0, diameter=0, rho=1.225, ratio=1, rpm=0, cutIn=3, cutOut=25,
          ratedWind=0, width=.5, tolerance=1, efficiency=1, yawLimit=180;
   double start=-std::numeric_limits<double>::infinity(), end=-start;
-  int degree=4, sectors=16, normal=0;
-  bool filterState=false, generator=false, absoluteYaw=true, excludeNegative=true;
+  int degree=4, torqueDegree=2, sectors=16, normal=0;
+  bool filterState=false, generator=false, absoluteYaw=true, excludeNegative=true, rejectFlags=true;
   std::map<int,std::pair<double,double>> limits;
   Points reference;
 };
@@ -166,14 +167,23 @@ struct Bin
   }
   double sd() const { return n>1 ? std::sqrt(std::max(0.,m2/(n-1))) : 0; }
 };
+struct ModelPart
+{
+  double low,high,origin,scale;
+  std::string formula;
+  std::vector<double> coefficients;
+};
 struct Result
 {
   std::vector<Record> raw;
+  std::vector<size_t> display;
+  std::map<std::pair<long long,long long>,size_t> density;
   std::map<long long,Bin> bins;
   Points fit, reference;
   std::vector<Points> sectors;
+  std::vector<ModelPart> models;
   std::vector<double> sectorPower;
-  std::map<long long,size_t> resource;
+  std::map<long long,double> resource;
   double shape=missing(), scale=missing(), peakX=missing(),peakY=missing(),slope=missing();
   size_t rejected=0;
 };
@@ -214,11 +224,13 @@ inline void curves(int kind,const Params& p,Result& r)
   if(kind==M02)
   {
     const auto w=weibull(r.raw); r.shape=w.first;r.scale=w.second;
-    if(std::isfinite(w.first))
+    if(std::isfinite(w.first)){
+      r.models.push_back({lo,hi,0,1,"F(v)=1-exp(-(v/A)^k); [k,A]",{w.first,w.second}});
       r.fit=sample(0,(r.bins.rbegin()->first+1)*p.width,[&](double v){
         const double a=std::max(0.,v-p.width/2), b=v+p.width/2;
         return 100*(std::exp(-std::pow(a/r.scale,r.shape))-std::exp(-std::pow(b/r.scale,r.shape)));
       });
+    }
     return;
   }
   if(kind==M55) {r.fit=bins;return;}
@@ -226,7 +238,7 @@ inline void curves(int kind,const Params& p,Result& r)
   {
     long double xx=0,xy=0;
     for(const auto a:r.raw){xx+=a.x*a.x;xy+=a.x*a.y;}
-    if(xx>0){r.slope=double(xy/xx);r.fit=sample(lo,hi,[&](double x){return x*r.slope;});}
+    if(xx>0){r.slope=double(xy/xx);r.models.push_back({lo,hi,0,1,"y=k*x",{r.slope}});r.fit=sample(lo,hi,[&](double x){return x*r.slope;});}
     if(p.ratio>0) r.reference=sample(lo,hi,[&](double x){return x*p.ratio;});
     return;
   }
@@ -248,9 +260,17 @@ inline void curves(int kind,const Params& p,Result& r)
   for(auto b:bins)
     if(kind==M01 && b.x<knee) startup.push_back(b);
     else (b.x<split?lower:upper).push_back(b);
-  auto segment=[&](const Points& points,int degree,auto evaluate){
+  auto segment=[&](const Points& points,int degree,auto evaluate,bool upperRegion=false){
     if(points.empty()) return;
     const auto poly=regress(points,std::min(degree,int(points.size()-1)));
+    ModelPart part{points.front().x,points.back().x,poly.origin,poly.scale,"y=sum(p_i*z^i)",poly.coefficients};
+    if(kind==M01&&!upperRegion)part.formula="y=clamp(sum(p_i*z^i),0,P_rated)";
+    if(kind==M34&&!upperRegion)part.formula="y=min(100,sum(p_i*z^i))";
+    if(upperRegion&&(kind==M01||kind==M32||kind==M21||kind==M34)){
+      part.formula="y=c";part.coefficients={kind==M21?p.rpm:kind==M34?100.:p.rated};
+    }
+    if(upperRegion&&kind==M33){part.formula="y=c/x";part.coefficients={9550*p.rated/p.efficiency};}
+    r.models.push_back(std::move(part));
     auto pts=sample(points.front().x,points.back().x,[&](double x){return evaluate(x,poly);});
     r.fit.insert(r.fit.end(),pts.begin(),pts.end());
   };
@@ -259,11 +279,14 @@ inline void curves(int kind,const Params& p,Result& r)
   if(kind==M32 && !lower.empty()){
     long double a=0,b=0;
     for(auto v:lower){double q=v.x*v.x*v.x;a+=q*v.y;b+=q*q;}
-    if(b>0) r.fit=sample(lower.front().x,lower.back().x,[&](double x){return std::clamp(double(a/b)*x*x*x,0.,p.rated);});
+    if(b>0){
+      r.models.push_back({lower.front().x,lower.back().x,0,1,"y=clamp(k*x^3,0,P_rated)",{double(a/b)}});
+      r.fit=sample(lower.front().x,lower.back().x,[&](double x){return std::clamp(double(a/b)*x*x*x,0.,p.rated);});
+    }
   }
   else {
     int degree=kind==M01?5:kind==M22||kind==M33?0:kind==M21||kind==M06?1:
-               kind==M03?p.degree:kind==M23?2:3;
+               kind==M03?p.degree:kind==M34?p.torqueDegree:kind==M23?2:3;
     segment(lower,degree,[&](double x,const Polynomial& pol){
       const double y=pol(x);
       return kind==M01?std::clamp(y,0.,p.rated):(kind==M34?std::min(100.,y):y);
@@ -277,7 +300,7 @@ inline void curves(int kind,const Params& p,Result& r)
       case M33:return x>0?9550.*p.rated/(p.efficiency*x):missing();
       default:return pol(x);
     }
-  });
+  },true);
   if(r.fit.size()>200) {const auto dense=r.fit;r.fit=sample(lo,hi,[&](double x){return interpolate(dense,x);});}
   if(kind==M03 && !r.fit.empty()){
     const auto best=std::max_element(r.fit.begin(),r.fit.end(),[](Point a,Point b){return a.y<b.y;});
@@ -285,14 +308,14 @@ inline void curves(int kind,const Params& p,Result& r)
   }
 }
 
-using Masks=std::set<double>;
-template<class Month> Result analyze(int kind,const Channels& channels,const Params& p,const Masks& exclude,Month month)
+using Masks=std::set<size_t>;
+template<class Month> Result analyze(int kind,const Channels& channels,const Params& p,const Masks& exclude,Month month,const std::atomic_bool* stop=nullptr)
 {
   const auto requiredRoles=required(kind,p);
   for(auto role:requiredRoles) if(channels[role].empty()) throw std::runtime_error("缺少所需测点");
   if(!(p.width>0) || p.end<p.start || p.tolerance<0 || p.sectors<1)
     throw std::runtime_error("请检查分箱宽度、时间范围和匹配容差");
-  if((needsCp(kind)||kind==M06) && !(p.diameter>0 && p.rho>0))
+  if(((needsCp(kind)||kind==M06) && !(p.diameter>0)) || (needsCp(kind) && !(p.rho>0)))
     throw std::runtime_error("请填写叶轮直径和空气密度");
   if((kind==M01||kind==M32||kind==M33) && !(p.rated>0))
     throw std::runtime_error("请填写额定功率（kW）");
@@ -307,27 +330,46 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
   int anchorRole=Wind;
   while(anchorRole<NRoles && channels[anchorRole].empty()) ++anchorRole;
   const auto& anchor=channels[anchorRole];
+  double typical=0;
+  if(kind==M01){
+    std::vector<double> steps;
+    for(size_t i=1;i<anchor.size();++i){
+      const double dt=anchor[i].x-anchor[i-1].x;
+      if(dt>0 && anchor[i].x>=p.start && anchor[i-1].x<=p.end)steps.push_back(dt);
+    }
+    if(!steps.empty()){auto mid=steps.begin()+steps.size()/2;std::nth_element(steps.begin(),mid,steps.end());typical=*mid;}
+  }
   const double R=p.diameter/2;
   std::vector<Bin> sectorP(p.sectors);
   out.sectors.resize(p.sectors);
   std::vector<std::array<size_t,4>> bands(p.sectors);
   for(size_t i=0;i<anchor.size();++i){
+    if((i%8192)==0 && stop && stop->load()) throw std::runtime_error("计算已取消");
     const double t=anchor[i].x;
     if(t<p.start||t>p.end) continue;
     SeriesRow row;
     row.fill(missing());
-    auto read=[&](int role){return role==anchorRole?anchor[i].y:match(channels[role],cursors[role],t,p.tolerance,role==Status);};
-    bool valid=!exclude.count(t);
+    auto read=[&](int role){return role==anchorRole?anchor[i].y:match(channels[role],cursors[role],t,p.tolerance,role==Status || role>=FaultFlag);};
+    bool valid=!exclude.count(i);
     for(int role:requiredRoles){row[role]=read(role);valid &= std::isfinite(row[role]);}
     for(const auto& limit:p.limits){
       double value=read(limit.first);
       valid &= std::isfinite(value) && value>=limit.second.first && value<=limit.second.second;
     }
     if(p.filterState) valid &= read(Status)==p.normal;
+    if(p.rejectFlags && kind!=M02 && kind!=M11 && kind!=M12)
+      for(int role:{int(FaultFlag),int(CurtailFlag),int(TransitionFlag)})
+        if(!channels[role].empty()) valid &= read(role)==0;
     const double v=row[Wind],kw=row[Power],rot=row[Rotor],gen=row[Generator],yaw=wrap(row[Yaw]+180,360)-180;
     if(std::isfinite(v)&&v<0) valid=false;
     if(p.excludeNegative && kw<0) valid=false;
-    if(kind==M01 && valid && v>=0) ++out.resource[static_cast<long long>(std::floor(v/p.width))];
+    if(kind==M01 && std::isfinite(v) && v>=0 && v/p.width<double(std::numeric_limits<long long>::max()))
+    {
+      double dt=i+1<anchor.size()?anchor[i+1].x-t:typical;
+      if(dt>5*typical)dt=typical;
+      dt=std::max(0.,std::min(dt,p.end-t));
+      out.resource[static_cast<long long>(std::floor(v/p.width))]+=dt;
+    }
     if(kind==M01 && (v<p.cutIn||v>p.cutOut||kw<=0)) valid=false;
     if(kind==M03 && (v<=0||kw<=0||(p.rated>0&&kw>=p.rated)||(p.ratedWind>0&&v>=p.ratedWind))) valid=false;
     const double cp=v>0?kw*1000/(.5*p.rho*pi*R*R*v*v*v):missing();
@@ -354,7 +396,10 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     }
     if(!valid||!std::isfinite(x)||!std::isfinite(y)){++out.rejected;continue;}
     out.raw.push_back({x,y,t,i});
-    long long bin=static_cast<long long>(std::floor(x/(kind==M55?1:p.width)));
+    double index=std::floor(x/(kind==M55?1:p.width));
+    if(!std::isfinite(index)||std::abs(index)>=double(std::numeric_limits<long long>::max()))
+      throw std::runtime_error("测量值超出分箱范围，请检查单位或设置有效上下限");
+    long long bin=static_cast<long long>(index);
     if(kind==M11){
       bin=int(std::floor(wrap(x+180./p.sectors,360)*p.sectors/360));
       ++bands[bin][v<4?0:v<8?1:v<12?2:3];
@@ -374,6 +419,25 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
       }
     }
   }
+  if(stop && stop->load()) throw std::runtime_error("计算已取消");
+  // Retain time-bucket boundaries and extremes on both axes in the display copy.
+  const size_t count=out.raw.size(),buckets=50000/6;
+  if(count<=50000){out.display.resize(count);std::iota(out.display.begin(),out.display.end(),size_t(0));}
+  else for(size_t i=0;i<buckets;++i){
+    size_t first=i*count/buckets,end=(i+1)*count/buckets;
+    std::array<size_t,6> indices{first,end-1,first,first,first,first};
+    for(size_t j=first+1;j<end;++j){
+      const auto& pt=out.raw[j];
+      if(pt.x<out.raw[indices[2]].x)indices[2]=j;
+      if(pt.x>out.raw[indices[3]].x)indices[3]=j;
+      if(pt.y<out.raw[indices[4]].y)indices[4]=j;
+      if(pt.y>out.raw[indices[5]].y)indices[5]=j;
+    }
+    std::sort(indices.begin(),indices.end());
+    out.display.insert(out.display.end(),indices.begin(),std::unique(indices.begin(),indices.end()));
+  }
+  if(kind==M12)for(const auto& pt:out.raw)
+    ++out.density[{static_cast<long long>(pt.x/5),static_cast<long long>(std::clamp(pt.y,-1e12,1e12))}];
   curves(kind,p,out);
   return out;
 }

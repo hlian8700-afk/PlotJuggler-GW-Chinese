@@ -169,7 +169,7 @@ jobs:
       - name: Package portable x64 build
         shell: pwsh
         run: |
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.1-win64-portable.zip" -Force
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.2-win64-portable.zip" -Force
 
       - name: Build Windows EXE installer
         shell: pwsh
@@ -180,14 +180,14 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
-          $setup = "customization/installer/BladeScope-3.17.0.1-win64-Setup.exe"
+          $setup = "customization/installer/BladeScope-3.17.0.2-win64-Setup.exe"
           if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
           Write-Host "Installer created: $setup"
 
       - name: Smoke test EXE installer and Chinese mapping
         shell: pwsh
         run: |
-          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.1-win64-Setup.exe"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.2-win64-Setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
@@ -216,12 +216,20 @@ jobs:
           }
           Write-Host "Installer silent install and $expectedRows mapping checks passed."
 
+      - name: Exercise installed curve analysis UI with synthetic signals
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pywinauto PyQt5==5.15.11
+          if ($LASTEXITCODE -ne 0) { throw "Cannot install GUI test dependencies" }
+          python customization/tests/windows_fit_ui.py "$env:RUNNER_TEMP/BladeScope-SmokeTest/bin/BladeScope.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Curve analysis UI check failed" }
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.1-win64' || 'BladeScope-3.17.0.1-win64-demo' }}
+          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.2-win64' || 'BladeScope-3.17.0.2-win64-demo' }}
           path: |
-            BladeScope-3.17.0.1-win64-portable.zip
-            customization/installer/BladeScope-3.17.0.1-win64-Setup.exe
+            BladeScope-3.17.0.2-win64-portable.zip
+            customization/installer/BladeScope-3.17.0.2-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30

@@ -28,7 +28,16 @@ inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int wid
   Points rows;
   for(auto p:input) if(p.x>=lo && p.x<=hi && std::isfinite(p.y)) rows.push_back(p);
   if(rows.empty()) throw std::runtime_error("当前时段没有有效样本");
-  if(mode) return {average(rows,width),QString::fromUtf8("滑动平均 · %1 点窗口 · %2 个样本").arg(width).arg(qulonglong(rows.size()))};
+  if(mode)
+  {
+    auto smooth=average(rows,width);
+    if(smooth.size()>200){
+      Points display;display.reserve(200);
+      for(size_t i=0;i<200;++i)display.push_back(smooth[i*(smooth.size()-1)/199]);
+      smooth=std::move(display);
+    }
+    return {std::move(smooth),QString::fromUtf8("滑动平均 · %1 点窗口 · %2 个样本").arg(width).arg(qulonglong(rows.size()))};
+  }
   const auto poly=regress(rows,degree);
   QStringList coeff;
   long double error=0;
@@ -40,7 +49,7 @@ inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int wid
     .arg(std::sqrt(double(error/rows.size())),0,'g',8).arg(qulonglong(rows.size()))};
 }
 
-inline void open(PlotWidget* plot,const std::string& source)
+inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
 {
   auto& map=plot->datamap();
   const auto it=map.numeric.find(source);
@@ -68,7 +77,7 @@ inline void open(PlotWidget* plot,const std::string& source)
   ok->setText(QStringLiteral("添加到当前图"));buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
   QwtPlotCurve preview(QStringLiteral("趋势预览"));
   preview.setItemAttribute(QwtPlotItem::Legend,false);
-  preview.attach(plot->qwtPlot());
+  preview.attach(canvasPlot);
   auto style=[&]{preview.setPen(QPen(color,penWidth->value()));plot->replot();};
   QObject::connect(colorButton,&QPushButton::clicked,&dialog,[&]{
     const auto c=QColorDialog::getColor(color,&dialog,QStringLiteral("趋势线"),QColorDialog::ShowAlphaChannel);

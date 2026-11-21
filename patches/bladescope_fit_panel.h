@@ -1,6 +1,8 @@
 #pragma once
 #include "bladescope_trend.h"
 #include <QSaveFile>
+#include "qwt_plot_picker.h"
+#include "qwt_picker_machine.h"
 #include <QTextStream>
 #include <deque>
 
@@ -18,7 +20,7 @@ inline const QStringList& kinds()
 inline const QStringList& roles()
 {
   static const QStringList names={"风速 (m/s)","有功功率 (kW)","叶轮转速 (rpm)","发电机转速 (rpm)",
-    "桨距角 (°)","绝对风向 (°)","对风角度 (°)","转矩 (%)","运行状态码","室外温度 (°C)"};
+    "桨距角 (°)","绝对风向 (°)","对风角度 (°)","转矩 (%)","运行状态码","室外温度 (°C)","故障标志","限功率标志","启停过渡标志"};
   return names;
 }
 inline QString num(double x){return std::isfinite(x)?QString::number(x,'g',12):QString();}
@@ -55,16 +57,42 @@ struct Snapshot
 };
 inline QStringList defaults()
 {
-  return {"WTUR.WSpd.Ra.F32;grWindSpeed;风速实时值","grGridActivePower;有功功率;电网有功功率",
-    "grRotorSpeed1;叶轮转速","WGEN.Spd.Ra.F32;grGeneratorSpeed;发电机转速","grPitchAngleA;桨距角",
-    "绝对风向;环境风向","对风角度;偏航误差","发电机转矩百分比","机组运行模式","室外温度;环境温度"};
+  return {"grWindSpeed;风速实时值;风速","grGridActivePower;有功功率;电网有功功率",
+    "grRotorSpeed1;叶轮转速","grGeneratorSpeed;发电机转速","grPitchAngleA;桨距角",
+    "绝对风向;环境风向","对风角度;偏航误差","发电机转矩百分比","机组运行模式","室外温度;环境温度","故障标志","限功率标志","启停过渡标志"};
 }
+
+class SelectionGuide : public QWidget
+{
+  QPoint first,last;
+  bool line=false;
+public:
+  explicit SelectionGuide(QWidget* parent):QWidget(parent)
+  {setAttribute(Qt::WA_TransparentForMouseEvents);hide();}
+  void updateDrag(QPoint a,QPoint b,bool boundary)
+  {first=a;last=b;line=boundary;setGeometry(parentWidget()->rect());show();raise();update();}
+protected:
+  void paintEvent(QPaintEvent*) override
+  {
+    QPainter painter(this);QColor c=palette().color(QPalette::Highlight);
+    painter.setPen(QPen(c,2,Qt::DashLine));
+    if(line)painter.drawLine(first,last);
+    else{c.setAlpha(40);painter.setBrush(c);painter.drawRect(QRect(first,last).normalized());}
+  }
+};
+
+class AnalysisPlot final : public PlotWidget
+{
+public:
+  using PlotWidget::PlotWidget;
+  using PlotWidgetBase::qwtPlot;
+};
 
 class Panel : public QWidget
 {
   PJ::PlotDataMapRef& source;
   PJ::PlotDataMapRef shown;
-  PlotWidget* plot=nullptr;
+  AnalysisPlot* plot=nullptr;
   QComboBox *kind,*select,*roseMetric;
   QCheckBox *density;
   QLabel* status;
@@ -78,11 +106,15 @@ class Panel : public QWidget
   std::vector<std::pair<QString,std::shared_ptr<const Result>>> comparisons;
   std::vector<std::pair<Masks,Masks>> undoStack;
   QVector<QStringList> stats,report;
-  std::string sourceKey;
+  int loadGeneration=0;
+  bool dirty=true;
+  std::shared_ptr<std::atomic_bool> stop;
+  QTimer* refreshTimer;
+  QwtPlotPicker* cursor;
   int generation=0,displayKind=-1;
   bool selecting=false;
   QPoint begin;
-  QRubberBand* rubber;
+  SelectionGuide* rubber;
   QList<bool> visibleLayers{true,true,true,true};
   std::vector<std::pair<QwtPlotCurve*,int>> layers;
 
@@ -106,7 +138,8 @@ class Panel : public QWidget
     p.ratio=n("ratio",1);p.rpm=n("rpm",0);p.cutIn=n("cutIn",3);p.cutOut=n("cutOut",25);
     p.ratedWind=n("ratedWind",0);p.width=n("width",.5);p.tolerance=n("tolerance",1);
     p.efficiency=n("efficiency",1);p.sectors=int(n("sectors",16));p.degree=int(n("degree",4));
-    p.normal=int(n("normal",0));p.filterState=config.value("filterState").toBool();
+    p.torqueDegree=int(n("torqueDegree",2));p.normal=int(n("normal",0));p.filterState=config.value("filterState").toBool();
+    p.rejectFlags=config.value("rejectFlags").toBool(true);
     p.generator=config.value("generator").toBool();p.absoluteYaw=config.value("absoluteYaw").toBool(true);
     for(int i=0;i<NRoles;++i){
       const auto bounds=config.value("limit"+QString::number(i)).toArray();
@@ -139,7 +172,7 @@ class Panel : public QWidget
   {
     QSettings().setValue("BladeScope/curveAnalysis",QJsonDocument(config).toJson(QJsonDocument::Compact));
   }
-  void settings()
+  bool settings()
   {
     QDialog d(this);d.setWindowTitle(QStringLiteral("测点关联和机组参数"));d.resize(730,560);
     QVBoxLayout layout(&d);
@@ -150,6 +183,8 @@ class Panel : public QWidget
     templateName->addItems(library.keys());templates->addWidget(templateName,1);
     auto* use=new QPushButton(QStringLiteral("载入模板"));templates->addWidget(use);
     auto* keep=new QCheckBox(QStringLiteral("同时保存为模板"));templates->addWidget(keep);
+    const auto groups=QJsonDocument::fromJson(saved.value("BladeScope/measurementGroups").toByteArray()).object();
+    auto* groupBox=new QComboBox;groupBox->addItem(QStringLiteral("所有测点"));groupBox->addItems(groups.keys());layout.addWidget(groupBox);
     auto* pages=new QTabWidget;layout.addWidget(pages,1);
     auto* mapping=new QTableWidget(NRoles,4);pages->addTab(mapping,QStringLiteral("测点关联"));
     mapping->setHorizontalHeaderLabels({"物理量","测点或别名（分号分隔）","有效下限","有效上限"});
@@ -167,6 +202,12 @@ class Panel : public QWidget
       auto lim=config.value("limit"+QString::number(i)).toArray();
       for(int j=0;j<2;++j)mapping->setItem(i,j+2,new QTableWidgetItem(lim.size()==2?num(lim[j].toDouble()):QString()));
     }
+    connect(groupBox,qOverload<int>(&QComboBox::currentIndexChanged),&d,[&](int index){
+      QStringList subset;
+      if(!index)subset=names;
+      else for(auto v:groups.value(groupBox->currentText()).toArray())if(names.contains(v.toString()))subset<<v.toString();
+      for(auto* box:selectors){auto text=box->currentText();box->clear();box->addItems(subset);box->setEditText(text);}
+    });
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);
     auto* formPage=new QWidget;auto* f=new QFormLayout(formPage);scroll->setWidget(formPage);
     pages->addTab(scroll,QStringLiteral("机组与计算"));
@@ -181,9 +222,12 @@ class Panel : public QWidget
     parameter("ratedWind","额定风速 (m/s)","");parameter("cutOut","切出风速 (m/s)","25");
     parameter("efficiency","发电机效率 (0–1)","1");parameter("width","横轴分箱宽度","0.5");
     parameter("tolerance","最大时间匹配差 (s)","1");parameter("degree","Cp–λ 多项式阶数 (4–6)","4");
+    parameter("torqueDegree","M34 转矩拟合阶数 (2–3)","2");
     parameter("start","起始时间（原始秒，可留空）","");parameter("end","结束时间（原始秒，可留空）","");
     parameter("normal","正常运行状态码","0");
     auto* state=new QCheckBox(QStringLiteral("仅保留正常运行状态"));state->setChecked(config.value("filterState").toBool());f->addRow(state);
+    auto* flags=new QCheckBox(QStringLiteral("性能曲线排除故障、限功率和启停标志（0 为正常）"));
+    flags->setChecked(config.value("rejectFlags").toBool(true));f->addRow(flags);
     auto* gen=new QCheckBox(QStringLiteral("M21 / M35 使用发电机转速"));gen->setChecked(config.value("generator").toBool());f->addRow(gen);
     auto* abs=new QCheckBox(QStringLiteral("M23 使用对风偏差绝对值"));abs->setChecked(config.value("absoluteYaw").toBool(true));f->addRow(abs);
     auto* sectors=new QComboBox;sectors->addItems({"16","24"});sectors->setCurrentText(QString::number(config.value("sectors").toInt(16)));f->addRow(QStringLiteral("风玫瑰扇区"),sectors);
@@ -214,6 +258,8 @@ class Panel : public QWidget
       if(next.value("width").toDouble(.5)<=0 || next.value("efficiency").toDouble(1)<=0 ||
          next.value("efficiency").toDouble(1)>1 || next.value("degree").toInt(4)<4 ||next.value("degree").toInt(4)>6){
         invalid(QStringLiteral("请检查分箱宽度、效率和拟合阶数"));return;}
+      if(next.value("torqueDegree").toInt(2)<2||next.value("torqueDegree").toInt(2)>3){
+        invalid(QStringLiteral("转矩拟合支持二阶或三阶"));return;}
       QJsonArray refs;double prev=-std::numeric_limits<double>::infinity();
       for(auto line:theory->toPlainText().split('\n',Qt::SkipEmptyParts)){
         auto pair=line.trimmed().split(QRegularExpression("[,，;\\s]+"),Qt::SkipEmptyParts);
@@ -223,7 +269,7 @@ class Panel : public QWidget
       }
       if(refs.size()==1){invalid(QStringLiteral("厂家曲线至少需要两个点"));return;}
       next["reference"]=refs;next["generator"]=gen->isChecked();next["absoluteYaw"]=abs->isChecked();
-      next["filterState"]=state->isChecked();next["sectors"]=sectors->currentText().toInt();
+      next["rejectFlags"]=flags->isChecked();next["filterState"]=state->isChecked();next["sectors"]=sectors->currentText().toInt();
       if(keep->isChecked()){
         auto name=templateName->currentText().trimmed();if(name.isEmpty()){invalid(QStringLiteral("请输入模板名"));return;}
         library[name]=next;saved.setValue("BladeScope/fitTemplates",QJsonDocument(library).toJson(QJsonDocument::Compact));
@@ -232,24 +278,45 @@ class Panel : public QWidget
     });
     const auto old=config;
     int ret=d.exec();
-    if(ret==2){settings();return;}
+    if(ret==2){if(settings())return true;config=old;return false;}
     if(ret==QDialog::Accepted){persist();refreshKinds();reload();}
     else config=old;
+    return ret==QDialog::Accepted;
   }
   void reload()
   {
     auto snap=std::make_shared<Snapshot>();snap->params=parameters();
     auto channels=std::make_shared<Channels>();const auto names=available();
     const auto aliases=qApp->property("bladeScopeTagAliases").toMap();
-    for(int i=0;i<NRoles;++i){
-      const auto name=resolve(i,names,aliases);if(name.isEmpty())continue;
-      const auto it=source.numeric.find(name.toStdString());if(it==source.numeric.end())continue;
-      const auto& curve=it->second;
-      auto& data=(*channels)[i];data.reserve(curve.size());
-      for(size_t j=0;j<curve.size();++j){const auto& p=curve.at(j);if(std::isfinite(p.x))data.push_back({p.x,p.y});}
-    }
-    snap->channels=channels;snap->name=QStringLiteral("当前数据");
-    current=snap;undoStack.clear();refreshKinds();calculate();
+    const int ticket=++loadGeneration;
+    ++generation;
+    if(stop)stop->store(true);
+    dirty=false;
+    active.reset();current.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
+    status->setText(QStringLiteral("正在准备测点…"));
+    struct CopyState {std::array<std::string,NRoles> names;int role=0;size_t offset=0;};
+    auto copying=std::make_shared<CopyState>();
+    for(int i=0;i<NRoles;++i)copying->names[i]=resolve(i,names,aliases).toStdString();
+    auto* timer=new QTimer(this);
+    connect(timer,&QTimer::timeout,this,[this,ticket,timer,copying,channels,snap]{
+      if(ticket!=loadGeneration){timer->stop();timer->deleteLater();return;}
+      QElapsedTimer clock;clock.start();
+      while(copying->role<NRoles && clock.elapsed()<5){
+        int i=copying->role;const auto it=source.numeric.find(copying->names[i]);
+        if(it==source.numeric.end()){++copying->role;copying->offset=0;continue;}
+        const auto& curve=it->second;auto& data=(*channels)[i];
+        if(!copying->offset)data.reserve(curve.size());
+        const size_t end=std::min<size_t>(curve.size(),copying->offset+8192);
+        for(;copying->offset<end;++copying->offset){auto pt=curve.at(copying->offset);
+          if(std::isfinite(pt.x))data.push_back({pt.x,pt.y});}
+        if(copying->offset>=curve.size()){++copying->role;copying->offset=0;}
+      }
+      if(copying->role==NRoles){
+        timer->stop();timer->deleteLater();snap->channels=channels;snap->name=QStringLiteral("当前数据");
+        current=snap;undoStack.clear();refreshKinds();calculate();
+      }
+    });
+    timer->start(0);
   }
   void clearPlot()
   {
@@ -259,6 +326,8 @@ class Panel : public QWidget
   void calculate()
   {
     const int k=kind->currentIndex();const auto ticket=++generation;
+    if(stop)stop->store(true);
+    stop=std::make_shared<std::atomic_bool>(false);auto cancel=stop;
     active.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
     if(!current||k<0)return;
     status->setText(QStringLiteral("正在计算…"));
@@ -289,13 +358,14 @@ class Panel : public QWidget
     };
     const bool ready=std::all_of(tasks.begin(),tasks.end(),[](const Task& t){return bool(t.cached);});
     if(ready){Answer a;for(auto& t:tasks)a.emplace_back(t.cached,QString());receive(std::move(a),{});return;}
-    BladeTrend::background<Answer>(this,[tasks,k]{
+    BladeTrend::background<Answer>(this,[tasks,k,cancel]{
       Answer out;
       for(const auto& t:tasks){
+        if(cancel->load())return out;
         try{
           auto value=t.cached;
           if(!value) value=std::make_shared<Result>(analyze(k,*t.snapshot->channels,t.snapshot->params,t.mask,
-               [](double ts){return QDateTime::fromSecsSinceEpoch(qint64(std::floor(ts))).date().month();}));
+               [](double ts){return QDateTime::fromSecsSinceEpoch(qint64(std::floor(ts))).date().month();},cancel.get()));
           out.emplace_back(value,QString());
         }catch(const std::exception& ex){out.emplace_back(nullptr,QString::fromUtf8(ex.what()));}
       }
@@ -372,15 +442,12 @@ class Panel : public QWidget
       if(k!=M12)layer(QStringLiteral("分箱均值"),means,1,QColor("#e69a22"),QwtPlotCurve::Dots);
       Points raw,marked;
       std::array<Points,4> colors;
-      const size_t count=std::min<size_t>(50000,r.raw.size());
-      std::map<std::pair<int,int>,size_t> occupancy;
-      auto tile=[](const Record& a){return std::make_pair(int(std::floor(a.x/5)),int(std::floor(a.y)));};
-      if(k==M12&&density->isChecked())for(size_t i=0;i<count;++i)++occupancy[tile(r.raw[i*r.raw.size()/count])];
-      for(size_t i=0;i<count;++i){
-        const auto& a=r.raw[i*r.raw.size()/count];
-        if(current->marked.count(a.t))marked.push_back({a.x,a.y});
+      auto tile=[](const Record& a){return std::make_pair(static_cast<long long>(a.x/5),static_cast<long long>(std::clamp(a.y,-1e12,1e12)));};
+      for(auto index:r.display){
+        const auto& a=r.raw[index];
+        if(current->marked.count(a.id))marked.push_back({a.x,a.y});
         if(k==M12&&density->isChecked()){
-          auto v=occupancy[tile(a)];colors[v<5?0:v<20?1:v<100?2:3].push_back({a.x,a.y});
+          auto v=r.density.at(tile(a));colors[v<5?0:v<20?1:v<100?2:3].push_back({a.x,a.y});
         }else raw.push_back({a.x,a.y});
       }
       layer(QStringLiteral("实测散点"),raw,2,QColor("#538cbc"),QwtPlotCurve::Dots);
@@ -396,18 +463,48 @@ class Panel : public QWidget
       Points path;
       if(k==M11)path=roseOutline(compared);
       else if(k==M12){
-        const size_t count=std::min<size_t>(50000,compared.raw.size());
-        for(size_t j=0;j<count;++j){auto a=compared.raw[j*compared.raw.size()/count];path.push_back({a.x,a.y});}
+        for(auto index:compared.display){const auto& a=compared.raw[index];path.push_back({a.x,a.y});}
       }else path=compared.fit;
       layer(QStringLiteral("对比 ")+pair.first,path,3,QColor::fromHsv(int((125+67*i)%360),180,205),
             k==M12?QwtPlotCurve::Dots:QwtPlotCurve::Lines);
     }
-    plot->zoomOut(false);plot->replot();
+    plot->setKeepRatioXY(k==M11);plot->zoomOut(false);plot->replot();
     QString summary=QStringLiteral("有效 %1　已筛除 %2　标注 %3").arg(qulonglong(r.raw.size())).arg(qulonglong(r.rejected)).arg(qulonglong(current->marked.size()));
     if(k==M02)summary+=std::isfinite(r.shape)?QStringLiteral("　Weibull k=%1，A=%2 m/s").arg(num(r.shape),num(r.scale)):QStringLiteral("　样本不足以估计 Weibull 参数");
     if(k==M41)summary+=QStringLiteral("　实测传动比 %1").arg(num(r.slope));
     if(k==M11)summary+=QStringLiteral("　正北向上，顺时针　风速分级 <4 / 4–8 / 8–12 / ≥12 m/s");
+    if(k==M01)summary+=energySummary();
     status->setText(summary);makeTables();
+  }
+  static double powerAt(const Result& r,const Params& p,double x)
+  {
+    if(x<p.cutIn||x>p.cutOut)return 0;
+    return interpolate(r.fit,x);
+  }
+  QString energySummary() const
+  {
+    double total=0,covered=0,energy=0;
+    for(const auto& b:active->resource){
+      const double x=(b.first+.5)*current->params.width;
+      total+=b.second;const double y=powerAt(*active,current->params,x);
+      if(std::isfinite(y)){covered+=b.second;energy+=b.second*y;}
+    }
+    return total>0&&covered>0?QStringLiteral("　覆盖风况年化电量 %1 MWh（时间覆盖 %2%）")
+      .arg(num(8.76*energy/total),num(100*covered/total)):QString();
+  }
+  Points compareValues(const Result& r) const
+  {
+    if(displayKind==M11){
+      Points values;
+      for(int i=0;i<int(r.sectors.size());++i)values.push_back({360.*i/r.sectors.size(),roseValue(r,i)});
+      return values;
+    }
+    if(displayKind==M12|| (displayKind==M02&&r.fit.empty())){
+      Points values;
+      for(auto& b:r.bins) values.push_back({b.second.x,displayKind==M02?100.*b.second.n/r.raw.size():b.second.y});
+      return values;
+    }
+    return r.fit;
   }
   void makeTables()
   {
@@ -422,20 +519,23 @@ class Panel : public QWidget
     report={{"当前曲线集","比较曲线集","曲线类型","共同取样点","平均差值","平均相对偏差(%)","基线峰值横坐标","对比峰值横坐标","峰值差","共同风况覆盖率(%)","覆盖区间年化电量差(kWh)"}};
     for(auto& item:comparisons){
       const auto& other=*item.second;Bin deltas,relative;
-      for(auto b:r.fit){double y=interpolate(other.fit,b.x);if(!std::isfinite(y))continue;
+      const auto baseValues=compareValues(r),otherValues=compareValues(other);
+      for(auto b:baseValues){double y=interpolate(otherValues,b.x);if(!std::isfinite(y))continue;
         deltas.add(b.x,y-b.y);if(std::abs(b.y)>1e-9)relative.add(b.x,100*(y-b.y)/std::abs(b.y));}
-      double mwh=0;size_t covered=0,total=0;
+      double energy=0,covered=0,total=0;
       if(k==M01)for(auto& b:r.resource){
         double x=(b.first+.5)*current->params.width;total+=b.second;
-        double a=interpolate(r.fit,x),c=interpolate(other.fit,x);
-        if(std::isfinite(a)&&std::isfinite(c)){covered+=b.second;mwh+=(c-a)*b.second;}
+        double a=powerAt(r,current->params,x);
+        auto saved=std::find_if(pool.begin(),pool.end(),[&](const auto& s){return s->name==item.first;});
+        double c=saved!=pool.end()?powerAt(other,(*saved)->params,x):missing();
+        if(std::isfinite(a)&&std::isfinite(c)){covered+=b.second;energy+=(c-a)*b.second;}
       }
       auto peak=[](const Points& pts){return pts.empty()?Point{missing(),missing()}:
         *std::max_element(pts.begin(),pts.end(),[](Point a,Point b){return a.y<b.y;});};
-      auto a=peak(r.fit),b=peak(other.fit);
+      auto a=peak(baseValues),b=peak(otherValues);
       report.append({current->name,item.first,kinds()[k],QString::number(qulonglong(deltas.n)),num(deltas.n?deltas.y:missing()),
         num(relative.n?relative.y:missing()),num(a.x),num(b.x),num(b.y-a.y),total?num(100.*covered/total):QString(),
-        covered?num(8760*mwh/total):QString()});
+        covered?num(8760*energy/total):QString()});
     }
   }
   void showTable(const QVector<QStringList>& rows,QString name)
@@ -457,18 +557,24 @@ class Panel : public QWidget
     const int mode=select->currentIndex();
     if(begin==end||(mode>=3 && a.x()==b.x()))return;
     const QRectF rect=QRectF(a,b).normalized();
-    Masks chosen;
-    for(auto pt:active->raw){
-      if(pt.x<rect.left()||pt.x>rect.right())continue;
-      bool hit=rect.contains(QPointF(pt.x,pt.y));
-      if(mode>=3){double line=a.y()+(b.y()-a.y())*(pt.x-a.x())/(b.x()-a.x());hit=mode==3?pt.y>line:pt.y<line;}
-      if(hit)chosen.insert(pt.t);
-    }
-    if(chosen.empty())return;
-    if(undoStack.size()==16)undoStack.erase(undoStack.begin());
-    undoStack.emplace_back(current->excluded,current->marked);
-    if(mode==2){current->marked.insert(chosen.begin(),chosen.end());render();}
-    else{current->excluded.insert(chosen.begin(),chosen.end());current->cache.clear();calculate();}
+    auto raw=active;
+    BladeTrend::background<Masks>(this,[a,b,rect,mode,raw]{
+      Masks chosen;
+      for(const auto& pt:raw->raw){
+        if(pt.x<rect.left()||pt.x>rect.right())continue;
+        bool hit=rect.contains(QPointF(pt.x,pt.y));
+        if(mode>=3){double line=a.y()+(b.y()-a.y())*(pt.x-a.x())/(b.x()-a.x());hit=mode==3?pt.y>line:pt.y<line;}
+        if(hit)chosen.insert(pt.id);
+      }
+      return chosen;
+    },[this,mode,raw](Masks chosen,QString error){
+      if(!error.isEmpty()){status->setText(error);return;}
+      if(raw!=active||!current||chosen.empty())return;
+      if(undoStack.size()==16)undoStack.erase(undoStack.begin());
+      undoStack.emplace_back(current->excluded,current->marked);
+      if(mode==2){current->marked.insert(chosen.begin(),chosen.end());render();}
+      else{current->excluded.insert(chosen.begin(),chosen.end());current->cache.clear();calculate();}
+    });
   }
 protected:
   bool eventFilter(QObject* watched,QEvent* event) override
@@ -476,10 +582,10 @@ protected:
     if(watched==canvas&&select->currentIndex()&&active &&displayKind!=M02&&displayKind!=M11){
       if(event->type()==QEvent::MouseButtonPress){
         auto* e=static_cast<QMouseEvent*>(event);if(e->button()!=Qt::LeftButton)return false;
-        begin=e->pos();selecting=true;rubber->setGeometry(QRect(begin,QSize()));rubber->show();return true;
+        begin=e->pos();selecting=true;rubber->updateDrag(begin,begin,select->currentIndex()>=3);return true;
       }
       if(selecting&&event->type()==QEvent::MouseMove){auto* e=static_cast<QMouseEvent*>(event);
-        rubber->setGeometry(QRect(begin,e->pos()).normalized());return true;}
+        rubber->updateDrag(begin,e->pos(),select->currentIndex()>=3);return true;}
       if(selecting&&event->type()==QEvent::MouseButtonRelease){selecting=false;rubber->hide();
         selection(static_cast<QMouseEvent*>(event)->pos());return true;}
     }
@@ -511,9 +617,9 @@ public:
     auto* reset=compareMenu->addAction("清空比较池");
     connect(reset,&QAction::triggered,this,[this]{for(auto* a:compareMenu->actions())if(a->isCheckable())delete a;pool.clear();calculate();});
     compareMenu->addSeparator();
-    plot=new PlotWidget(shown,this);layout->addWidget(plot,1);plot->activateGrid(true);plot->activateLegend(true);
+    plot=new AnalysisPlot(shown,this);layout->addWidget(plot,1);plot->activateGrid(true);plot->activateLegend(true);
     plot->setContextMenuEnabled(false);plot->qwtPlot()->setAcceptDrops(false);
-    canvas=plot->qwtPlot()->canvas();canvas->installEventFilter(this);rubber=new QRubberBand(QRubberBand::Rectangle,canvas);
+    canvas=plot->qwtPlot()->canvas();canvas->installEventFilter(this);rubber=new SelectionGuide(canvas);
     auto* tools=new QHBoxLayout;layout->addLayout(tools);select=new QComboBox;
     select->addItems({"浏览","框选排除","框选标注","上界线以上排除","下界线以下排除"});tools->addWidget(select);
     button(tools,"撤销",[this]{if(!current||undoStack.empty())return;
@@ -524,14 +630,41 @@ public:
     roseMetric=new QComboBox;roseMetric->addItems({"频率 (%)","平均风速 (m/s)","平均功率 (kW)"});tools->addWidget(roseMetric);
     tools->addStretch();
     auto* out=new QHBoxLayout;layout->addLayout(out);status=new QLabel;status->setWordWrap(true);out->addWidget(status,1);
+    button(out,"拟合信息",[this]{
+      if(!active)return;
+      QVector<QStringList> rows{{"曲线集","公式（z=(x−中心)/尺度）","下限","上限","中心","尺度","系数（升幂）"}};
+      auto append=[&](QString set,const Result& r){for(auto& part:r.models){
+        QStringList coeff;for(auto value:part.coefficients)coeff<<num(value);
+        rows.append({set,QString::fromStdString(part.formula),num(part.low),num(part.high),
+                     num(part.origin),num(part.scale),coeff.join(", ")});
+      }};
+      append(current->name,*active);for(auto& item:comparisons)append(item.first,*item.second);
+      if(rows.size()==1){QMessageBox::information(this,"拟合信息","此图使用实测分布或分组统计，详见分箱统计。");return;}
+      showTable(rows,"拟合信息");
+    });
     button(out,"导出图片",[this]{if(active)QMetaObject::invokeMethod(plot,"on_savePlotToFile",Qt::DirectConnection);});
+    button(out,"导出拟合点",[this]{
+      if(!active)return;
+      QVector<QStringList> rows{{"曲线集","分析类型","横坐标","纵坐标"}};
+      auto append=[&](QString name,const Result& r){for(auto pt:compareValues(r))rows.append({name,kinds()[displayKind],num(pt.x),num(pt.y)});};
+      append(current->name,*active);for(auto& item:comparisons)append(item.first,*item.second);
+      saveCsv(this,"导出拟合点",rows);
+    });
     button(out,"分箱统计",[this]{showTable(stats,"分箱统计");});button(out,"对比报告",[this]{showTable(report,"曲线对比报告");});
     connect(kind,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int k){density->setVisible(k==M12);roseMetric->setVisible(k==M11);calculate();});
     connect(density,&QCheckBox::toggled,this,[this]{render();});
     connect(roseMetric,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{render();});
+    cursor=new QwtPlotPicker(QwtPlot::xBottom,QwtPlot::yLeft,QwtPicker::CrossRubberBand,QwtPicker::AlwaysOn,canvas);
+    cursor->setStateMachine(new QwtPickerTrackerMachine);
+    cursor->setTrackerPen(QPen(palette().color(QPalette::WindowText)));
+    cursor->setRubberBandPen(QPen(palette().color(QPalette::Mid),0,Qt::DotLine));
+    connect(select,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int i){cursor->setEnabled(i==0);});
+    refreshTimer=new QTimer(this);refreshTimer->setSingleShot(true);refreshTimer->setInterval(150);
+    connect(refreshTimer,&QTimer::timeout,this,[this]{if(dirty&&isVisible())reload();});
     density->hide();roseMetric->hide();
   }
-  void enter(){refreshKinds();if(!current)reload();}
-  ~Panel() override {delete plot;}
+  void invalidate(){dirty=true;++loadGeneration;++generation;if(stop)stop->store(true);if(isVisible())refreshTimer->start();}
+  void enter(){refreshKinds();if(dirty||!current)reload();}
+  ~Panel() override {if(stop)stop->store(true);delete plot;}
 };
 }
