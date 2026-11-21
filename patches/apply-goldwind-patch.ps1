@@ -1073,7 +1073,7 @@ $plotSyncInsert = @'
       plotCanvas->setStyleSheet(QString("background-color:%1;border:0px;").arg(canvasTop.name()));
       qwtPlot()->setCanvasBackground(QBrush(canvasTop));
       plotCanvas->update();
-      qwtPlot()->updateCanvasMargins();
+      qwtPlot()->replot();
       for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
         QwtText title = qwtPlot()->axisTitle(axis);
         title.setColor(axisText);
