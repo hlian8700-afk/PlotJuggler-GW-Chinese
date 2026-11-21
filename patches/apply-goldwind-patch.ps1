@@ -622,7 +622,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#ffffff","#fcfdff","#29445d","#e4eaf0"},
     QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#ffffff","#fdfefe","#3d4540","#e5e9e6"},
     QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
-    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#ffffff","#fcfdff","#e8edf2","#566779"}};
+    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#edf2f6","#e3eaf1","#35485b","#c5d1dc"}};
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
@@ -1058,6 +1058,18 @@ $plotSyncInsert = @'
       QLinearGradient canvasGradient(0, 0, 0, qMax(1, qwtPlot()->canvas()->height()));
       canvasGradient.setColorAt(0.0, canvasTop);
       canvasGradient.setColorAt(1.0, canvasBottom);
+      auto* plotCanvas = qwtPlot()->canvas();
+      // Apply the canvas surface directly: the app-wide QWidget theme must not
+      // repaint the plotting surface with the surrounding dark panel color.
+      QPalette canvasPalette = plotCanvas->palette();
+      canvasPalette.setColor(QPalette::Window, canvasTop);
+      canvasPalette.setColor(QPalette::Base, canvasTop);
+      canvasPalette.setColor(QPalette::WindowText, axisText);
+      canvasPalette.setColor(QPalette::Text, axisText);
+      plotCanvas->setPalette(canvasPalette);
+      plotCanvas->setAutoFillBackground(true);
+      plotCanvas->setStyleSheet(QString("QwtPlotCanvas{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %1,stop:1 %2);}")
+                                .arg(canvasTop.name(), canvasBottom.name()));
       qwtPlot()->setCanvasBackground(QBrush(canvasGradient));
       for (int axis : {QwtPlot::xBottom, QwtPlot::xTop, QwtPlot::yLeft, QwtPlot::yRight}) {
         QwtText title = qwtPlot()->axisTitle(axis);
