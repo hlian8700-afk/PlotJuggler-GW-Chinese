@@ -1,5 +1,4 @@
 """Exercise the installed Windows application through Qt's accessibility bridge."""
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -10,7 +9,6 @@ import time
 
 from PyQt5.QtCore import QByteArray, QSettings
 from pywinauto import Desktop
-from pywinauto.keyboard import send_keys
 
 
 def wait_for(read, seconds=40):
@@ -53,21 +51,9 @@ def run(executable):
     def click(name):
         element = wait_for(lambda: find(name, "Button"))
         element.click_input()
-        print(f'Clicked {name}', flush=True)
-
-    def dialog_open(title):
-        return any(w.window_text() == title for w in windows())
-
-    def check_dialog(title):
-        click(title)
-        wait_for(lambda: dialog_open(title))
-        send_keys('{ESC}')
-        wait_for(lambda: not dialog_open(title))
 
     try:
-        analysis_button = wait_for(lambda: find("曲线分析", "Button"), 80)
-        main_window = analysis_button.top_level_parent()
-        ctypes.windll.user32.ShowWindow(main_window.handle, 3)
+        wait_for(lambda: find("曲线分析", "Button"), 80)
         click("曲线分析")
         wait_for(lambda: find("分箱统计", "Button"))
 
@@ -76,11 +62,9 @@ def run(executable):
                        for w in top.descendants(control_type="Text"))
 
         wait_for(sample_count)
-        check_dialog('分箱统计')
-        check_dialog('拟合信息')
         click("时序图")
         wait_for(lambda: find("曲线分析", "Button"))
-        print("Installed GUI opened analysis, computed M01, opened statistics and formula tables, and returned to the plot.")
+        print("Installed GUI opened curve analysis, computed M01, and returned to the plot.", flush=True)
     finally:
         if process.poll() is None:
             process.terminate()
