@@ -1019,7 +1019,7 @@ if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
 $tabInsert = @'
   _tabWidget->setMovable(true);
   _tabWidget->setDocumentMode(true);
-  _tabWidget->tabBar()->setFixedHeight(26);
+  _tabWidget->tabBar()->setFixedHeight(28);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   // Tab colors inherit from the active global theme stylesheet.
@@ -1170,6 +1170,8 @@ $toolbarVisibility = "  ui->buttonFullscreen->setVisible(true);" + [Environment]
 $toolbarCppSrc = $toolbarCppSrc.Replace($toolbarVisibility, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  }")
 $toolbarLeave = "  ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());"
 $toolbarCppSrc = $toolbarCppSrc.Replace($toolbarLeave, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  }")
+$toolbarDragLeave = "  ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);"
+$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarDragLeave, "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  }")
 Set-Content -Path $toolbarCppFile -Value $toolbarCppSrc -Encoding UTF8
 Write-Host "BladeScope active DockToolbar merged into the tab header."
 
