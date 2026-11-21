@@ -611,6 +611,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   connect(bladeGrid, &QAction::triggered, ui->buttonActivateGrid, &QPushButton::click);
   auto* bladeLegend = bladePlotMenu->addAction(QString::fromUtf8("显示/隐藏图例"));
   connect(bladeLegend, &QAction::triggered, ui->buttonLegend, &QPushButton::click);
+  ui->menuBar->removeAction(ui->menuCloudData->menuAction());
   auto* bladeSettingsMenu = new QMenu(QString::fromUtf8("设置"), this);
   ui->menuBar->insertMenu(ui->menuBar->actions().first(), bladeSettingsMenu);
   bladeSettingsMenu->addAction(ui->actionPreferences);
@@ -1102,11 +1103,8 @@ $openGlAnchor = '  bool use_opengl = settings.value("Preferences::use_opengl", t
 if (!$plotBaseSrc.Contains($openGlAnchor)) { throw "Qwt OpenGL canvas selection anchor missing" }
 $plotBaseSrc = $plotBaseSrc.Replace($openGlAnchor,
 @'
-  static const bool nativeRendering = settings.value("BladeScope/nativeRendering", false).toBool();
-  static const bool softwareTheme = settings.value("BladeScope/softwareTheme", false).toBool();
-  const bool use_opengl = nativeRendering
-      ? settings.value("Preferences::use_opengl", true).toBool()
-      : !softwareTheme;
+  const bool nativeRendering = false;
+  const bool use_opengl = true;
 '@)
 $plotBaseSrc = $plotBaseSrc.Replace('  abs_canvas->setObjectName("qwtCanvas");', @'
   abs_canvas->setObjectName("qwtCanvas");
@@ -1304,61 +1302,10 @@ $gridToggle = @'
   });
 '@
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_plot_theme.h`"`n#include <QOpenGLWidget>" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_plot_theme.h`"" }
   @{ Old = '  bladeSettingsMenu->addAction(ui->actionColorMap_Editor);'; New = @'
   bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
   auto* plotThemeAction = bladeSettingsMenu->addAction(QString::fromUtf8("绘图主题调色盘"));
-  const bool nativeRendering = QSettings().value("BladeScope/nativeRendering", false).toBool();
-  plotThemeAction->setEnabled(!nativeRendering);
-  auto* renderMode = bladeSettingsMenu->addAction(
-      QString::fromUtf8("原版渲染（重启生效）"));
-  renderMode->setCheckable(true);
-  renderMode->setChecked(nativeRendering);
-  connect(renderMode, &QAction::toggled, this, [this, nativeRendering](bool enabled) {
-    QSettings().setValue("BladeScope/nativeRendering", enabled);
-    if (enabled != nativeRendering)
-      QMessageBox::information(this, QString::fromUtf8("绘图渲染"),
-                               QString::fromUtf8("请重启 BladeScope 以切换渲染模式。"));
-  });
-  auto* software = bladeSettingsMenu->addAction(
-      QString::fromUtf8("主题使用软件渲染（重启生效）"));
-  software->setCheckable(true);
-  software->setChecked(QSettings().value("BladeScope/softwareTheme", false).toBool());
-  software->setEnabled(!nativeRendering);
-  connect(software, &QAction::toggled, this, [this](bool enabled) {
-    QSettings().setValue("BladeScope/softwareTheme", enabled);
-    QMessageBox::information(this, QString::fromUtf8("绘图渲染"),
-                             QString::fromUtf8("重启 BladeScope 后，主题将使用所选渲染方式。"));
-  });
-  auto* measure = bladeSettingsMenu->addAction(QString::fromUtf8("记录绘图耗时"));
-  measure->setCheckable(true);
-  connect(measure, &QAction::toggled, this, [this](bool enabled) {
-    auto* app = QCoreApplication::instance();
-    app->setProperty("bladeScopeMeasurePaint", enabled);
-    if (enabled)
-    {
-      app->setProperty("bladeScopePaintCount", 0LL);
-      app->setProperty("bladeScopePaintTotal", 0LL);
-      app->setProperty("bladeScopePaintMax", 0LL);
-      return;
-    }
-    QString backend;
-    forEachWidget([&](PlotWidget* plot) {
-      if (!plot->isVisible() || !backend.isEmpty())
-        return;
-      if (auto* gl = plot->findChild<QOpenGLWidget*>("qwtCanvas"))
-        backend = gl->isValid() ? "OpenGL" : "OpenGL (invalid context)";
-      else
-        backend = "Raster";
-    });
-    const auto count = app->property("bladeScopePaintCount").toLongLong();
-    const double total = app->property("bladeScopePaintTotal").toLongLong() / 1e6;
-    const double max = app->property("bladeScopePaintMax").toLongLong() / 1e6;
-    QString report = QString::fromUtf8("后端：%1\n绘制次数：%2\n平均 CPU 绘制：%3 ms\n最长 CPU 绘制：%4 ms")
-                         .arg(backend.isEmpty() ? QStringLiteral("—") : backend)
-                         .arg(count).arg(count ? total / count : 0, 0, 'f', 2).arg(max, 0, 'f', 2);
-    QMessageBox::information(this, QString::fromUtf8("绘图耗时"), report);
-  });
   connect(plotThemeAction, &QAction::triggered, this, [this] {
     BladePlotTheme::openPanel(this);
     const QSignalBlocker blocked(ui->buttonActivateGrid);
@@ -1660,21 +1607,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 # Cache the gradient, grid and waveforms on the raster canvas. Cursor markers
 # and the legend are composited afterwards, in the existing Z order.
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot.cpp" @(
-  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qpixmap.h>`n#include <qvariant.h>`n#include <QElapsedTimer>`n#include <QScopeGuard>" }
+  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qpixmap.h>`n#include <qvariant.h>" }
   @{ Old = '    drawItems( painter, m_data->canvas->contentsRect(), maps );'; New = @'
-    auto* app = QCoreApplication::instance();
-    QElapsedTimer timer;
-    if (app->property("bladeScopeMeasurePaint").toBool())
-        timer.start();
-    const auto measure = qScopeGuard([&] {
-        if (!timer.isValid())
-            return;
-        const qint64 ns = timer.nsecsElapsed();
-        app->setProperty("bladeScopePaintCount", app->property("bladeScopePaintCount").toLongLong() + 1);
-        app->setProperty("bladeScopePaintTotal", app->property("bladeScopePaintTotal").toLongLong() + ns);
-        app->setProperty("bladeScopePaintMax", qMax(app->property("bladeScopePaintMax").toLongLong(), ns));
-    });
-
     auto* canvas = m_data->canvas.data();
     const QRect rect = canvas->contentsRect();
     const bool themed = property( "bladeScopePlotTheme" ).toBool();
