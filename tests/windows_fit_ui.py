@@ -1,4 +1,5 @@
 """Exercise the installed Windows application through Qt's accessibility bridge."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -52,9 +53,21 @@ def run(executable):
     def click(name):
         element = wait_for(lambda: find(name, "Button"))
         element.click_input()
+        print(f'Clicked {name}', flush=True)
+
+    def dialog_open(title):
+        return any(w.window_text() == title for w in windows())
+
+    def check_dialog(title):
+        click(title)
+        wait_for(lambda: dialog_open(title))
+        send_keys('{ESC}')
+        wait_for(lambda: not dialog_open(title))
 
     try:
         wait_for(lambda: find("曲线分析", "Button"), 80)
+        main_window = next(w for w in windows() if 'BladeScope' in w.window_text())
+        ctypes.windll.user32.ShowWindow(main_window.handle, 3)
         click("曲线分析")
         wait_for(lambda: find("分箱统计", "Button"))
 
@@ -63,12 +76,8 @@ def run(executable):
                        for w in top.descendants(control_type="Text"))
 
         wait_for(sample_count)
-        click("分箱统计")
-        wait_for(lambda: find("导出 CSV", "Button"))
-        send_keys("{ESC}")
-        click("拟合信息")
-        wait_for(lambda: find("导出 CSV", "Button"))
-        send_keys("{ESC}")
+        check_dialog('分箱统计')
+        check_dialog('拟合信息')
         click("时序图")
         wait_for(lambda: find("曲线分析", "Button"))
         print("Installed GUI opened analysis, computed M01, opened statistics and formula tables, and returned to the plot.")
