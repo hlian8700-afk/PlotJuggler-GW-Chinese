@@ -1528,6 +1528,7 @@ Update-BladeThemeSource "plotjuggler_base/src/plotwidget_base.cpp" @(
 '@ }
 )
 Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
+  @{ Old = '#include <qpainter.h>'; New = "#include <qpainter.h>`n#include <qvariant.h>" }
   @{ Old = '        drawCurve( painter, m_data->style, xMap, yMap, canvasRect, from, to );'; New = @'
         if ( testPaintAttribute( BladeScopeTimeSeries ) &&
              ( m_data->style == Lines || m_data->style == LinesAndDots ) &&
