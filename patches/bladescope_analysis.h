@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTextStream>
+#include <QSignalBlocker>
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QFile>
@@ -431,7 +432,38 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   auto* units = new QCheckBox(QString::fromUtf8("确认差值测点单位一致"));
   fields->addRow(QString::fromUtf8("起始时间（原始秒）"), from);
   fields->addRow(QString::fromUtf8("结束时间（原始秒）"), to);
-  fields->addRow(QString::fromUtf8("条件测点"), condition);
+  const auto addSearchableChannel = [&](const QString& field, QComboBox* combo) {
+    using Entry = QPair<QString, QVariant>;
+    QVector<Entry> entries;
+    entries.reserve(combo->count());
+    for (int i = 0; i < combo->count(); ++i)
+      entries.append(qMakePair(combo->itemText(i), combo->itemData(i)));
+
+    auto* query = new QLineEdit;
+    query->setPlaceholderText(QString::fromUtf8("搜索中文名或原始标签"));
+    query->setClearButtonEnabled(true);
+    query->setAccessibleName(field + QString::fromUtf8("搜索"));
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(12);
+    auto* row = new QHBoxLayout;
+    row->addWidget(query, 2);
+    row->addWidget(combo, 3);
+    fields->addRow(field, row);
+
+    QObject::connect(query, &QLineEdit::textChanged, &dialog, [combo, entries](const QString& text) {
+      const QVariant previous = combo->currentData();
+      const QString needle = text.trimmed();
+      const QSignalBlocker blocker(combo);
+      combo->clear();
+      for (const auto& entry : entries)
+        if (entry.second.toString().isEmpty() || entry.second == previous ||
+            entry.first.contains(needle, Qt::CaseInsensitive))
+          combo->addItem(entry.first, entry.second);
+      const int index = combo->findData(previous);
+      combo->setCurrentIndex(index >= 0 ? index : 0);
+    });
+  };
+  addSearchableChannel(QString::fromUtf8("条件测点"), condition);
   auto* comparison = new QHBoxLayout;
   comparison->addWidget(op);
   comparison->addWidget(threshold);
@@ -440,7 +472,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   fields->addRow(QString::fromUtf8("条件"), comparison);
   fields->addRow(QString::fromUtf8("最大匹配时间差（秒）"), tolerance);
   fields->addRow(previous);
-  fields->addRow(QString::fromUtf8("参考测点（目标减参考）"), reference);
+  addSearchableChannel(QString::fromUtf8("参考测点（目标减参考）"), reference);
   fields->addRow(units);
   layout->addLayout(fields);
 

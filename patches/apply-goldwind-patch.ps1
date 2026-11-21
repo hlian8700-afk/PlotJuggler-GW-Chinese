@@ -186,7 +186,51 @@ $layoutReplacement = @'
   auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
   goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
   goldwindImport->hide(); // Available from File menu.
-  connect(goldwindImport, &QPushButton::clicked, this, [this]() {
+  const auto refreshMapping = [this] {
+    goldwindReloadChineseNames();
+    {
+      QVariantMap aliases;
+      for (auto it = goldwindChineseNames().cbegin(); it != goldwindChineseNames().cend(); ++it)
+        aliases.insert(it.key(), it.value());
+      QCoreApplication::instance()->setProperty("bladeScopeTagAliases", aliases);
+    }
+    goldwindReloadSearchAliases();
+    const auto existing = _tree_view_items;
+    _tree_view->setUpdatesEnabled(false);
+    _tree_view->clear();
+    _tree_view_items.clear();
+    for (const auto& name : existing) addCurve(name);
+    _tree_view->setUpdatesEnabled(true);
+    refreshColumns();
+  };
+  auto* goldwindClearMapping = new QPushButton(this);
+  goldwindClearMapping->setObjectName("bladeScopeClearChineseMapping");
+  goldwindClearMapping->hide();
+  connect(goldwindClearMapping, &QPushButton::clicked, this, [this, refreshMapping] {
+    const auto title = QString::fromUtf8("清除中文映射");
+    if (QMessageBox::question(this, title,
+          QString::fromUtf8("清除当前中文映射并显示原始标签？重新导入 CSV 后可恢复中文显示。"),
+          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+      return;
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!QDir().mkpath(dir))
+    {
+      QMessageBox::warning(this, title, QString::fromUtf8("无法创建配置目录。"));
+      return;
+    }
+
+    // An empty override prevents falling back to the bundled mapping on restart.
+    const QByteArray header("raw_tag,cn_name\n");
+    QSaveFile file(dir + "/gw_tag_mapping.csv");
+    if (!file.open(QIODevice::WriteOnly) || file.write(header) != header.size() || !file.commit())
+    {
+      QMessageBox::warning(this, title, file.errorString());
+      return;
+    }
+    refreshMapping();
+  });
+  connect(goldwindImport, &QPushButton::clicked, this, [this, refreshMapping]() {
     const QString path = QFileDialog::getOpenFileName(
         this, QString::fromUtf8("选择新的标签映射 CSV"), QString(),
         QString::fromUtf8("CSV 文件 (*.csv)"));
@@ -273,21 +317,7 @@ $layoutReplacement = @'
       QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
       return;
     }
-    goldwindReloadChineseNames();
-    {
-      QVariantMap aliases;
-      for (auto it = goldwindChineseNames().cbegin(); it != goldwindChineseNames().cend(); ++it)
-        aliases.insert(it.key(), it.value());
-      QCoreApplication::instance()->setProperty("bladeScopeTagAliases", aliases);
-    }
-    goldwindReloadSearchAliases();
-    const auto existing = _tree_view_items;
-    _tree_view->setUpdatesEnabled(false);
-    _tree_view->clear();
-    _tree_view_items.clear();
-    for (const auto& name : existing) addCurve(name);
-    _tree_view->setUpdatesEnabled(true);
-    refreshColumns();
+    refreshMapping();
     QMessageBox::information(this, QString::fromUtf8("导入成功"),
                              QString::fromUtf8("已全部替换为 %1 条标签映射（识别编码：%2）").arg(checked.size()).arg(detectedEncoding));
   });
@@ -802,6 +832,11 @@ $curvePanelLayout = @'
       panelButton->hide();
       break;
     }
+  }
+  if (auto* clear = _curvelist_widget->findChild<QPushButton*>("bladeScopeClearChineseMapping"))
+  {
+    auto* action = bladeFileMenu->addAction(QString::fromUtf8("清除中文映射..."));
+    connect(action, &QAction::triggered, clear, &QPushButton::click);
   }
   // One compact action row: load recording, focus filter, clear search.
   // Buttons call the original controls and never modify the underlying samples.
