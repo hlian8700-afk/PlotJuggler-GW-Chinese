@@ -225,6 +225,36 @@ jobs:
           python customization/tests/windows_fit_ui.py "$env:RUNNER_TEMP/BladeScope-SmokeTest/bin/BladeScope.exe"
           if ($LASTEXITCODE -ne 0) { throw "Curve analysis UI check failed" }
 
+      - name: Verify M01 tables, coefficients and CSV inside the installed Qt application
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest/bin/BladeScope.exe"
+          $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT = Join-Path $env:RUNNER_TEMP "BladeScope-FitAcceptance"
+          New-Item -ItemType Directory -Force $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT | Out-Null
+          $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          if (!$app.WaitForExit(60000)) {
+            Stop-Process -Id $app.Id -Force
+            throw "Qt curve analysis acceptance did not exit within 60 seconds"
+          }
+          if ($app.ExitCode -ne 0) {
+            $log = Join-Path $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT "failure.txt"
+            if (Test-Path $log) { Get-Content -Encoding UTF8 $log }
+            throw "Qt curve analysis acceptance exited with code $($app.ExitCode)"
+          }
+          $csv = Join-Path $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT "m01-bins.csv"
+          if (!(Test-Path $csv) -or @(Import-Csv -LiteralPath $csv -Encoding UTF8).Count -ne 3) {
+            throw "Expected a CSV with three M01 bins"
+          }
+          Write-Host "Verified three M01 bins, fitted coefficients, exported CSV, and return to time series."
+
+      - name: Upload Qt acceptance diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BladeScope-fit-acceptance-diagnostics
+          path: ${{ runner.temp }}/BladeScope-FitAcceptance/
+          if-no-files-found: ignore
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

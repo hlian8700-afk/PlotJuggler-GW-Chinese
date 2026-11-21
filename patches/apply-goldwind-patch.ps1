@@ -1974,12 +1974,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2007,6 +2007,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   };
   connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
   connect(ui->menuTools->addAction(QStringLiteral("曲线分析")), &QAction::triggered, this, showFitPanel);
+  const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
+  if (!fitAcceptanceOutput.isEmpty())
+  {
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+    BladeFitUI::verifyM01(this, _mapped_plot_data, fitEntry, ui->widgetStack, fitAcceptanceOutput);
+  }
   int headerButtonIndex = 1;
 '@ }
 )

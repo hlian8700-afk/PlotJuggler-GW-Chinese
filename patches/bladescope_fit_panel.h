@@ -292,7 +292,7 @@ class Panel : public QWidget
     ++generation;
     if(stop)stop->store(true);
     dirty=false;
-    active.reset();current.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
+    setProperty("bladeFitResultsReady",false);active.reset();current.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
     status->setText(QStringLiteral("正在准备测点…"));
     struct CopyState {std::array<std::string,NRoles> names;int role=0;size_t offset=0;};
     auto copying=std::make_shared<CopyState>();
@@ -328,7 +328,7 @@ class Panel : public QWidget
     const int k=kind->currentIndex();const auto ticket=++generation;
     if(stop)stop->store(true);
     stop=std::make_shared<std::atomic_bool>(false);auto cancel=stop;
-    active.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
+    setProperty("bladeFitResultsReady",false);active.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
     if(!current||k<0)return;
     status->setText(QStringLiteral("正在计算…"));
     struct Task {std::shared_ptr<Snapshot> snapshot;std::shared_ptr<const Result> cached;Masks mask;};
@@ -474,7 +474,7 @@ class Panel : public QWidget
     if(k==M41)summary+=QStringLiteral("　实测传动比 %1").arg(num(r.slope));
     if(k==M11)summary+=QStringLiteral("　正北向上，顺时针　风速分级 <4 / 4–8 / 8–12 / ≥12 m/s");
     if(k==M01)summary+=energySummary();
-    status->setText(summary);makeTables();
+    makeTables();status->setText(summary);setProperty("bladeFitResultsReady",true);
   }
   static double powerAt(const Result& r,const Params& p,double x)
   {
@@ -544,8 +544,8 @@ class Panel : public QWidget
     QDialog d(this);d.setWindowTitle(name);d.resize(950,450);QVBoxLayout l(&d);
     auto* t=new QTableWidget(rows.size()-1,rows.front().size());t->setHorizontalHeaderLabels(rows.front());
     for(int i=1;i<rows.size();++i)for(int j=0;j<rows[i].size();++j)t->setItem(i-1,j,new QTableWidgetItem(rows[i][j]));
-    t->setEditTriggers(QAbstractItemView::NoEditTriggers);t->resizeColumnsToContents();l.addWidget(t);
-    auto* save=new QPushButton(QStringLiteral("导出 CSV"));l.addWidget(save);
+    t->setObjectName("bladeFitResultTable");t->setEditTriggers(QAbstractItemView::NoEditTriggers);t->resizeColumnsToContents();l.addWidget(t);
+    auto* save=new QPushButton(QStringLiteral("导出 CSV"));save->setObjectName("bladeFitExportCsv");l.addWidget(save);
     connect(save,&QPushButton::clicked,&d,[&]{saveCsv(&d,name,rows);});d.exec();
   }
   void selection(QPoint end)
@@ -600,7 +600,7 @@ public:
     auto* top=new QHBoxLayout;layout->addLayout(top);
     auto button=[this](QHBoxLayout* line,QString title,auto fn){
       auto* b=new QPushButton(title);line->addWidget(b);connect(b,&QPushButton::clicked,this,fn);return b;};
-    button(top,"时序图",closePage);top->addWidget(new QLabel(QStringLiteral("曲线分析")));
+    button(top,"时序图",closePage)->setObjectName("bladeFitBack");top->addWidget(new QLabel(QStringLiteral("曲线分析")));
     kind=new QComboBox;kind->addItems(kinds());top->addWidget(kind);
     button(top,"测点与机组参数",[this]{settings();});button(top,"获取数据",[this]{reload();});
     top->addStretch();
@@ -629,7 +629,7 @@ public:
     density=new QCheckBox("密度着色");tools->addWidget(density);
     roseMetric=new QComboBox;roseMetric->addItems({"频率 (%)","平均风速 (m/s)","平均功率 (kW)"});tools->addWidget(roseMetric);
     tools->addStretch();
-    auto* out=new QHBoxLayout;layout->addLayout(out);status=new QLabel;status->setWordWrap(true);out->addWidget(status,1);
+    auto* out=new QHBoxLayout;layout->addLayout(out);status=new QLabel;status->setObjectName("bladeFitStatus");status->setWordWrap(true);out->addWidget(status,1);
     button(out,"拟合信息",[this]{
       if(!active)return;
       QVector<QStringList> rows{{"曲线集","公式（z=(x−中心)/尺度）","下限","上限","中心","尺度","系数（升幂）"}};
@@ -641,7 +641,7 @@ public:
       append(current->name,*active);for(auto& item:comparisons)append(item.first,*item.second);
       if(rows.size()==1){QMessageBox::information(this,"拟合信息","此图使用实测分布或分组统计，详见分箱统计。");return;}
       showTable(rows,"拟合信息");
-    });
+    })->setObjectName("bladeFitFormula");
     button(out,"导出图片",[this]{if(active)QMetaObject::invokeMethod(plot,"on_savePlotToFile",Qt::DirectConnection);});
     button(out,"导出拟合点",[this]{
       if(!active)return;
@@ -650,7 +650,7 @@ public:
       append(current->name,*active);for(auto& item:comparisons)append(item.first,*item.second);
       saveCsv(this,"导出拟合点",rows);
     });
-    button(out,"分箱统计",[this]{showTable(stats,"分箱统计");});button(out,"对比报告",[this]{showTable(report,"曲线对比报告");});
+    button(out,"分箱统计",[this]{showTable(stats,"分箱统计");})->setObjectName("bladeFitBins");button(out,"对比报告",[this]{showTable(report,"曲线对比报告");});
     connect(kind,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int k){density->setVisible(k==M12);roseMetric->setVisible(k==M11);calculate();});
     connect(density,&QCheckBox::toggled,this,[this]{render();});
     connect(roseMetric,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{render();});
