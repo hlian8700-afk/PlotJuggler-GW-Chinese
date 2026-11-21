@@ -1954,3 +1954,18 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   });
 '@ }
 )
+
+$recordingIndexHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_recording_index.h")
+Set-Content -Path "plotjuggler_app/bladescope_recording_index.h" -Value $recordingIndexHeader -Encoding UTF8BOM
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_recording_index.h`"" }
+  @{ Old = '  auto* bladeReload = bladeFileMenu->addAction'; New = @'
+  auto* bladeIndex = bladeFileMenu->addAction(QString::fromUtf8("CSV 录波目录索引..."));
+  connect(bladeIndex, &QAction::triggered, this, [this] {
+    BladeRecordingIndex::open(this, [this](QStringList files) {
+      loadDataFromFiles(files, files.size() > 1);
+    });
+  });
+  auto* bladeReload = bladeFileMenu->addAction
+'@ }
+)
