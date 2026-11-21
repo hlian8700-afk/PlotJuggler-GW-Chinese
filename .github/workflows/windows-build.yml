@@ -24,6 +24,16 @@ jobs:
         with:
           path: customization
 
+      - name: Prepare example labels for public builds
+        if: ${{ !github.event.repository.private }}
+        shell: pwsh
+        run: |
+          @(
+            'raw_tag,cn_name'
+            'demo_speed,示例转速'
+            'demo_power,示例功率'
+          ) | Set-Content -LiteralPath "customization/data/gw_tag_mapping.csv" -Encoding UTF8
+
       - name: Verify required mapping file
         shell: pwsh
         run: |
@@ -196,16 +206,20 @@ jobs:
           Stop-Process -Id $app.Id -Force
           Write-Host "GUI executable survived startup smoke test."
           $rows = @(Import-Csv -LiteralPath $csv -Encoding UTF8)
-          if ($rows.Count -ne 1981) { throw "Expected 1981 mappings, found $($rows.Count)" }
+          $expectedRows = if ('${{ github.event.repository.private }}' -eq 'true') { 1981 } else { 2 }
+          if ($rows.Count -ne $expectedRows) { throw "Expected $expectedRows mappings, found $($rows.Count)" }
+          if ($expectedRows -eq 2 -and (($rows.raw_tag -join ',') -ne 'demo_speed,demo_power')) {
+            throw "Public installer must contain only example labels"
+          }
           if (@($rows | Where-Object { [string]::IsNullOrWhiteSpace($_.raw_tag) -or [string]::IsNullOrWhiteSpace($_.cn_name) }).Count -ne 0) {
             throw "Chinese dictionary contains blank tags or labels"
           }
-          Write-Host "Installer silent install and 1981 mapping checks passed."
+          Write-Host "Installer silent install and $expectedRows mapping checks passed."
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BladeScope-3.17.0-win64
+          name: ${{ github.event.repository.private && 'BladeScope-3.17.0-win64' || 'BladeScope-3.17.0-win64-demo' }}
           path: |
             BladeScope-3.17.0-win64-portable.zip
             customization/installer/BladeScope-3.17.0-win64-Setup.exe
