@@ -1020,7 +1020,9 @@ $tabInsert = @'
   _tabWidget->setMovable(true);
   _tabWidget->setDocumentMode(true);
   _tabWidget->setStyleSheet(
-      "QTabWidget::pane { border: 0; }"
+      // In document mode the native pane may start inside the header by a few pixels.
+      // Allocate the clearance in the page layout so every split shares the same boundary.
+      "QTabWidget::pane { border: 0; padding-top: 5px; }"
       "QTabBar::tab { background: palette(base); color: palette(text); "
       "border: 1px solid palette(midlight); border-radius: 4px; "
       "padding: 0 5px; margin-right: 2px; height: 18px; "
