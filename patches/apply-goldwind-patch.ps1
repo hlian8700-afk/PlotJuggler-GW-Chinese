@@ -1850,3 +1850,60 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxQuaternion/toolbox_quaternio
 Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
   @{ Old = 'connect(ui->buttonBox, &QDialogButtonBox::rejected,'; New = 'connect(ui->closeToolButton, &QPushButton::clicked,' }
 )
+
+$analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_analysis.h")
+Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
+  @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
+  ui->menuBar->removeAction(ui->menuCloudData->menuAction());
+  auto* bladeAnalysis = bladePlotMenu->addAction(QString::fromUtf8("测点组与录波分析..."));
+  connect(bladeAnalysis, &QAction::triggered, this, [this] {
+    if (_mapped_plot_data.numeric.empty())
+    {
+      QMessageBox::information(this, QString::fromUtf8("录波分析"), QString::fromUtf8("请先加载录波。"));
+      return;
+    }
+    auto* docker = _main_tabbed_widget->currentTab();
+    auto* plot = docker && docker->plotCount() ? docker->plotAt(0) : nullptr;
+    QStringList selected;
+    double start = std::numeric_limits<double>::infinity();
+    double end = -start;
+    for (const auto& item : _mapped_plot_data.numeric)
+      if (item.second.size())
+      {
+        start = std::min(start, item.second.at(0).x);
+        end = std::max(end, item.second.at(item.second.size() - 1).x);
+      }
+    if (plot && !plot->isXYPlot())
+    {
+      for (const auto& curve : plot->curveList())
+        selected << QString::fromStdString(curve.src_name);
+      if (!selected.isEmpty())
+      {
+        const auto rect = plot->currentBoundingRect();
+        start = rect.left() + plot->timeOffset();
+        end = rect.right() + plot->timeOffset();
+      }
+    }
+    BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
+        [this, plot](const QStringList& names, bool newTab) {
+          auto* target = plot;
+          if (newTab || !target || target->isXYPlot())
+            target = _main_tabbed_widget->addTab({})->plotAt(0);
+          if (!target)
+            return;
+          for (const auto& name : names)
+          {
+            const auto raw = name.toStdString();
+            const auto& curves = target->curveList();
+            if (std::none_of(curves.begin(), curves.end(), [&](const auto& c) { return c.src_name == raw; }))
+              target->addCurve(raw);
+          }
+          target->zoomOut(false);
+          target->replot();
+          onUndoableChange();
+        });
+  });
+'@ }
+)
