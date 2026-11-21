@@ -1716,7 +1716,9 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
   ui->plotSplitter->setStretchFactor(0, 1);
   ui->plotSplitter->setStretchFactor(1, 1);
   ui->plotSplitter->setSizes({ 1, 1 });
-  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QString::fromUtf8("关闭"));
+  auto* closeButton = ui->buttonBox->button(QDialogButtonBox::Close);
+  closeButton->setText(QStringLiteral("\u5173\u95ED"));
+  closeButton->setMinimumSize(88, 26);
 '@ }
   @{ Old = '  preview_layout_A->setMargin(6);'; New = '  preview_layout_A->setContentsMargins(0, 0, 0, 0);' }
   @{ Old = '  preview_layout_B->setMargin(6);'; New = '  preview_layout_B->setContentsMargins(0, 0, 0, 0);' }

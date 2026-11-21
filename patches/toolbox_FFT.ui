@@ -3,7 +3,7 @@
  <class>toolbox_fft</class>
  <widget class="QWidget" name="toolbox_fft">
   <property name="windowTitle"><string>FFT 频谱分析</string></property>
-  <layout class="QVBoxLayout" name="verticalLayout" stretch="0,1,0,0,0">
+  <layout class="QVBoxLayout" name="verticalLayout" stretch="0,1,0,0">
    <item><widget class="QLabel" name="label_7">
      <property name="font">
       <font>
@@ -84,33 +84,8 @@
           <string>计算 FFT</string>
          </property>
         </widget></item>
-<item><spacer name="bottomStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
-<item><widget class="QPushButton" name="pushButtonClear">
-       <property name="minimumSize">
-        <size>
-         <width>24</width>
-         <height>24</height>
-        </size>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>24</width>
-         <height>24</height>
-        </size>
-       </property>
-       <property name="toolTip">
-        <string>清除波形</string>
-       </property>
-       <property name="text">
-        <string>清除</string>
-       </property>
-       <property name="iconSize">
-        <size>
-         <width>20</width>
-         <height>20</height>
-        </size>
-       </property>
-      </widget></item></layout></item>
+
+</layout></item>
    <item><layout class="QHBoxLayout" name="fftActions"><item><widget class="QLabel" name="label">
        <property name="text">
         <string>从左侧拖入曲线到上方时域图</string>
@@ -149,15 +124,33 @@
         <string>保存频谱</string>
        </property>
       </widget></item>
+<item><spacer name="bottomStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
+<item><widget class="QPushButton" name="pushButtonClear">
+       <property name="minimumSize">
+        <size>
+         <width>88</width>
+         <height>26</height>
+        </size>
+       </property>
+       
+       <property name="toolTip">
+        <string>清除波形</string>
+       </property>
+       <property name="text">
+        <string>清除</string>
+       </property>
+       <property name="iconSize">
+        <size>
+         <width>14</width>
+         <height>14</height>
+        </size>
+       </property>
+      </widget></item>
 <item><widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
       <set>QDialogButtonBox::Close</set>
      </property>
     </widget></item></layout></item>
-   <item><widget class="QLabel" name="label_4">
-    <property name="text"><string>FFT 要求采样间隔恒定。采样不均匀时结果可能不准确，工具箱不会自动重采样。</string></property>
-    <property name="wordWrap"><bool>true</bool></property>
-   </widget></item>
   </layout>
  </widget>
  <resources/>
