@@ -5,6 +5,7 @@ on:
     branches: [ main, feature/plot-theme-palette ]
     paths:
       - 'patches/**'
+      - 'tests/windows_fit_ui.py'
       - '.github/workflows/windows-build.yml'
       - 'data/**'
       - 'assets/**'
