@@ -96,6 +96,7 @@
             </item>
             <item>
              <widget class="QLineEdit" name="lineEditFilter">
+              <property name="placeholderText"><string>搜索待导出的曲线</string></property>
               <property name="maximumSize">
                <size>
                 <width>300</width>
