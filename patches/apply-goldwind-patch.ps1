@@ -1973,3 +1973,57 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   auto* bladeReload = bladeFileMenu->addAction
 '@ }
 )
+
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h")) {
+  $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
+  Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
+}
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"" }
+  @{ Old = '  int headerButtonIndex = 0;'; New = @'
+  auto* fitEntry = new QToolButton(tabCorner);
+  fitEntry->setText(QStringLiteral("曲线分析"));
+  fitEntry->setFixedHeight(22);
+  tabCornerLayout->insertWidget(0, fitEntry);
+  auto showFitPanel = [this] {
+    auto* panel = ui->widgetStack->findChild<QWidget*>("bladeFitPanel");
+    if (!panel)
+    {
+      auto* view = new BladeFitUI::Panel(_mapped_plot_data, [this] {
+        ui->widgetStack->setCurrentIndex(0);
+      });
+      view->setObjectName("bladeFitPanel");
+      auto* scroll = new QScrollArea(ui->widgetStack);
+      scroll->setFrameShape(QFrame::NoFrame);
+      scroll->setWidgetResizable(true);
+      scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+      scroll->setWidget(view);
+      ui->widgetStack->addWidget(scroll);
+      panel = view;
+    }
+    auto* scroll = qobject_cast<QScrollArea*>(panel->parentWidget()->parentWidget());
+    if (scroll) ui->widgetStack->setCurrentWidget(scroll);
+    static_cast<BladeFitUI::Panel*>(panel)->enter();
+  };
+  connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
+  connect(ui->menuTools->addAction(QStringLiteral("曲线分析")), &QAction::triggered, this, showFitPanel);
+  int headerButtonIndex = 1;
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
+  @{ Old = '#include "statistics_dialog.h"'; New = "#include `"statistics_dialog.h`"`n#include `"bladescope_trend.h`"" }
+  @{ Old = '  menu.addAction(_action_formula);'; New = @'
+  menu.addAction(_action_formula);
+  if (!isXYPlot() && !curveList().empty())
+  {
+    auto* trends = menu.addMenu(QStringLiteral("添加趋势线"));
+    for (const auto& entry : curveList())
+    {
+      const auto raw = entry.src_name;
+      if (!_mapped_data.numeric.count(raw)) continue;
+      connect(trends->addAction(entry.curve->title().text()), &QAction::triggered, this,
+              [this, raw] { BladeTrend::open(this, raw); });
+    }
+  }
+'@ }
+)
