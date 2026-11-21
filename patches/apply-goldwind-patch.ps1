@@ -1716,9 +1716,6 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
   ui->plotSplitter->setStretchFactor(0, 1);
   ui->plotSplitter->setStretchFactor(1, 1);
   ui->plotSplitter->setSizes({ 1, 1 });
-  auto* closeButton = ui->buttonBox->button(QDialogButtonBox::Close);
-  closeButton->setText(QStringLiteral("\u5173\u95ED"));
-  closeButton->setMinimumSize(88, 26);
 '@ }
   @{ Old = '  preview_layout_A->setMargin(6);'; New = '  preview_layout_A->setContentsMargins(0, 0, 0, 0);' }
   @{ Old = '  preview_layout_B->setMargin(6);'; New = '  preview_layout_B->setContentsMargins(0, 0, 0, 0);' }
@@ -1749,8 +1746,6 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxCSV/toolbox_ui.cpp" @(
   ui->setupUi(_widget);
 '@; New = @'
   ui->setupUi(_widget);
-  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
-  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
 '@ }
   @{ Old = @'
 "Export data"
@@ -1768,8 +1763,6 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxQuaternion/toolbox_quaternio
   ui->setupUi(_widget);
 '@; New = @'
   ui->setupUi(_widget);
-  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
-  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
 '@ }
   @{ Old = @'
 new PJ::PlotWidgetBase(ui->frame);
@@ -1782,8 +1775,6 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
   ui->setupUi(_widget);
 '@; New = @'
   ui->setupUi(_widget);
-  ui->buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("\u5173\u95ed"));
-  ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
   ui->scriptSplitter->setStretchFactor(0, 0);
   ui->scriptSplitter->setStretchFactor(1, 1);
   ui->scriptSplitter->setSizes({ 176, 700 });
@@ -1840,4 +1831,20 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     toolViewport->setWidget(widget);
     ui->widgetStack->addWidget(toolViewport);
 '@ }
+)
+
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
+  @{ Old = 'connect(ui->buttonBox, &QDialogButtonBox::rejected,'; New = 'connect(ui->closeToolButton, &QPushButton::clicked,' }
+)
+
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxCSV/toolbox_ui.cpp" @(
+  @{ Old = 'connect(ui->buttonBox, &QDialogButtonBox::rejected,'; New = 'connect(ui->closeToolButton, &QPushButton::clicked,' }
+)
+
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxQuaternion/toolbox_quaternion.cpp" @(
+  @{ Old = 'connect(ui->buttonBox, &QDialogButtonBox::rejected,'; New = 'connect(ui->closeToolButton, &QPushButton::clicked,' }
+)
+
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
+  @{ Old = 'connect(ui->buttonBox, &QDialogButtonBox::rejected,'; New = 'connect(ui->closeToolButton, &QPushButton::clicked,' }
 )

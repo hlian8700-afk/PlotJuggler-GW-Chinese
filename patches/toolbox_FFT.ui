@@ -144,11 +144,11 @@
         </size>
        </property>
       </widget></item>
-<item><widget class="QDialogButtonBox" name="buttonBox">
-     <property name="standardButtons">
-      <set>QDialogButtonBox::Close</set>
-     </property>
-    </widget></item></layout></item>
+<item><widget class="QPushButton" name="closeToolButton">
+        <property name="minimumSize"><size><width>72</width><height>26</height></size></property>
+        <property name="text"><string>关闭</string></property>
+        <property name="autoDefault"><bool>false</bool></property>
+       </widget></item></layout></item>
   </layout>
  </widget>
  <resources/>

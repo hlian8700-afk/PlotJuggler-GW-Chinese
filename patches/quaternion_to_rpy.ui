@@ -233,11 +233,11 @@
       </widget>
      </item>
      <item>
-      <widget class="QDialogButtonBox" name="buttonBox">
-       <property name="standardButtons">
-        <set>QDialogButtonBox::Close</set>
-       </property>
-      </widget>
+      <widget class="QPushButton" name="closeToolButton">
+        <property name="minimumSize"><size><width>72</width><height>26</height></size></property>
+        <property name="text"><string>关闭</string></property>
+        <property name="autoDefault"><bool>false</bool></property>
+       </widget>
      </item>
     </layout>
    </item>
