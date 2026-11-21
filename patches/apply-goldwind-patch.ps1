@@ -1506,3 +1506,58 @@ QRect PlotLegend::geometry(const QRectF& canvasRect) const
 QRectF PlotLegend::hideButtonRect() const
 '@ }
 )
+
+# Limit interactive time-series painting to the visible interval. Keep the
+# neighboring samples so segments crossing either edge still draw correctly.
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.h" @(
+  @{ Old = '        FilterPointsAggressive = 0x10,'; New = @'
+        FilterPointsAggressive = 0x10,
+
+        //! Data has ascending timestamps; enable viewport culling on screen.
+        BladeScopeTimeSeries = 0x100,
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_base/src/plotwidget_base.cpp" @(
+  @{ Old = '      plot_qwt = createTimeSeries(ts_data);'; New = @'
+      plot_qwt = createTimeSeries(ts_data);
+      curve->setPaintAttribute(QwtPlotCurve::BladeScopeTimeSeries);
+'@ }
+)
+Update-BladeThemeSource "3rdparty/qwt/src/qwt_plot_curve.cpp" @(
+  @{ Old = '        drawCurve( painter, m_data->style, xMap, yMap, canvasRect, from, to );'; New = @'
+        if ( testPaintAttribute( BladeScopeTimeSeries ) &&
+             ( m_data->style == Lines || m_data->style == LinesAndDots ) &&
+             !m_data->symbol && !testCurveAttribute( Fitted ) &&
+             m_data->brush.style() == Qt::NoBrush &&
+             plot() && painter->device() == plot()->canvas() )
+        {
+            const double left = qMin( xMap.s1(), xMap.s2() );
+            const double right = qMax( xMap.s1(), xMap.s2() );
+            const auto boundary = [&]( double x, bool upper ) {
+                int low = from;
+                int high = to + 1;
+                while ( low < high )
+                {
+                    const int mid = low + ( high - low ) / 2;
+                    const double t = sample( mid ).x();
+                    if ( t < x || ( upper && t == x ) )
+                        low = mid + 1;
+                    else
+                        high = mid;
+                }
+                return low;
+            };
+
+            const int first = qMax( from, boundary( left, false ) - 1 );
+            const int last = qMin( to, boundary( right, true ) );
+            from = first;
+            to = last;
+            if ( to - from > canvasRect.width() * painter->device()->devicePixelRatioF() * 4 )
+                painter->setRenderHint( QPainter::Antialiasing, false );
+        }
+        drawCurve( painter, m_data->style, xMap, yMap, canvasRect, from, to );
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '    if (do_replot)'; New = '    if (do_replot && plot->isVisible())' }
+)
