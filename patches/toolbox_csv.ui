@@ -99,7 +99,7 @@
               <property name="placeholderText"><string>搜索待导出的曲线</string></property>
               <property name="maximumSize">
                <size>
-                <width>300</width>
+                <width>220</width>
                 <height>16777215</height>
                </size>
               </property>
@@ -280,7 +280,7 @@
            <widget class="QLineEdit" name="lineEditPrefix">
             <property name="maximumSize">
              <size>
-              <width>250</width>
+              <width>140</width>
               <height>16777215</height>
              </size>
             </property>

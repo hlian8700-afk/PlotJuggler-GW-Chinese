@@ -26,7 +26,7 @@
      <property name="handleWidth"><number>6</number></property>
      <widget class="QWidget" name="timePanel"><layout class="QVBoxLayout" name="timePanelLayout">
 <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
-<item><widget class="QLabel" name="timePanelTitle"><property name="text"><string>时域波形</string></property></widget></item>
+<item><widget class="QLabel" name="timePanelTitle"><property name="text"><string>时域波形（从左侧拖入曲线）</string></property></widget></item>
 <item><widget class="QFrame" name="framePlotPreviewA">
        <property name="autoFillBackground">
         <bool>false</bool>
@@ -53,7 +53,7 @@
 </layout></widget>
     </widget>
    </item>
-   <item><layout class="QHBoxLayout" name="fftOptions"><item><widget class="QLabel" name="label_6">
+   <item><layout class="QHBoxLayout" name="fftOptions" stretch="0,0,0,0,0,1"><item><widget class="QLabel" name="label_6">
          <property name="text">
           <string>计算范围</string>
          </property>
@@ -84,13 +84,10 @@
           <string>计算 FFT</string>
          </property>
         </widget></item>
+<item><spacer name="fftOptionsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
 
 </layout></item>
-   <item><layout class="QHBoxLayout" name="fftActions"><item><widget class="QLabel" name="label">
-       <property name="text">
-        <string>从左侧拖入曲线到上方时域图</string>
-       </property>
-      </widget></item>
+   <item><layout class="QHBoxLayout" name="fftActions">
 <item><widget class="QLabel" name="label_2">
        <property name="text">
         <string>曲线后缀</string>
@@ -124,7 +121,8 @@
         <string>保存频谱</string>
        </property>
       </widget></item>
-<item><spacer name="bottomStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
+
+<item><spacer name="fftBottomStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
 <item><widget class="QPushButton" name="pushButtonClear">
        <property name="minimumSize">
         <size>

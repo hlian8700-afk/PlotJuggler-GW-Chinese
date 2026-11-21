@@ -178,7 +178,7 @@ $layoutReplacement = @'
   goldwindGroup->setMinimumHeight(30);
   // Category toggle colors inherit from the active global theme.
 
-  goldwindToolbar->addWidget(goldwindGroup, 0, 1);
+  goldwindToolbar->addWidget(goldwindGroup, 1, 0);
   auto* goldwindSelect = new QPushButton(QString::fromUtf8("选择筛选结果"), this);
   goldwindSelect->setToolTip(QString::fromUtf8("多选当前可见的测点，然后拖动所选测点到绘图区"));
   goldwindSelect->hide(); // Search box replaces the separate selection button.
@@ -1786,7 +1786,8 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
   ui->buttonBox->button(QDialogButtonBox::Close)->setMinimumWidth(72);
   ui->scriptSplitter->setStretchFactor(0, 0);
   ui->scriptSplitter->setStretchFactor(1, 1);
-  ui->scriptSplitter->setSizes({ 230, 700 });
+  ui->scriptSplitter->setSizes({ 176, 700 });
+  connect(ui->showScriptList, &QCheckBox::toggled, ui->scriptList, &QWidget::setVisible);
   ui->codeSplitter->setStretchFactor(0, 1);
   ui->codeSplitter->setStretchFactor(1, 2);
   ui->codeSplitter->setSizes({ 180, 360 });
@@ -1827,3 +1828,16 @@ $toolSource = $toolSource.Replace('"Failed to write file: %1"', 'QStringLiteral(
 $toolSource = $toolSource.Replace('QString("<b>File saved in folder:</b><br>%1<br><br><b>File name:</b><br>%2")', 'QStringLiteral("<b>\u4fdd\u5b58\u76ee\u5f55</b><br>%1<br><br><b>\u6587\u4ef6\u540d</b><br>%2")')
 $toolSource = $toolSource.Replace('QString("<b>Files saved in folder:</b><br>%1<br><br><b>%2</b><br>%3")', 'QStringLiteral("<b>\u4fdd\u5b58\u76ee\u5f55</b><br>%1<br><br><b>%2</b><br>%3")')
 Set-Content -Path "plotjuggler_plugins/ToolboxCSV/toolbox_csv.cpp" -Value $toolSource -Encoding UTF8BOM
+
+# Isolate tool size hints so hidden tools cannot enlarge the main stacked layout.
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include <QScrollArea>" }
+  @{ Old = '    ui->widgetStack->addWidget(widget);'; New = @'
+    auto* toolViewport = new QScrollArea(ui->widgetStack);
+    toolViewport->setFrameShape(QFrame::NoFrame);
+    toolViewport->setWidgetResizable(true);
+    toolViewport->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+    toolViewport->setWidget(widget);
+    ui->widgetStack->addWidget(toolViewport);
+'@ }
+)

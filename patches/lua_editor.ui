@@ -51,7 +51,8 @@
       <attribute name="title">
        <string>脚本编辑器</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_4" stretch="1,0">
+      <layout class="QVBoxLayout" name="verticalLayout_4" stretch="0,1,0">
+<item><layout class="QHBoxLayout" name="scriptListActions"><item><widget class="QCheckBox" name="showScriptList"><property name="text"><string>显示脚本列表</string></property><property name="checked"><bool>true</bool></property></widget></item><item><spacer name="luaListStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item></layout></item>
        <item>
         <widget class="QSplitter" name="scriptSplitter">
          <property name="orientation">
