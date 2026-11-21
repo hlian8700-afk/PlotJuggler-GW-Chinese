@@ -1035,175 +1035,16 @@ $tabPaintBlock = @'
   _buttonAddTab->move(QPoint(button_pos, 0));
 '@
 $tabPaintBlock = $tabPaintBlock.Replace("`r`n", "`n")
-if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; refusing partial toolbar merge" }
+if (!$tabSrc.Contains($tabPaintBlock)) { throw "Original tab paintEvent block missing; cannot position add-tab button" }
 $tabPaintReplacement = @'
-  const int toolbar_width = _headerToolbar ? _headerToolbar->width() : 0;
-  const int header_gap = 4;
-  int max_width_tabbar = std::max(0, width() - _buttonAddTab->width() - margin - toolbar_width - header_gap);
-  tabWidget()->tabBar()->setMaximumWidth(max_width_tabbar);
-  if (_headerToolbar) {
-    _headerToolbar->setGeometry(max_width_tabbar + margin, 0, toolbar_width, 28);
-    _headerToolbar->raise();
-  }
-  _buttonAddTab->move(QPoint(max_width_tabbar + margin + toolbar_width + header_gap, 0));
+  const int button_pos = std::max(0, width() - _buttonAddTab->width() - margin);
+  tabWidget()->tabBar()->setMaximumWidth(button_pos);
+  _buttonAddTab->move(QPoint(button_pos, 0));
 '@
 $tabSrc = $tabSrc.Replace($tabPaintBlock, $tabPaintReplacement.TrimEnd())
-
-
-# Merge the active plot's real DockToolbar into the tab header row.
-$tabHeaderFile = "plotjuggler_app/tabbedplotwidget.h"
-$tabHeaderSrc = Get-Content -Raw -Encoding UTF8 $tabHeaderFile
-$tabHeaderSrc = $tabHeaderSrc.Replace("#include <QWidget>", "#include <QWidget>" + [Environment]::NewLine + "#include <QPointer>")
-$tabHeaderAnchor = "  QTabWidget* _tabWidget;"
-if (!$tabHeaderSrc.Contains($tabHeaderAnchor)) { throw "Tab header member anchor missing" }
-$tabHeaderReplacement = @'
-  QTabWidget* _tabWidget;
-  QPointer<DockWidget> _headerToolbarOwner;
-  QPointer<DockToolbar> _headerToolbar;
-  void updateHeaderToolbar();
-'@
-$tabHeaderSrc = $tabHeaderSrc.Replace($tabHeaderAnchor, $tabHeaderReplacement.TrimEnd())
-Set-Content -Path $tabHeaderFile -Value $tabHeaderSrc -Encoding UTF8
-
-$tabCppFile = "plotjuggler_app/tabbedplotwidget.cpp"
-$tabCppSrc = $tabSrc
-$tabCppMarker = "void TabbedPlotWidget::paintEvent(QPaintEvent* event)"
-if (!$tabCppSrc.Contains($tabCppMarker)) { throw "Tab header method anchor missing" }
-$tabCppMethod = @'
-void TabbedPlotWidget::updateHeaderToolbar()
-{
-  DockWidget* next_owner = nullptr;
-  if (auto* docker = currentTab())
-  {
-    if (docker->dockAreaCount() > 0)
-    {
-      auto* area = docker->dockArea(0);
-      next_owner = dynamic_cast<DockWidget*>(area->currentDockWidget());
-    }
-  }
-
-  if (_headerToolbarOwner == next_owner && _headerToolbar)
-  {
-    update();
-    return;
-  }
-
-  if (_headerToolbar)
-  {
-    if (_headerToolbarOwner)
-    {
-      auto* old_layout = qobject_cast<QBoxLayout*>(_headerToolbarOwner->layout());
-      _headerToolbar->setCompactHeaderMode(false);
-      _headerToolbar->setParent(_headerToolbarOwner);
-      if (old_layout) old_layout->insertWidget(0, _headerToolbar);
-    }
-    else
-    {
-      _headerToolbar->deleteLater();
-    }
-  }
-
-  _headerToolbar = nullptr;
-  _headerToolbarOwner = nullptr;
-
-  if (next_owner && next_owner->toolBar())
-  {
-    auto* owner_layout = qobject_cast<QBoxLayout*>(next_owner->layout());
-    if (owner_layout)
-    {
-      _headerToolbar = next_owner->toolBar();
-      owner_layout->removeWidget(_headerToolbar);
-      _headerToolbar->setParent(this);
-      _headerToolbar->setCompactHeaderMode(true);
-      _headerToolbar->setFixedHeight(28);
-      _headerToolbar->setFixedWidth(198);
-      _headerToolbar->show();
-      _headerToolbarOwner = next_owner;
-      connect(_headerToolbar->buttonClose(), &QPushButton::clicked, this, [this]() {
-        QTimer::singleShot(0, this, [this]() { updateHeaderToolbar(); });
-      });
-    }
-  }
-  update();
-}
-
-'@
-$tabCppSrc = $tabCppSrc.Replace($tabCppMarker, $tabCppMethod + $tabCppMarker)
-$tabCppSrc = "#include <QBoxLayout>" + [Environment]::NewLine + "#include <QTimer>" + [Environment]::NewLine + "#include <QPointer>" + [Environment]::NewLine + $tabCppSrc
-$tabCppSrc = $tabCppSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));", "  _buttonAddTab->setFixedSize(QSize(28, 28));")
-$tabCppSrc = $tabCppSrc.Replace("  connect(_buttonAddTab, &QPushButton::pressed, this, &TabbedPlotWidget::on_addTabButton_pressed);",
-  "  connect(_buttonAddTab, &QPushButton::pressed, this, &TabbedPlotWidget::on_addTabButton_pressed);" + [Environment]::NewLine + "  updateHeaderToolbar();")
-$tabCppSrc = $tabCppSrc.Replace("  tabWidget()->setCurrentWidget(docker);",
-  "  tabWidget()->setCurrentWidget(docker);" + [Environment]::NewLine +
-  "  connect(docker, &PlotDocker::plotWidgetAdded, this, [this](PlotWidget*) {" + [Environment]::NewLine +
-  "    QTimer::singleShot(0, this, [this]() { updateHeaderToolbar(); });" + [Environment]::NewLine + "  });")
-$tabCurrentMatch = [regex]::Match($tabCppSrc, '(?s)void TabbedPlotWidget::on_tabWidget_currentChanged\(int index\)\s*\{.*?\n\}')
-if (!$tabCurrentMatch.Success) { throw "Current tab method block missing" }
-$tabCppSrc = $tabCppSrc.Insert($tabCurrentMatch.Index + $tabCurrentMatch.Length - 1,
-  "  updateHeaderToolbar();" + [Environment]::NewLine)
-Set-Content -Path $tabCppFile -Value $tabCppSrc -Encoding UTF8
-
-$toolbarHeaderFile = "plotjuggler_app/plot_docker_toolbar.h"
-$toolbarHeaderSrc = Get-Content -Raw -Encoding UTF8 $toolbarHeaderFile
-$toolbarHeaderSrc = $toolbarHeaderSrc.Replace("  void toggleFullscreen();", "  void toggleFullscreen();" + [Environment]::NewLine + "  void setCompactHeaderMode(bool enabled);")
-$toolbarHeaderSrc = $toolbarHeaderSrc.Replace("  bool _fullscreen_mode;", "  bool _fullscreen_mode;" + [Environment]::NewLine + "  bool _compact_header_mode = false;")
-Set-Content -Path $toolbarHeaderFile -Value $toolbarHeaderSrc -Encoding UTF8
-
-$toolbarCppFile = "plotjuggler_app/plot_docker_toolbar.cpp"
-$toolbarCppSrc = (Get-Content -Raw -Encoding UTF8 $toolbarCppFile).Replace("`r`n", "`n")
-$toolbarMethodAnchor = "void DockToolbar::toggleFullscreen()"
-if (!$toolbarCppSrc.Contains($toolbarMethodAnchor)) { throw "Compact toolbar method anchor missing" }
-$toolbarMethod = @'
-void DockToolbar::setCompactHeaderMode(bool enabled)
-{
-  _compact_header_mode = enabled;
-  ui->label->setVisible(!enabled);
-  ui->buttonBackground->setVisible(enabled);
-  ui->buttonSplitHorizontal->setVisible(enabled && !_fullscreen_mode);
-  ui->buttonSplitVertical->setVisible(enabled && !_fullscreen_mode);
-  ui->buttonFullscreen->setVisible(enabled);
-  ui->buttonClose->setVisible(!enabled || !_fullscreen_mode);
-  updateGeometry();
-}
-
-'@
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMethodAnchor, $toolbarMethod + $toolbarMethodAnchor)
-$toolbarFullscreenBlock = @'
-  if (_fullscreen_mode)
-  {
-    ui->buttonSplitHorizontal->setVisible(false);
-    ui->buttonSplitVertical->setVisible(false);
-  }
-'@
-$toolbarFullscreenReplacement = @'
-  if (_fullscreen_mode)
-  {
-    ui->buttonSplitHorizontal->setVisible(false);
-    ui->buttonSplitVertical->setVisible(false);
-  }
-  if (_compact_header_mode)
-  {
-    ui->buttonBackground->setVisible(true);
-    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);
-    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);
-    ui->buttonClose->setVisible(!_fullscreen_mode);
-    ui->buttonFullscreen->setVisible(true);
-  }
-'@
-$toolbarFullscreenBlock = $toolbarFullscreenBlock.Replace("`r`n", "`n")
-if (!$toolbarCppSrc.Contains($toolbarFullscreenBlock)) { throw "Fullscreen compact toolbar anchor missing" }
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarFullscreenBlock, $toolbarFullscreenReplacement.TrimEnd())
-$toolbarMouseAnchor = "  if (auto* area = _parent->dockAreaWidget())" + [Environment]::NewLine + "  {" + [Environment]::NewLine + "    QCoreApplication::sendEvent(area->titleBar(), ev);" + [Environment]::NewLine + "  }"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarMouseAnchor.Replace("`r`n", "`n"), "  if (!_compact_header_mode) { if (auto* area = _parent->dockAreaWidget()) QCoreApplication::sendEvent(area->titleBar(), ev); }")
-$toolbarVisibility = "  ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(!_fullscreen_mode);"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarVisibility.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(true);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(true);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(!_fullscreen_mode);" + [Environment]::NewLine + "  }")
-$toolbarLeave = "  ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarLeave.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(_fullscreen_mode);" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  }")
-$toolbarDragLeave = "  ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "  ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "  ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "  ui->buttonSplitVertical->setVisible(false);"
-$toolbarCppSrc = $toolbarCppSrc.Replace($toolbarDragLeave.Replace("`r`n", "`n"), "  if (!_compact_header_mode) {" + [Environment]::NewLine + "    ui->buttonFullscreen->setVisible(false);" + [Environment]::NewLine + "    ui->buttonBackground->setVisible(ui->buttonBackground->isChecked());" + [Environment]::NewLine + "    ui->buttonSplitHorizontal->setVisible(false);" + [Environment]::NewLine + "    ui->buttonSplitVertical->setVisible(false);" + [Environment]::NewLine + "  }")
-Set-Content -Path $toolbarCppFile -Value $toolbarCppSrc -Encoding UTF8
-Write-Host "BladeScope active DockToolbar merged into the tab header."
-
+$tabSrc = $tabSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));",
+                          "  _buttonAddTab->setFixedSize(QSize(28, 28));")
+Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
 # Keep plot legends synchronized with the left-side label mode and CSV aliases.
@@ -1499,3 +1340,41 @@ $rendererSource = $rendererSource.Replace($canvasBackground,
   'if ( !( m_data->discardFlags & DiscardCanvasBackground ) &&
              plot->property( "bladeScopeExportPass" ).toInt() != 2 )')
 Set-Content -Path $rendererPath -Value $rendererSource -Encoding UTF8
+
+# Float each original DockToolbar inside its own canvas. Leave its button
+# enter/leave, fullscreen and drag/drop handlers in charge of visibility.
+Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
+  @{ Old = '  qobject_cast<QBoxLayout*>(layout())->insertWidget(0, _toolbar);'; New = @'
+  if (auto* canvas = _plot_widget->findChild<QWidget*>("qwtCanvas"))
+  {
+    _toolbar->setParent(canvas);
+    _toolbar->setObjectName("bladeScopeCanvasToolbar");
+    _toolbar->setStyleSheet("#bladeScopeCanvasToolbar { background: transparent; }");
+    _toolbar->setFixedHeight(28);
+    canvas->installEventFilter(_toolbar);
+    _toolbar->show();
+  }
+  else
+  {
+    qobject_cast<QBoxLayout*>(layout())->insertWidget(0, _toolbar);
+  }
+'@ }
+)
+Update-BladeThemeSource "plotjuggler_app/plot_docker_toolbar.cpp" @(
+  @{ Old = '  if (event->type() == QEvent::MouseButtonDblClick)'; New = @'
+  if (object == parentWidget() && object != _parent)
+  {
+    if (event->type() == QEvent::Resize || event->type() == QEvent::Show)
+    {
+      const int inset = 3;
+      const int available = qMax(0, parentWidget()->width() - 2 * inset);
+      const int toolbarWidth = qMin(available, 190);
+      setGeometry(parentWidget()->width() - toolbarWidth - inset, inset, toolbarWidth, height());
+      raise();
+    }
+    return QWidget::eventFilter(object, event);
+  }
+
+  if (event->type() == QEvent::MouseButtonDblClick)
+'@ }
+)
