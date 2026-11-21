@@ -638,8 +638,8 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     "QGroupBox{color:%4;border:1px solid %6;border-radius:5px;margin-top:8px;padding-top:7px;}"
     "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%4;}"
     "QTabWidget::pane{background:%3;color:%4;border:0px;}"
-    "QTabBar{background:%3;color:%4;max-height:27px;}"
-    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:1px 7px;margin-right:2px;min-height:20px;max-height:23px;font-size:9pt;border-top-left-radius:3px;border-top-right-radius:3px;}"
+    "QTabBar{background:%3;color:%4;max-height:22px;}"
+    "QTabBar::tab{background:%2;color:%4;border:1px solid %6;padding:0px 6px;margin-right:2px;min-height:16px;max-height:18px;font-size:9pt;border-top-left-radius:3px;border-top-right-radius:3px;}"
     "QTabBar::tab:selected{background:%1;color:%4;border-bottom:2px solid %5;font-weight:600;}"
     "QTabBar::tab:hover:!selected{background:%5;color:%4;}"
     "QToolTip{background:%2;color:%4;border:1px solid %6;padding:4px;}"
@@ -1019,7 +1019,7 @@ if (!$tabSrc.Contains($tabAnchor)) { throw "Plot tab bar anchor missing" }
 $tabInsert = @'
   _tabWidget->setMovable(true);
   _tabWidget->setDocumentMode(true);
-  _tabWidget->tabBar()->setFixedHeight(28);
+  _tabWidget->tabBar()->setFixedHeight(22);
   _tabWidget->tabBar()->setExpanding(false);
   _tabWidget->tabBar()->setUsesScrollButtons(true);
   // Tab colors inherit from the active global theme stylesheet.
@@ -1043,7 +1043,7 @@ $tabPaintReplacement = @'
 '@
 $tabSrc = $tabSrc.Replace($tabPaintBlock, $tabPaintReplacement.TrimEnd())
 $tabSrc = $tabSrc.Replace("  _buttonAddTab->setFixedSize(QSize(32, 32));",
-                          "  _buttonAddTab->setFixedSize(QSize(28, 28));")
+                          "  _buttonAddTab->setFixedSize(QSize(22, 22));")
 Set-Content -Path $tabFile -Value $tabSrc -Encoding UTF8
 Write-Host "BladeScope native tab bar spacing and style applied."
 
@@ -1344,12 +1344,17 @@ Set-Content -Path $rendererPath -Value $rendererSource -Encoding UTF8
 # Float each original DockToolbar inside its own canvas. Leave its button
 # enter/leave, fullscreen and drag/drop handlers in charge of visibility.
 Update-BladeThemeSource "plotjuggler_app/plot_docker.cpp" @(
+  @{ Old = '  this->layout()->setMargin(10);'; New = '  this->layout()->setContentsMargins(2, 0, 2, 2);' }
   @{ Old = '  qobject_cast<QBoxLayout*>(layout())->insertWidget(0, _toolbar);'; New = @'
   if (auto* canvas = _plot_widget->findChild<QWidget*>("qwtCanvas"))
   {
     _toolbar->setParent(canvas);
     _toolbar->setObjectName("bladeScopeCanvasToolbar");
-    _toolbar->setStyleSheet("#bladeScopeCanvasToolbar { background: transparent; }");
+    _toolbar->setStyleSheet(
+        "#bladeScopeCanvasToolbar, #bladeScopeCanvasToolbar QWidget "
+        "{ background: transparent; }"
+        "#bladeScopeCanvasToolbar QPushButton:hover "
+        "{ background: rgba(128, 128, 128, 45); }");
     _toolbar->setFixedHeight(28);
     canvas->installEventFilter(_toolbar);
     _toolbar->show();
