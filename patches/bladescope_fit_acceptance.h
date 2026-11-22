@@ -21,6 +21,29 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
   };
 
   QTimer::singleShot(0, window, [=, &data] {
+    const auto workbookPath = QDir(output).filePath("acceptance-power-curve.xlsx");
+    const CurveSheet expected{{QStringList{"项目动态功率曲线","","",""},
+      QStringList{"Turbine Type","Air Density (Kg/m3)","Turbulent Intensity",""},
+      QStringList{"Test turbine","ρ=1.031","Iref=0.142","inflow=0.3"},
+      QStringList{"Wind(m/s)","Power (kW)","Ct","Cp"},
+      QStringList{"2.5","95.69","0.9399","0.2884"}, QStringList{"3","227.47","0.9299","0.3968"}},3,0,1};
+    const auto bytes = writeCurveSheet(expected);
+    QFile workbookFile(workbookPath);
+    if (bytes.isEmpty() || !workbookFile.open(QIODevice::WriteOnly) || workbookFile.write(bytes) != bytes.size()) {
+      fail(QStringLiteral("write standard power curve XLSX"));
+      return;
+    }
+    workbookFile.close();
+    try {
+      const auto actual = readCurveSheet(workbookPath);
+      if (actual.rows != expected.rows || curvePoints(actual) != curvePoints(expected)) {
+        fail(QStringLiteral("standard power curve XLSX round-trip"));
+        return;
+      }
+    } catch (const std::exception& ex) {
+      fail(QString::fromUtf8(ex.what()));
+      return;
+    }
     auto& wind = data.addNumeric("BladeFitTestWind")->second;
     auto& power = data.addNumeric("BladeFitTestPower")->second;
     auto& pitch = data.addNumeric("BladeFitTestPitch")->second;

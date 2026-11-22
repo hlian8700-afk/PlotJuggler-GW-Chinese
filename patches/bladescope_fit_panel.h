@@ -1,5 +1,6 @@
 #pragma once
 #include "bladescope_trend.h"
+#include "bladescope_fit_xlsx.h"
 #include <QSaveFile>
 #include "qwt_plot_picker.h"
 #include "qwt_picker_machine.h"
@@ -45,6 +46,104 @@ inline void saveCsv(QWidget* parent,const QString& title,const QVector<QStringLi
     out.flush();if(out.status()==QTextStream::Ok && file.commit())return;
   }
   QMessageBox::warning(parent,title,file.errorString());
+}
+
+inline void profileControls(QVBoxLayout* layout, QDialog* parent, QString id, QString title,
+                            std::function<QJsonObject()> capture, std::function<void(const QJsonObject&)> apply,
+                            std::function<bool(const QJsonObject&)> validate)
+{
+  const auto key = QStringLiteral("BladeScope/fitProfiles/") + id;
+  auto profiles = std::make_shared<QJsonObject>(
+      QJsonDocument::fromJson(QSettings().value(key).toByteArray()).object());
+  auto* row = new QHBoxLayout;
+  auto* names = new QComboBox;
+  names->setEditable(true);
+  names->setInsertPolicy(QComboBox::NoInsert);
+  names->lineEdit()->setPlaceholderText(title);
+  names->addItems(profiles->keys());
+  row->addWidget(names, 1);
+  layout->insertLayout(0, row);
+  auto persist = [=](const QString& selected) {
+    QSettings().setValue(key, QJsonDocument(*profiles).toJson(QJsonDocument::Compact));
+    names->clear();
+    names->addItems(profiles->keys());
+    names->setEditText(selected);
+  };
+  auto warning = [=](const QString& message) { QMessageBox::warning(parent, title, message); };
+  auto button = [&](QString label, auto callback) {
+    auto* control = new QPushButton(label);
+    row->addWidget(control);
+    QObject::connect(control, &QPushButton::clicked, parent, callback);
+  };
+  button(QStringLiteral("载入"), [=] {
+    const auto name = names->currentText().trimmed();
+    if (profiles->contains(name)) apply(profiles->value(name).toObject());
+    else warning(QStringLiteral("请选择已保存的组。"));
+  });
+  button(QStringLiteral("保存"), [=] {
+    const auto name = names->currentText().trimmed();
+    if (name.isEmpty()) { warning(QStringLiteral("请输入组名。")); return; }
+    try {
+      const auto values = capture();
+      if (profiles->contains(name) && QMessageBox::question(parent, title,
+          QStringLiteral("覆盖同名组？")) != QMessageBox::Yes) return;
+      profiles->insert(name, values);
+      persist(name);
+    } catch (const std::exception& ex) { warning(QString::fromUtf8(ex.what())); }
+  });
+  button(QStringLiteral("重命名"), [=] {
+    const auto name = names->currentText().trimmed();
+    if (!profiles->contains(name)) return;
+    bool ok = false;
+    const auto next = QInputDialog::getText(parent, title, QStringLiteral("新组名"),
+                                           QLineEdit::Normal, name, &ok).trimmed();
+    if (!ok || next.isEmpty() || next == name) return;
+    if (profiles->contains(next)) { warning(QStringLiteral("组名已存在。")); return; }
+    const auto values = profiles->take(name);
+    profiles->insert(next, values);
+    persist(next);
+  });
+  button(QStringLiteral("删除"), [=] {
+    const auto name = names->currentText().trimmed();
+    if (profiles->contains(name) && QMessageBox::question(parent, title,
+        QStringLiteral("删除选定组？")) == QMessageBox::Yes) {
+      profiles->remove(name);
+      persist({});
+    }
+  });
+  button(QStringLiteral("导入"), [=] {
+    const auto path = QFileDialog::getOpenFileName(parent, title, {}, "JSON (*.json)");
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024*1024) {
+      warning(QStringLiteral("无法读取配置文件或文件过大。")); return;
+    }
+    const auto doc = QJsonDocument::fromJson(file.readAll()).object();
+    const auto name = doc.value("name").toString().trimmed();
+    const auto values = doc.value("values").toObject();
+    if (doc.value("version").toInt() != 1 || doc.value("type").toString() != id ||
+        name.isEmpty() || !doc.value("values").isObject() || !validate(values)) {
+      warning(QStringLiteral("文件类型、版本或内容不符合此组的配置格式。")); return;
+    }
+    QString target = name;
+    for (int n=2; profiles->contains(target); ++n)
+      target = QStringLiteral("%1 (%2)").arg(name).arg(n);
+    profiles->insert(target, values);
+    persist(target);
+    apply(values);
+  });
+  button(QStringLiteral("导出"), [=] {
+    const auto name = names->currentText().trimmed();
+    if (!profiles->contains(name)) { warning(QStringLiteral("请先保存并选中要导出的组。")); return; }
+    auto path = QFileDialog::getSaveFileName(parent, title, id + ".json", "JSON (*.json)");
+    if (path.isEmpty()) return;
+    if (QFileInfo(path).suffix().isEmpty()) path += ".json";
+    QSaveFile file(path);
+    const auto bytes = QJsonDocument(QJsonObject{{"version",1},{"type",id},{"name",name},
+                                                 {"values",profiles->value(name)}}).toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+      warning(QStringLiteral("无法保存配置文件。"));
+  });
 }
 
 struct Snapshot
@@ -186,7 +285,11 @@ class Panel : public QWidget
     const auto groups=QJsonDocument::fromJson(saved.value("BladeScope/measurementGroups").toByteArray()).object();
     auto* groupBox=new QComboBox;groupBox->addItem(QStringLiteral("所有测点"));groupBox->addItems(groups.keys());layout.addWidget(groupBox);
     auto* pages=new QTabWidget;layout.addWidget(pages,1);
-    auto* mapping=new QTableWidget(NRoles,4);pages->addTab(mapping,QStringLiteral("测点关联"));
+    auto* mappingPage=new QWidget;
+    auto* mappingLayout=new QVBoxLayout(mappingPage);
+    auto* mapping=new QTableWidget(NRoles,4);
+    mappingLayout->addWidget(mapping);
+    pages->addTab(mappingPage,QStringLiteral("测点关联"));
     mapping->setHorizontalHeaderLabels({"物理量","测点或别名（分号分隔）","有效下限","有效上限"});
     mapping->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
     mapping->verticalHeader()->hide();
@@ -210,7 +313,10 @@ class Panel : public QWidget
     });
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);
     auto* formPage=new QWidget;auto* f=new QFormLayout(formPage);scroll->setWidget(formPage);
-    pages->addTab(scroll,QStringLiteral("机组与计算"));
+    auto* parameterPage=new QWidget;
+    auto* parameterLayout=new QVBoxLayout(parameterPage);
+    parameterLayout->addWidget(scroll);
+    pages->addTab(parameterPage,QStringLiteral("机组与计算"));
     QMap<QString,QLineEdit*> fields;
     auto parameter=[&](QString key,QString title,QString fallback){
       auto* e=new QLineEdit(config.contains(key)?num(config.value(key).toDouble()):fallback);
@@ -231,10 +337,148 @@ class Panel : public QWidget
     auto* gen=new QCheckBox(QStringLiteral("M21 / M35 使用发电机转速"));gen->setChecked(config.value("generator").toBool());f->addRow(gen);
     auto* abs=new QCheckBox(QStringLiteral("M23 使用对风偏差绝对值"));abs->setChecked(config.value("absoluteYaw").toBool(true));f->addRow(abs);
     auto* sectors=new QComboBox;sectors->addItems({"16","24"});sectors->setCurrentText(QString::number(config.value("sectors").toInt(16)));f->addRow(QStringLiteral("风玫瑰扇区"),sectors);
-    auto* theory=new QPlainTextEdit;QStringList lines;
-    for(auto p:parameters().reference)lines<<num(p.x)+","+num(p.y);
-    theory->setPlainText(lines.join('\n'));theory->setPlaceholderText(QStringLiteral("每行输入 风速,功率(kW)，按风速递增。留空使用机组参数估算。"));
-    pages->addTab(theory,QStringLiteral("厂家功率曲线"));
+    QMap<QString,QPair<QCheckBox*,bool>> toggles{
+      {"generator",{gen,false}}, {"absoluteYaw",{abs,true}}, {"rejectFlags",{flags,true}},
+      {"filterState",{state,false}}};
+    auto captureMapping = [&] {
+      QJsonObject values;
+      for(int i=0;i<NRoles;++i){
+        values["role"+QString::number(i)]=selectors[i]->currentText().trimmed();
+        const auto a=mapping->item(i,2)->text().trimmed(), b=mapping->item(i,3)->text().trimmed();
+        if(a.isEmpty() && b.isEmpty()) continue;
+        bool okA,okB; const double lo=a.toDouble(&okA), hi=b.toDouble(&okB);
+        if(!okA || !okB || !std::isfinite(lo) || !std::isfinite(hi) || lo>hi)
+          throw std::runtime_error((roles()[i]+QStringLiteral("有效范围有误")).toStdString());
+        values["limit"+QString::number(i)] = QJsonArray{lo,hi};
+      }
+      return values;
+    };
+    auto captureParameters = [&] {
+      QJsonObject values;
+      for(auto it=fields.cbegin();it!=fields.cend();++it){
+        const auto text=it.value()->text().trimmed();
+        if(text.isEmpty()) continue;
+        bool ok; const double value=text.toDouble(&ok);
+        if(!ok || !std::isfinite(value)) throw std::runtime_error("请输入有效数字");
+        values[it.key()]=value;
+      }
+      for(auto it=toggles.cbegin();it!=toggles.cend();++it) values[it.key()]=it.value().first->isChecked();
+      values["sectors"]=sectors->currentText().toInt();
+      return values;
+    };
+    profileControls(mappingLayout,&d,"measurement-associations",QStringLiteral("测点关联组"),captureMapping,
+      [&](const QJsonObject& values) {
+        for(int i=0;i<NRoles;++i){
+          selectors[i]->setEditText(values.value("role"+QString::number(i)).toString());
+          const auto limits=values.value("limit"+QString::number(i)).toArray();
+          for(int j=0;j<2;++j) mapping->item(i,j+2)->setText(limits.size()==2?num(limits[j].toDouble()):QString());
+        }
+      }, [](const QJsonObject& values) {
+        for(int i=0;i<NRoles;++i){
+          if(!values.value("role"+QString::number(i)).isString()) return false;
+          const auto key="limit"+QString::number(i);
+          if(!values.contains(key)) continue;
+          const auto limits=values.value(key).toArray();
+          if(limits.size()!=2 || !limits[0].isDouble() || !limits[1].isDouble() ||
+             limits[0].toDouble()>limits[1].toDouble()) return false;
+        }
+        return true;
+      });
+    profileControls(parameterLayout,&d,"turbine-parameters",QStringLiteral("机组参数组"),captureParameters,
+      [&](const QJsonObject& values) {
+        for(auto it=fields.cbegin();it!=fields.cend();++it)
+          it.value()->setText(values.contains(it.key())?num(values.value(it.key()).toDouble()):QString());
+        for(auto it=toggles.cbegin();it!=toggles.cend();++it)
+          it.value().first->setChecked(values.value(it.key()).toBool(it.value().second));
+        sectors->setCurrentText(QString::number(values.value("sectors").toInt(16)));
+      }, [&](const QJsonObject& values) {
+        for(auto it=values.begin();it!=values.end();++it) {
+          if(toggles.contains(it.key())) { if(!it.value().isBool()) return false; }
+          else if(it.key()=="sectors") {
+            if(it.value()!=QJsonValue(16) && it.value()!=QJsonValue(24)) return false;
+          } else if(!fields.contains(it.key()) || !it.value().isDouble()) return false;
+        }
+        return !values.isEmpty();
+      });
+
+    auto* theoryPage=new QWidget;
+    auto* theoryLayout=new QVBoxLayout(theoryPage);
+    auto* curveActions=new QHBoxLayout;
+    auto* importCurve=new QPushButton(QStringLiteral("导入标准功率曲线 XLSX"));
+    auto* exportCurve=new QPushButton(QStringLiteral("导出标准功率曲线 XLSX"));
+    auto* curveModel=new QLabel;
+    curveActions->addWidget(importCurve);curveActions->addWidget(exportCurve);curveActions->addStretch();
+    theoryLayout->addLayout(curveActions);theoryLayout->addWidget(curveModel);
+    auto* theory=new QPlainTextEdit;
+    theoryLayout->addWidget(theory);
+    pages->addTab(theoryPage,QStringLiteral("标准功率曲线"));
+    auto editText=[](const QJsonArray& points) {
+      QStringList lines;
+      for(const auto point:points){
+        const auto xy=point.toArray();
+        lines << QString::number(xy[0].toDouble(),'g',17)+","+QString::number(xy[1].toDouble(),'g',17);
+      }
+      return lines.join('\n');
+    };
+    theory->setPlainText(editText(config.value("reference").toArray()));
+    theory->setPlaceholderText(QStringLiteral("每行输入 风速,功率(kW)，按风速递增。留空使用机组参数估算。"));
+    CurveSheet workbook;
+    const auto stored=config.value("referenceWorkbook").toObject();
+    workbook.header=stored.value("header").toInt(-1);
+    workbook.wind=stored.value("wind").toInt(-1);
+    workbook.power=stored.value("power").toInt(-1);
+    for(const auto value:stored.value("rows").toArray()){
+      QStringList row;
+      for(const auto cell:value.toArray()) row<<cell.toString();
+      workbook.rows.append(row);
+    }
+    auto showMetadata=[&]{
+      QStringList metadata;
+      for(int i=1;i<workbook.header && i<workbook.rows.size();++i)
+        metadata<<workbook.rows[i].join(QStringLiteral("  |  "));
+      curveModel->setText(metadata.join('\n'));
+      curveModel->setVisible(!metadata.isEmpty());
+    };
+    showMetadata();
+    auto readEditedCurve=[&] {
+      CurveSheet sheet{{QStringList{"项目动态功率曲线"}, QStringList{"Turbine Type","Air Density (Kg/m3)","Turbulent Intensity"},
+                        QStringList{"","",""}, QStringList{"Wind(m/s)","Power (kW)","Ct","Cp"}},3,0,1};
+      for(auto line:theory->toPlainText().split('\n',Qt::SkipEmptyParts)){
+        const auto fields=line.trimmed().split(QRegularExpression("[,，;\\s]+"),Qt::SkipEmptyParts);
+        if(fields.isEmpty()) continue;
+        if(fields.size()!=2) throw std::runtime_error("每行应填写风速和功率两个数值");
+        sheet.rows.append(fields);
+      }
+      if(sheet.rows.size()>4){
+        const auto points=curvePoints(sheet);
+        if(workbook.header>=0 && curvePoints(workbook)==points) return workbook;
+      }
+      return sheet;
+    };
+    connect(importCurve,&QPushButton::clicked,&d,[&]{
+      const auto path=QFileDialog::getOpenFileName(&d,QStringLiteral("导入标准功率曲线"),{},"Excel (*.xlsx)");
+      if(path.isEmpty()) return;
+      try {
+        auto imported=readCurveSheet(path);
+        const auto points=curvePoints(imported);
+        workbook=std::move(imported);
+        theory->setPlainText(editText(points));
+        showMetadata();
+      } catch(const std::exception& ex) { QMessageBox::warning(&d,d.windowTitle(),QString::fromUtf8(ex.what())); }
+    });
+    connect(exportCurve,&QPushButton::clicked,&d,[&]{
+      try {
+        const auto sheet=readEditedCurve();
+        curvePoints(sheet);
+        auto path=QFileDialog::getSaveFileName(&d,QStringLiteral("导出标准功率曲线"),"power-curve.xlsx","Excel (*.xlsx)");
+        if(path.isEmpty()) return;
+        if(!path.endsWith(".xlsx",Qt::CaseInsensitive)) path+=".xlsx";
+        const auto bytes=writeCurveSheet(sheet);
+        QSaveFile file(path);
+        if(bytes.isEmpty() || !file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size() || !file.commit())
+          throw std::runtime_error("无法写入标准功率曲线文件");
+      } catch(const std::exception& ex) { QMessageBox::warning(&d,d.windowTitle(),QString::fromUtf8(ex.what())); }
+    });
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);layout.addWidget(buttons);
     connect(buttons,&QDialogButtonBox::rejected,&d,&QDialog::reject);
     connect(use,&QPushButton::clicked,&d,[&]{if(library.contains(templateName->currentText())){
@@ -242,34 +486,30 @@ class Panel : public QWidget
     connect(buttons,&QDialogButtonBox::accepted,&d,[&]{
       auto next=config;
       auto invalid=[&](QString t){QMessageBox::warning(&d,d.windowTitle(),t);};
-      for(int i=0;i<NRoles;++i){
-        next["role"+QString::number(i)]=selectors[i]->currentText().trimmed();
-        const auto a=mapping->item(i,2)->text().trimmed(),b=mapping->item(i,3)->text().trimmed();const auto key="limit"+QString::number(i);
-        if(a.isEmpty()&&b.isEmpty())next.remove(key);
-        else{bool okA,okB;double lo=a.toDouble(&okA),hi=b.toDouble(&okB);
-          if(!okA||!okB||!std::isfinite(lo)||!std::isfinite(hi)||lo>hi){invalid(roles()[i]+QStringLiteral("有效范围有误"));return;}
-          next[key]=QJsonArray{lo,hi};}
-      }
-      for(auto it=fields.begin();it!=fields.end();++it){
-        auto t=it.value()->text().trimmed();if(t.isEmpty()){next.remove(it.key());continue;}
-        bool ok;double v=t.toDouble(&ok);
-        if(!ok||!std::isfinite(v)){invalid(QStringLiteral("请输入有效数字"));return;} next[it.key()]=v;
-      }
+      try {
+        for(int i=0;i<NRoles;++i) next.remove("limit"+QString::number(i));
+        for(const auto& key:fields.keys()) next.remove(key);
+        for(const auto& values:{captureMapping(),captureParameters()})
+          for(auto it=values.begin();it!=values.end();++it) next[it.key()]=it.value();
+      } catch(const std::exception& ex) { invalid(QString::fromUtf8(ex.what())); return; }
       if(next.value("width").toDouble(.5)<=0 || next.value("efficiency").toDouble(1)<=0 ||
          next.value("efficiency").toDouble(1)>1 || next.value("degree").toInt(4)<4 ||next.value("degree").toInt(4)>6){
         invalid(QStringLiteral("请检查分箱宽度、效率和拟合阶数"));return;}
       if(next.value("torqueDegree").toInt(2)<2||next.value("torqueDegree").toInt(2)>3){
         invalid(QStringLiteral("转矩拟合支持二阶或三阶"));return;}
-      QJsonArray refs;double prev=-std::numeric_limits<double>::infinity();
-      for(auto line:theory->toPlainText().split('\n',Qt::SkipEmptyParts)){
-        auto pair=line.trimmed().split(QRegularExpression("[,，;\\s]+"),Qt::SkipEmptyParts);
-        bool a,b;double x=pair.value(0).toDouble(&a),y=pair.value(1).toDouble(&b);
-        if(pair.size()!=2||!a||!b||!std::isfinite(x)||!std::isfinite(y)||x<=prev){invalid(QStringLiteral("请检查厂家曲线的数据和顺序"));return;}
-        refs.append(QJsonArray{x,y});prev=x;
-      }
-      if(refs.size()==1){invalid(QStringLiteral("厂家曲线至少需要两个点"));return;}
-      next["reference"]=refs;next["generator"]=gen->isChecked();next["absoluteYaw"]=abs->isChecked();
-      next["rejectFlags"]=flags->isChecked();next["filterState"]=state->isChecked();next["sectors"]=sectors->currentText().toInt();
+      try {
+        if(theory->toPlainText().trimmed().isEmpty()){
+          next["reference"]=QJsonArray();
+          next.remove("referenceWorkbook");
+        } else {
+          const auto sheet=readEditedCurve();
+          next["reference"]=curvePoints(sheet);
+          QJsonArray rows;
+          for(const auto& row:sheet.rows) rows.append(QJsonArray::fromStringList(row));
+          next["referenceWorkbook"]=QJsonObject{{"header",sheet.header},{"wind",sheet.wind},
+                                                 {"power",sheet.power},{"rows",rows}};
+        }
+      } catch(const std::exception& ex) { invalid(QString::fromUtf8(ex.what())); return; }
       if(keep->isChecked()){
         auto name=templateName->currentText().trimmed();if(name.isEmpty()){invalid(QStringLiteral("请输入模板名"));return;}
         library[name]=next;saved.setValue("BladeScope/fitTemplates",QJsonDocument(library).toJson(QJsonDocument::Compact));
