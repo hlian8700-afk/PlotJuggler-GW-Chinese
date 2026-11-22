@@ -1,5 +1,6 @@
 #pragma once
 #include "bladescope_fit_panel.h"
+#include "bladescope_sqlite_recording.h"
 #include <QScreen>
 #include "qwt_scale_div.h"
 #include "qwt_text.h"
@@ -21,6 +22,62 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
   };
 
   QTimer::singleShot(0, window, [=, &data] {
+    const auto recordingPath = QDir(output).filePath("acceptance-recording.DATA");
+    const auto connectionName = QUuid::createUuid().toString();
+    bool fixtureReady = false;
+    {
+      auto database = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+      database.setDatabaseName(recordingPath);
+      const bool opened = database.open();
+      QSqlQuery fixture(database);
+      fixtureReady = opened &&
+        fixture.exec(R"(CREATE TABLE oneseconddata ("WTUR.Tm.Rw.Dt" TEXT, "WGEN.Spd.Ra.F32" REAL, "state flag" TEXT))") &&
+        fixture.exec(R"(INSERT INTO oneseconddata VALUES
+          ('2026-11-06 00:00:03.250', 103, 'true'),
+          ('2026-11-06 00:00:00.100', 100, 'false'),
+          ('2026-11-06 00:00:02.125', NULL, 'invalid'),
+          ('2026-11-06 00:00:01.500', 101, 'false'),
+          ('invalid', 999, 'true'))") &&
+        fixture.exec(R"(CREATE TABLE realtimedata (time INTEGER, power REAL))") &&
+        fixture.exec(R"(INSERT INTO realtimedata VALUES (2000, 20), (1000, 10))") &&
+        fixture.exec(R"(CREATE TABLE realtimedata_1 (time TEXT, power REAL))");
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    if (!fixtureReady || !BladeSqliteRecording::validHeader(recordingPath)) {
+      fail(QStringLiteral("create SQLite DATA fixture or load Qt SQLite driver"));
+      return;
+    }
+    const auto stamp = BladeRecordingIndex::timestamp;
+    std::atomic_bool canceled{false};
+    auto recording = BladeSqliteRecording::read(recordingPath,
+        {"oneseconddata", "WTUR.Tm.Rw.Dt", {"WGEN.Spd.Ra.F32", "state flag"},
+         stamp("2026-11-06 00:00:01.500"), stamp("2026-11-06 00:00:03.250"), false},
+        {"WGEN.Spd.Ra.F32"}, canceled);
+    const auto rpm = recording.data.numeric.find("WGEN.Spd.Ra.F32 [2]");
+    const auto flags = recording.data.numeric.find("state flag");
+    if (!recording.error.isEmpty() || recording.rows!=3 || recording.invalidTime!=1 ||
+        recording.invalidValues!=2 || rpm==recording.data.numeric.end() ||
+        rpm->second.size()!=2 || rpm->second.at(0).y!=101 || rpm->second.at(1).y!=103 ||
+        rpm->second.at(0).x!=stamp("2026-11-06 00:00:01.500") ||
+        flags==recording.data.numeric.end() || flags->second.size()!=2 ||
+        flags->second.at(0).y!=0 || flags->second.at(1).y!=1) {
+      fail(QStringLiteral("SQLite column selection, time ordering, nulls or name collision"));
+      return;
+    }
+    BladeSqliteRecording::Connection catalog(recordingPath);
+    if (BladeSqliteRecording::tables(catalog.db).size()!=3) {
+      fail(QStringLiteral("enumerate SQLite data tables"));
+      return;
+    }
+    auto millis = BladeSqliteRecording::read(recordingPath,
+        {"realtimedata", "time", {"power"}, 1.0, 2.0, true}, {}, canceled);
+    const auto powerSeries = millis.data.numeric.find("power");
+    if (!millis.error.isEmpty() || powerSeries==millis.data.numeric.end() ||
+        powerSeries->second.size()!=2 || powerSeries->second.at(0).x!=1.0 ||
+        powerSeries->second.at(1).x!=2.0) {
+      fail(QStringLiteral("SQLite millisecond timestamps"));
+      return;
+    }
     const auto workbookPath = QDir(output).filePath("acceptance-power-curve.xlsx");
     const CurveSheet expected{{QStringList{"项目动态功率曲线","","",""},
       QStringList{"Turbine Type","Air Density (Kg/m3)","Turbulent Intensity",""},

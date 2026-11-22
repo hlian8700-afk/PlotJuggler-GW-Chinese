@@ -2050,3 +2050,51 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 
 
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::GuiPrivate)' -Encoding UTF8
+
+$sqliteHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_sqlite_recording.h")
+Set-Content -Path "plotjuggler_app/bladescope_sqlite_recording.h" -Value $sqliteHeader -Encoding UTF8BOM
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'find_package(Qt5 REQUIRED COMPONENTS Sql)' -Encoding UTF8
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::Sql)' -Encoding UTF8
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"" }
+  @{ Old = '  extensions.push_front(QString("All Supported Files (%1)").arg(single_line_extensions.trimmed()));'; New = @'
+  const QString sqliteExtensions = QStringLiteral("*.data *.db *.sqlite *.sqlite3");
+  single_line_extensions.append(sqliteExtensions);
+  extensions.push_back(QStringLiteral("SQLite 录波文件 (%1)").arg(sqliteExtensions));
+  extensions.push_front(QString("All Supported Files (%1)").arg(single_line_extensions.trimmed()));
+'@ }
+  @{ Old = @'
+  if (loadDataFromFiles(fileNames))
+  {
+    updateRecentDataMenu(fileNames);
+  }
+'@; New = @'
+  QStringList ordinaryFiles;
+  for (const auto& path : fileNames)
+    if (!BladeSqliteRecording::isRecordingExtension(path))
+      ordinaryFiles << path;
+  if (!ordinaryFiles.isEmpty() && loadDataFromFiles(ordinaryFiles))
+    updateRecentDataMenu(ordinaryFiles);
+  if (ordinaryFiles.size() == fileNames.size()) return;
+
+  QStringList summaries;
+  for (const auto& path : fileNames)
+  {
+    if (!BladeSqliteRecording::isRecordingExtension(path)) continue;
+    auto recording = BladeSqliteRecording::open(this, path, _mapped_plot_data.getAllNames());
+    if (recording.data.numeric.empty()) continue;
+    const auto series = recording.data.numeric.size();
+    importPlotDataMap(recording.data, false);
+    summaries << QStringLiteral("%1：%2 行，%3 个测点，跳过 %4 条无效时间和 %5 个无效测点值。")
+      .arg(QFileInfo(path).fileName()).arg(qlonglong(recording.rows)).arg(qulonglong(series))
+      .arg(qlonglong(recording.invalidTime)).arg(qlonglong(recording.invalidValues));
+  }
+  if (!summaries.isEmpty())
+  {
+    _curvelist_widget->updateFilter();
+    updateDataAndReplot(true);
+    linkedZoomOut();
+    QMessageBox::information(this, QStringLiteral("SQLite 录波导入完成"), summaries.join('\n'));
+  }
+'@ }
+)

@@ -95,6 +95,13 @@ jobs:
           $exe = Get-ChildItem "$env:GITHUB_WORKSPACE\stage" -Recurse -Filter plotjuggler.exe | Select-Object -First 1
           if (!$exe) { throw "plotjuggler.exe was not produced by the build." }
           windeployqt --release --compiler-runtime $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Qt deployment failed" }
+          $sqlDriver = Join-Path $exe.DirectoryName "sqldrivers/qsqlite.dll"
+          if (!(Test-Path $sqlDriver)) {
+            New-Item -ItemType Directory -Force (Split-Path $sqlDriver) | Out-Null
+            Copy-Item (Join-Path $env:QT_ROOT_DIR "plugins/sqldrivers/qsqlite.dll") $sqlDriver
+          }
+          if (!(Test-Path $sqlDriver)) { throw "Qt SQLite driver is missing" }
           Copy-Item customization/data/gw_tag_mapping.csv $exe.DirectoryName
           # Upstream plugin install destination is configured as an absolute path
           # (C:/Program Files/plotjuggler/...), outside our custom stage prefix.
@@ -194,6 +201,7 @@ jobs:
           $exe = Join-Path $target "bin/BladeScope.exe"
           $csv = Join-Path $target "bin/gw_tag_mapping.csv"
           if (!(Test-Path $exe)) { throw "Installed BladeScope executable missing" }
+          if (!(Test-Path (Join-Path $target "bin/sqldrivers/qsqlite.dll"))) { throw "Installed Qt SQLite driver missing" }
           if (!(Test-Path $csv)) { throw "Installed Goldwind Chinese dictionary missing" }
           if (!(Test-Path (Join-Path $target "bin/DataLoadCSV.dll"))) { throw "Installed CSV plugin missing" }
           if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
