@@ -3,6 +3,7 @@
 #include "bladescope_recording_index.h"
 #include "bladescope_time_display.h"
 #include <QCompleter>
+#include <QHash>
 #include <functional>
 #include <optional>
 #include <QSqlDatabase>
@@ -190,7 +191,7 @@ inline ReadResult read(const QString& path, const Selection& selection,
 
 struct RecordingOptions
 {
-  Selection selection;
+  QVector<Selection> selections;
   int precision;
 };
 
@@ -225,7 +226,7 @@ inline std::optional<RecordingOptions> selectRecording(
   auto* until = new QLineEdit;
   for(auto* value:{from,until}) value->setPlaceholderText(QStringLiteral("留空不限，日期时间或秒数"));
   if (!available.isEmpty())
-    form->addRow(QStringLiteral("数据表"), table);
+    form->addRow(QStringLiteral("配置时间列的数据表"), table);
   else
     table->hide();
   form->addRow(QStringLiteral("时间列"),time);
@@ -264,6 +265,8 @@ inline std::optional<RecordingOptions> selectRecording(
     settings.setValue(key, QJsonDocument(groups).toJson(QJsonDocument::Compact));
   };
 
+  if (!available.isEmpty())
+    layout.addWidget(new QLabel(QStringLiteral("可跨表勾选测点。上方数据表用于设置各表的时间列和数字时间单位。")));
   auto* measurements = new QListWidget;
   layout.addWidget(measurements,1);
   auto* actions = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
@@ -273,46 +276,83 @@ inline std::optional<RecordingOptions> selectRecording(
   actions->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("\u53d6\u6d88"));
   layout.addWidget(actions);
   const auto aliases = qApp->property("bladeScopeTagAliases").toMap();
-  auto filter=[&]{
-    for(int i=0;i<measurements->count();++i)
-      measurements->item(i)->setHidden(!measurements->item(i)->text().contains(search->text().trimmed(),Qt::CaseInsensitive));
-  };
   const auto timeField = [&] {
     const int index = time->findText(time->currentText().trimmed(), Qt::MatchFixedString);
     return index >= 0 ? time->itemText(index) : QString();
   };
-  auto populate=[&] {
-    const auto timeName = timeField();
-    QSet<QString> checked;
-    for(int i=0;i<measurements->count();++i) {
-      auto* item=measurements->item(i);
-      if(item->checkState()==Qt::Checked) checked.insert(item->data(Qt::UserRole).toString());
+  const auto tableNames = available.isEmpty() ? QStringList{QString()} : available;
+  QMap<QString, QStringList> fields;
+  QMap<QString, QString> timeColumns;
+  QMap<QString, int> units;
+  constexpr int tableRole = Qt::UserRole + 1;
+  for (const auto& tableName : tableNames)
+  {
+    fields.insert(tableName, fieldsForTable(tableName));
+    for (const auto& preferred : QStringList{"WTUR.Tm.Rw.Dt", "timestamp", "time", "datetime"})
+    {
+      const auto& columns = fields[tableName];
+      const auto match = std::find_if(columns.cbegin(), columns.cend(), [&](const QString& field) {
+        return field.compare(preferred, Qt::CaseInsensitive) == 0;
+      });
+      if (!available.isEmpty() && match != columns.cend())
+      {
+        timeColumns.insert(tableName, *match);
+        break;
+      }
     }
-    measurements->clear();
-    for(int i=0;i<time->count();++i) {
-      if(time->itemText(i)==timeName) continue;
-      const auto tag=time->itemText(i), alias=aliases.value(tag).toString();
-      auto* item=new QListWidgetItem(alias.isEmpty()?tag:tag+" — "+alias,measurements);
-      item->setData(Qt::UserRole,tag);
-      item->setCheckState(checked.contains(tag)?Qt::Checked:Qt::Unchecked);
+    for (const auto& tag : fields[tableName])
+    {
+      const auto alias = aliases.value(tag).toString();
+      auto label = alias.isEmpty() ? tag : tag + QStringLiteral(" — ") + alias;
+      if (tableNames.size() > 1)
+        label += QStringLiteral("  [%1]").arg(tableName);
+      auto* item = new QListWidgetItem(label, measurements);
+      item->setData(Qt::UserRole, tag);
+      item->setData(tableRole, tableName);
+      item->setCheckState(Qt::Unchecked);
+    }
+  }
+  const auto isTimeItem = [&](const QListWidgetItem* item) {
+    return item->data(Qt::UserRole).toString() == timeColumns.value(item->data(tableRole).toString());
+  };
+  const auto filter = [&] {
+    const auto term = search->text().trimmed();
+    for (int i = 0; i < measurements->count(); ++i)
+    {
+      auto* item = measurements->item(i);
+      item->setHidden(isTimeItem(item) || !item->text().contains(term, Qt::CaseInsensitive));
+    }
+  };
+  const auto updateTimeItems = [&] {
+    for (int i = 0; i < measurements->count(); ++i)
+    {
+      auto* item = measurements->item(i);
+      if (isTimeItem(item))
+        item->setCheckState(Qt::Unchecked);
     }
     filter();
   };
-  auto changeTable=[&]{
+  QString editingTable = table->currentText();
+  const auto saveTime = [&] {
+    timeColumns.insert(editingTable, timeField());
+    units.insert(editingTable, numericUnit->currentIndex());
+    updateTimeItems();
+  };
+  const auto showTable = [&] {
+    editingTable = table->currentText();
     const QSignalBlocker block(time);
     time->clear();
-    time->addItems(fieldsForTable(table->currentText()));
-    time->setCurrentIndex(-1);
-    if (!available.isEmpty()) for(const auto& preferred:QStringList{"WTUR.Tm.Rw.Dt","timestamp","time","datetime"}) {
-      const int i=time->findText(preferred,Qt::MatchFixedString);
-      if(i>=0) { time->setCurrentIndex(i); break; }
-    }
-    measurements->clear();
-    populate();
+    time->addItems(fields.value(editingTable));
+    time->setCurrentIndex(time->findText(timeColumns.value(editingTable), Qt::MatchExactly));
+    numericUnit->setCurrentIndex(units.value(editingTable));
+    updateTimeItems();
   };
-  QObject::connect(table,&QComboBox::currentTextChanged,&dialog,changeTable);
-  QObject::connect(time,QOverload<int>::of(&QComboBox::activated),&dialog,populate);
-  QObject::connect(time->lineEdit(), &QLineEdit::editingFinished, &dialog, populate);
+  QObject::connect(table, &QComboBox::currentTextChanged, &dialog, [&] {
+    saveTime();
+    showTable();
+  });
+  QObject::connect(time, QOverload<int>::of(&QComboBox::activated), &dialog, saveTime);
+  QObject::connect(time->lineEdit(), &QLineEdit::editingFinished, &dialog, saveTime);
   QObject::connect(search,&QLineEdit::textChanged,&dialog,filter);
   QObject::connect(all,&QPushButton::clicked,&dialog,[&]{
     for(int i=0;i<measurements->count();++i)
@@ -329,13 +369,13 @@ inline std::optional<RecordingOptions> selectRecording(
     if (!savedGroups.contains(name))
       return warn(QStringLiteral("请选择已保存的测点组。"));
 
-    const auto timeName = timeField();
-    QHash<QString, QListWidgetItem*> items;
+    saveTime();
+    QMultiHash<QString, QListWidgetItem*> items;
     for (int i = 0; i < measurements->count(); ++i)
     {
       auto* item = measurements->item(i);
       const auto tag = item->data(Qt::UserRole).toString();
-      if (tag != timeName)
+      if (!isTimeItem(item))
         items.insert(tag, item);
     }
 
@@ -370,13 +410,13 @@ inline std::optional<RecordingOptions> selectRecording(
   });
   QObject::connect(saveGroup, &QPushButton::clicked, &dialog, [&] {
     const auto name = groupCombo->currentText().trimmed();
-    const auto timeName = timeField();
+    saveTime();
     QStringList tags;
     for (int i = 0; i < measurements->count(); ++i)
     {
       const auto* item = measurements->item(i);
       const auto tag = item->data(Qt::UserRole).toString();
-      if (item->checkState() == Qt::Checked && tag != timeName)
+      if (item->checkState() == Qt::Checked && !isTimeItem(item) && !tags.contains(tag))
         tags << tag;
     }
     if (name.isEmpty() || tags.isEmpty())
@@ -391,41 +431,54 @@ inline std::optional<RecordingOptions> selectRecording(
   });
   QObject::connect(manageGroups, &QPushButton::clicked, &dialog, [&] {
     const auto name = groupCombo->currentText().trimmed();
-    const auto timeName = timeField();
+    saveTime();
     QStringList tags;
-    for (int i = 0; i < time->count(); ++i)
+    for (int i = 0; i < measurements->count(); ++i)
     {
-      if (time->itemText(i) != timeName)
-        tags << time->itemText(i);
+      const auto* item = measurements->item(i);
+      if (!isTimeItem(item))
+        tags << item->data(Qt::UserRole).toString();
     }
+    tags.removeDuplicates();
     BladeAnalysis::manageGroups(&dialog, tags, savedGroups, persistGroups);
     refreshGroups(name);
   });
 
-  Selection selection;
-  QObject::connect(actions,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-  QObject::connect(actions,&QDialogButtonBox::accepted,&dialog,[&]{
-    const double inf=std::numeric_limits<double>::infinity();
-    selection={table->currentText(),timeField(),{},
-               from->text().trimmed().isEmpty()?-inf:BladeRecordingIndex::timestamp(from->text().trimmed()),
-               until->text().trimmed().isEmpty()?inf:BladeRecordingIndex::timestamp(until->text().trimmed()),
-               numericUnit->currentIndex()==1};
-    for(int i=0;i<measurements->count();++i) {
-      auto* item=measurements->item(i);
-      if(item->checkState()==Qt::Checked && item->data(Qt::UserRole).toString()!=selection.time)
-        selection.measurements<<item->data(Qt::UserRole).toString();
+  QVector<Selection> selections;
+  QObject::connect(actions, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  QObject::connect(actions, &QDialogButtonBox::accepted, &dialog, [&] {
+    saveTime();
+    const double inf = std::numeric_limits<double>::infinity();
+    const double start = from->text().trimmed().isEmpty() ? -inf : BladeRecordingIndex::timestamp(from->text().trimmed());
+    const double end = until->text().trimmed().isEmpty() ? inf : BladeRecordingIndex::timestamp(until->text().trimmed());
+    QMap<QString, QStringList> checked;
+    for (int i = 0; i < measurements->count(); ++i)
+    {
+      const auto* item = measurements->item(i);
+      if (item->checkState() == Qt::Checked && !isTimeItem(item))
+        checked[item->data(tableRole).toString()] << item->data(Qt::UserRole).toString();
     }
-    if (selection.time.isEmpty() || selection.measurements.isEmpty() || std::isnan(selection.from) ||
-        std::isnan(selection.until) || selection.from>selection.until) {
-      QMessageBox::warning(&dialog,dialog.windowTitle(),QStringLiteral("请选中时间列和测点，并检查起止时间。"));
-      return;
+    if (checked.isEmpty() || std::isnan(start) || std::isnan(end) || start > end)
+      return warn(QStringLiteral("请勾选测点，并检查起止时间。"));
+    selections.clear();
+    for (auto it = checked.cbegin(); it != checked.cend(); ++it)
+    {
+      const auto field = timeColumns.value(it.key());
+      if (field.isEmpty())
+      {
+        table->setCurrentText(it.key());
+        time->setFocus();
+        return warn(it.key().isEmpty() ? QStringLiteral("请选择时间列。")
+                                     : QStringLiteral("请为 %1 选择时间列。").arg(it.key()));
+      }
+      selections.push_back({it.key(), field, it.value(), start, end, units.value(it.key()) == 1});
     }
     dialog.accept();
   });
-  changeTable();
+  showTable();
   time->setFocus();
-  if(dialog.exec()!=QDialog::Accepted) return {};
-  return RecordingOptions{selection, precision->currentIndex()};
+  if (dialog.exec() != QDialog::Accepted) return {};
+  return RecordingOptions{selections, precision->currentIndex()};
 
 }
 
@@ -447,14 +500,31 @@ inline ReadResult open(QWidget* parent, const QString& path, const std::unordere
       [&](const QString& table) { return columns(connection.db, table); });
   if (!options) return {};
   connection.db.close();
-  const auto& selection = options->selection;
+  auto usedNames = names;
 
   std::atomic_bool canceled{false};
   ReadResult result;
   QProgressDialog progress(QStringLiteral("正在读取 SQLite 测点…"),QStringLiteral("取消"),0,0,parent);
   progress.setWindowModality(Qt::WindowModal);
   auto worker = std::unique_ptr<QThread>(QThread::create([&] {
-    try { result=read(path,selection,names,canceled); }
+    try {
+      for (const auto& selection : options->selections)
+      {
+        if (canceled) return;
+        Samples samples(static_cast<size_t>(selection.measurements.size()));
+        const auto part = readSamples(path, selection, samples, canceled);
+        if (canceled) return;
+        if (!part.error.isEmpty())
+        {
+          result.error = selection.table + QStringLiteral(": ") + part.error;
+          return;
+        }
+        result.rows += part.rows;
+        result.invalidTime += part.invalidTime;
+        result.invalidValues += part.invalidValues;
+        buildSeries(result.data, selection, samples, usedNames, canceled);
+      }
+    }
     catch(const std::exception& ex) { result.error=QString::fromUtf8(ex.what()); }
   }));
   QEventLoop loop;

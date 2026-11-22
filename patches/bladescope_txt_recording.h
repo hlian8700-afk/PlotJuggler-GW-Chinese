@@ -147,14 +147,14 @@ inline ReadResult open(QWidget* parent, const QString& path, const std::unordere
       parent, QStringLiteral("TXT \u5f55\u6ce2\u5bfc\u5165"), path, {},
       [&](const QString&) { return fields; });
   if (!options) return {};
-  const int timeColumn = header.indexOf(options->selection.time);
+  const int timeColumn = header.indexOf(options->selections.front().time);
 
   std::atomic_bool canceled{false};
   ReadResult result;
   QProgressDialog progress(QStringLiteral("正在读取 TXT 录波…"),QStringLiteral("取消"),0,0,parent);
   progress.setWindowModality(Qt::WindowModal);
   auto worker = std::unique_ptr<QThread>(QThread::create([&] {
-    try { result=read(path,timeColumn,names,canceled,&options->selection); }
+    try { result=read(path,timeColumn,names,canceled,&options->selections.front()); }
     catch(const std::exception& ex) { result.error=QString::fromUtf8(ex.what()); }
   }));
   QEventLoop loop;

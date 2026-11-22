@@ -153,30 +153,36 @@ inline QStringList importFiles(QWidget* parent, const QStringList& paths,
       std::atomic_bool canceled{false};
       PJ::PlotDataMapRef data;
       QStringList errors;
-      int loaded = 0;
+      QSet<QString> loaded;
       size_t totalRows = 0;
       QProgressDialog progress(QStringLiteral("\u6b63\u5728\u8bfb\u53d6 DATA \u5f55\u6ce2"), QStringLiteral("\u53d6\u6d88"), 0, 0, parent);
       progress.setWindowModality(Qt::WindowModal);
       auto worker = std::unique_ptr<QThread>(QThread::create([&] {
         try {
-          Samples samples(static_cast<size_t>(options.selection.measurements.size()));
-          for (const auto& member : members) {
-            if (canceled) return;
-            size_t previousCount = 0;
-            for (const auto& channel : samples) previousCount += channel.size();
-            auto result = readSamples(member, options.selection, samples, canceled);
-            if (canceled) return;
-            size_t currentCount = 0;
-            for (const auto& channel : samples) currentCount += channel.size();
-            if (!result.error.isEmpty() || currentCount == previousCount) {
-              errors << QFileInfo(member).fileName() + ": " +
-                  (result.error.isEmpty() ? QStringLiteral("\u9009\u5b9a\u8303\u56f4\u65e0\u6709\u6548\u6d4b\u70b9") : result.error);
-              continue;
+          for (const auto& selection : options.selections)
+          {
+            Samples samples(static_cast<size_t>(selection.measurements.size()));
+            for (const auto& member : members)
+            {
+              if (canceled) return;
+              size_t previousCount = 0;
+              for (const auto& channel : samples) previousCount += channel.size();
+              const auto result = readSamples(member, selection, samples, canceled);
+              if (canceled) return;
+              size_t currentCount = 0;
+              for (const auto& channel : samples) currentCount += channel.size();
+              if (!result.error.isEmpty() || currentCount == previousCount)
+              {
+                errors << QStringLiteral("%1 [%2]: %3")
+                    .arg(QFileInfo(member).fileName(), selection.table,
+                         result.error.isEmpty() ? QStringLiteral("选定范围无有效测点") : result.error);
+                continue;
+              }
+              loaded.insert(member);
+              totalRows += size_t(result.rows);
             }
-            ++loaded;
-            totalRows += size_t(result.rows);
+            buildSeries(data, selection, samples, names, canceled);
           }
-          buildSeries(data, options.selection, samples, names, canceled);
         } catch (const std::exception& ex) {
           data.numeric.clear();
           errors << QString::fromUtf8(ex.what());
@@ -195,7 +201,7 @@ inline QStringList importFiles(QWidget* parent, const QStringList& paths,
       if (!data.numeric.empty()) {
         messages << QStringLiteral("%1: %2 \u4e2a\u6587\u4ef6, %3 \u884c, %4 \u4e2a\u6d4b\u70b9")
             .arg(QFileInfo(members.front()).fileName())
-            .arg(loaded).arg(qulonglong(totalRows)).arg(qulonglong(data.numeric.size()));
+            .arg(loaded.size()).arg(qulonglong(totalRows)).arg(qulonglong(data.numeric.size()));
         BladeTimeDisplay::setPrecision(options.precision);
         receive(data);
       }
