@@ -459,7 +459,8 @@ inline bool conditionPasses(const Condition& rule, double value)
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
                  const std::function<void(const QStringList&, bool, double, double, bool, const SampleFilter&, const QJsonObject&)>& plot,
-                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& dual)
+                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& dual,
+                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& xy)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
@@ -929,6 +930,15 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
         QStringLiteral("数据视图"), viewModes, statisticsMode->currentIndex(), false, &accepted);
     SampleFilter filter;
     if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter, graphAliases());
+  });
+  addButton(actions, "XY 分析", [&] {
+    bool firstOK = false, lastOK = false;
+    const double first = from->text().toDouble(&firstOK), last = to->text().toDouble(&lastOK);
+    if (!firstOK || !lastOK || !std::isfinite(first) || !std::isfinite(last) || first > last)
+      return warn(QStringLiteral("请输入有效的起止时间。"));
+    SampleFilter filter;
+    if (makeFilter(filter)) xy(selected(), first, last, statisticsMode->currentIndex() == 1,
+                               filter, graphAliases());
   });
   addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;

@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.27"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.28"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.27") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.28") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -1984,8 +1984,9 @@ $analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "blad
 Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
 Copy-Item (Join-Path $PSScriptRoot "bladescope_time_view_math.h") "plotjuggler_app/bladescope_time_view_math.h" -Force
 Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_dual_time.h") | Set-Content -Path "plotjuggler_app/bladescope_dual_time.h" -Encoding UTF8BOM
+Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_waveform_xy.h") | Set-Content -Path "plotjuggler_app/bladescope_waveform_xy.h" -Encoding UTF8BOM
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"`n#include `"bladescope_dual_time.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"`n#include `"bladescope_dual_time.h`"`n#include `"bladescope_waveform_xy.h`"" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
   ui->menuBar->removeAction(ui->menuCloudData->menuAction());
   auto* bladeGroupManager = bladePlotMenu->addAction(QString::fromUtf8("测点组管理..."));
@@ -2088,6 +2089,9 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           onUndoableChange();
         }, [this](const QStringList& names, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
           BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail, filter, aliases);
+        }, [this](const QStringList& names, double first, double last, bool detail,
+                  const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
+          BladeWaveformXY::open(this, _mapped_plot_data, names, first, last, detail, filter, aliases);
         });
   });
 '@ }
