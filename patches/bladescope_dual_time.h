@@ -100,6 +100,8 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   auto* rightRange = new QPushButton(QStringLiteral("设置右轴范围"));
   rightRange->setEnabled(false);
   bar->addWidget(rightRange);
+  auto* statistics = new QPushButton(QStringLiteral("统计与差值"));
+  bar->addWidget(statistics);
   bar->addStretch();
   auto* pages = new QStackedWidget;
   layout.addWidget(pages, 1);
@@ -192,6 +194,111 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       editor.accept();
     });
     editor.exec();
+  });
+  QObject::connect(statistics, &QPushButton::clicked, &dialog, [&] {
+    QDialog report(&dialog);
+    report.setWindowTitle(QStringLiteral("双轴统计与差值"));
+    report.resize(720, 430);
+    QVBoxLayout layout(&report);
+    QFormLayout settings;
+    layout.addLayout(&settings);
+    QComboBox x, y;
+    for (auto* box : {&x, &y}) box->addItems(left + right);
+    y.setCurrentIndex(left.size());
+    QDoubleSpinBox tolerance;
+    tolerance.setDecimals(6);
+    tolerance.setRange(0., 3600.);
+    QCheckBox difference(QStringLiteral("确认两测点单位一致，计算 Y−X"));
+    settings.addRow(QStringLiteral("参考 X"), &x);
+    settings.addRow(QStringLiteral("目标 Y"), &y);
+    settings.addRow(QStringLiteral("匹配容差（秒）"), &tolerance);
+    settings.addRow(&difference);
+    QPlainTextEdit text;
+    text.setReadOnly(true);
+    layout.addWidget(&text, 1);
+    QPushButton refresh(QStringLiteral("计算"));
+    QPushButton copy(QStringLiteral("复制统计"));
+    QHBoxLayout actions;
+    actions.addWidget(&refresh);
+    actions.addWidget(&copy);
+    layout.addLayout(&actions);
+
+    auto* active = pages->currentIndex() == 0 ? top : single;
+    const auto visible = active->currentBoundingRect();
+    const double start = visible.left() + active->timeOffset();
+    const double end = visible.right() + active->timeOffset();
+    const auto calculate = [&] {
+      QStringList rows{QStringLiteral("当前可见时间（原始秒）：%1 至 %2")
+                           .arg(BladeAnalysis::number(start), BladeAnalysis::number(end)),
+                       detail ? QStringLiteral("细化 TS 原始点") : QStringLiteral("常规抽稀数据"),
+                       filter ? QStringLiteral("已应用条件筛选") : QStringLiteral("未启用条件筛选")};
+      for (const auto& name : left + right)
+      {
+        const auto it = snapshot.numeric.find(name.toStdString());
+        if (it == snapshot.numeric.end()) continue;
+        const auto& series = it->second;
+        BladeAnalysis::Statistics stats;
+        std::vector<double> values;
+        const auto limit = BladeAnalysis::boundary(series, end, true);
+        for (size_t i = BladeAnalysis::boundary(series, start); i < limit; ++i)
+        {
+          const auto value = series.at(i).y;
+          if (!std::isfinite(value)) { ++stats.invalid; continue; }
+          stats.add(value);
+          values.push_back(value);
+        }
+        rows << QString();
+        BladeAnalysis::appendStatistics(rows, name, stats, &values);
+      }
+
+      if (difference.isChecked())
+      {
+        const auto reference = snapshot.numeric.find(x.currentText().toStdString());
+        const auto target = snapshot.numeric.find(y.currentText().toStdString());
+        if (reference != snapshot.numeric.end() && target != snapshot.numeric.end())
+        {
+          const auto& series = target->second;
+          const auto& source = reference->second;
+          const auto referenceStart = BladeAnalysis::boundary(source, start);
+          const auto referenceEnd = BladeAnalysis::boundary(source, end, true);
+          BladeAnalysis::Statistics stats;
+          std::vector<double> values;
+          const auto limit = BladeAnalysis::boundary(series, end, true);
+          size_t cursor = referenceStart;
+          for (size_t i = BladeAnalysis::boundary(series, start); i < limit; ++i)
+          {
+            const auto sample = series.at(i);
+            if (!std::isfinite(sample.y)) { ++stats.invalid; continue; }
+            while (cursor < referenceEnd && source.at(cursor).x < sample.x) ++cursor;
+            size_t best = cursor;
+            if (cursor > referenceStart && (cursor == referenceEnd ||
+                sample.x - source.at(cursor - 1).x <= source.at(cursor).x - sample.x))
+              best = cursor - 1;
+            if (best == referenceEnd || std::abs(source.at(best).x - sample.x) > tolerance.value() ||
+                !std::isfinite(source.at(best).y))
+            {
+              ++stats.unmatched;
+              continue;
+            }
+            const double value = sample.y - source.at(best).y;
+            if (!std::isfinite(value)) { ++stats.invalid; continue; }
+            stats.add(value);
+            values.push_back(value);
+          }
+          rows << QString();
+          BladeAnalysis::appendStatistics(rows,
+              QStringLiteral("差值 %1 − %2（匹配容差 %3 秒）")
+                  .arg(y.currentText(), x.currentText(), BladeAnalysis::number(tolerance.value())), stats, &values);
+        }
+      }
+      text.setPlainText(rows.join(QLatin1Char('\n')));
+    };
+    QObject::connect(&refresh, &QPushButton::clicked, &report, calculate);
+    QObject::connect(&copy, &QPushButton::clicked, &report, [&] {
+      QApplication::clipboard()->setText(text.toPlainText());
+    });
+    calculate();
+    report.exec();
   });
   synchronize(single, single->currentBoundingRect());
   dialog.exec();

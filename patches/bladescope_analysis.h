@@ -54,6 +54,28 @@ struct Statistics
   }
 };
 
+inline void appendStatistics(QStringList& rows, const QString& name, const Statistics& v,
+                         std::vector<double>* values = nullptr)
+{
+  rows << QStringLiteral("%1：有效 %2，无法匹配 %3，无效 %4")
+              .arg(name).arg(qulonglong(v.count)).arg(qulonglong(v.unmatched)).arg(qulonglong(v.invalid));
+  if (!v.count) return;
+  rows << QStringLiteral("最小 %1，最大 %2，极差 %3，均值 %4，总体标准差 %5")
+              .arg(number(v.low), number(v.high), number(v.high - v.low), number(v.mean),
+                   number(std::sqrt(std::max(0.0, v.m2 / double(v.count)))));
+  if (!values || values->empty()) return;
+  std::sort(values->begin(), values->end());
+  const auto percentile = [&](double ratio) {
+    const double position = ratio * (values->size() - 1);
+    const size_t index = size_t(position);
+    const auto lower = (*values)[index];
+    const auto upper = (*values)[std::min(index + 1, values->size() - 1)];
+    return number(lower + (upper - lower) * (position - index));
+  };
+  rows << QStringLiteral("P5 %1，P25 %2，中位数 %3，P75 %4，P95 %5")
+      .arg(percentile(.05), percentile(.25), percentile(.5), percentile(.75), percentile(.95));
+}
+
 inline size_t boundary(const PJ::PlotData& series, double time, bool upper = false)
 {
   size_t low = 0, high = series.size();
@@ -734,25 +756,6 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     rows << QString::fromUtf8("时间区间：%1 至 %2").arg(number(first), number(last));
     rows << QStringLiteral("数据口径：%1；筛选%2").arg(statisticsMode->currentText(),
         filter ? QStringLiteral("已启用") : QStringLiteral("未启用"));
-    const auto summary = [&](const QString& name, const Statistics& v, std::vector<double>* values = nullptr) {
-      rows << QStringLiteral("%1：有效 %2，无法匹配 %3，无效 %4")
-                  .arg(name).arg(qulonglong(v.count)).arg(qulonglong(v.unmatched)).arg(qulonglong(v.invalid));
-      if (!v.count) return;
-      rows << QStringLiteral("最小 %1，最大 %2，极差 %3，均值 %4，总体标准差 %5")
-                  .arg(number(v.low), number(v.high), number(v.high - v.low), number(v.mean),
-                       number(std::sqrt(std::max(0.0, v.m2 / double(v.count)))));
-      if (!values || values->empty()) return;
-      std::sort(values->begin(), values->end());
-      const auto percentile = [&](double ratio) {
-        const double position = ratio * (values->size() - 1);
-        const size_t index = size_t(position);
-        const auto lower = (*values)[index];
-        const auto upper = (*values)[std::min(index + 1, values->size() - 1)];
-        return number(lower + (upper - lower) * (position - index));
-      };
-      rows << QStringLiteral("P5 %1，P25 %2，中位数 %3，P75 %4，P95 %5")
-          .arg(percentile(.05), percentile(.25), percentile(.5), percentile(.75), percentile(.95));
-    };
     for (const auto& name : targets)
     {
       const auto it = data.numeric.find(name.toStdString());
@@ -803,12 +806,12 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       rows << "" << name;
       if (filter)
       {
-        summary(QStringLiteral("筛选前"), full);
+        appendStatistics(rows, QStringLiteral("筛选前"), full);
         rows << QStringLiteral("条件排除或无法配对：%1").arg(qulonglong(rejected));
       }
-      summary(filter ? QStringLiteral("筛选后") : QStringLiteral("全部样本"), filtered, &retained);
+      appendStatistics(rows, filter ? QStringLiteral("筛选后") : QStringLiteral("全部样本"), filtered, &retained);
       if (baseline)
-        summary(QStringLiteral("参考差值（目标−参考）"), delta, &differences);
+        appendStatistics(rows, QStringLiteral("参考差值（目标−参考）"), delta, &differences);
     }
     if (exportSamples)
     {
