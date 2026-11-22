@@ -320,7 +320,10 @@ class Panel : public QWidget
   }
   void clearPlot()
   {
-    layers.clear();plot->removeAllCurves();shown.clear();
+    layers.clear();
+    plot->removeAllCurves();
+    // PlotDataMapRef::clear() leaves scatter_xy intact in PlotJuggler 3.17.0.
+    shown.scatter_xy.clear();
     QMetaObject::invokeMethod(plot,"setModeXY",Qt::DirectConnection,Q_ARG(bool,true));
   }
   void calculate()
@@ -622,8 +625,8 @@ public:
     auto button=[this](QHBoxLayout* line,QString title,auto fn){
       auto* b=new QPushButton(title);line->addWidget(b);connect(b,&QPushButton::clicked,this,fn);return b;};
     button(top,"时序图",closePage)->setObjectName("bladeFitBack");top->addWidget(new QLabel(QStringLiteral("曲线分析")));
-    kind=new QComboBox;kind->addItems(kinds());top->addWidget(kind);
-    button(top,"测点与机组参数",[this]{settings();});button(top,"获取数据",[this]{reload();});
+    kind=new QComboBox;kind->setObjectName("bladeFitKind");kind->addItems(kinds());top->addWidget(kind);
+    button(top,"测点与机组参数",[this]{settings();});button(top,"获取数据",[this]{reload();})->setObjectName("bladeFitReload");
     top->addStretch();
     poolMenu=new QToolButton;poolMenu->setText("曲线集比较");poolMenu->setPopupMode(QToolButton::InstantPopup);compareMenu=new QMenu(poolMenu);poolMenu->setMenu(compareMenu);top->addWidget(poolMenu);
     auto* saveSet=compareMenu->addAction("保存当前曲线集");
@@ -638,7 +641,7 @@ public:
     auto* reset=compareMenu->addAction("清空比较池");
     connect(reset,&QAction::triggered,this,[this]{for(auto* a:compareMenu->actions())if(a->isCheckable())delete a;pool.clear();calculate();});
     compareMenu->addSeparator();
-    plot=new AnalysisPlot(shown,this);layout->addWidget(plot,1);plot->activateGrid(true);plot->activateLegend(true);
+    plot=new AnalysisPlot(shown,this);plot->qwtPlot()->setObjectName("bladeFitPlot");layout->addWidget(plot,1);plot->activateGrid(true);plot->activateLegend(true);
     plot->setContextMenuEnabled(false);plot->qwtPlot()->setAcceptDrops(false);
     canvas=plot->qwtPlot()->canvas();rubber=new SelectionGuide(canvas);
     auto* tools=new QHBoxLayout;layout->addLayout(tools);select=new QComboBox;

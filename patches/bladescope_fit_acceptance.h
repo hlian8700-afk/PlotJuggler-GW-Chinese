@@ -1,6 +1,7 @@
 #pragma once
 #include "bladescope_fit_panel.h"
 #include <QScreen>
+#include "qwt_scale_div.h"
 
 namespace BladeFitUI
 {
@@ -21,15 +22,18 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
   QTimer::singleShot(0, window, [=, &data] {
     auto& wind = data.addNumeric("BladeFitTestWind")->second;
     auto& power = data.addNumeric("BladeFitTestPower")->second;
+    auto& pitch = data.addNumeric("BladeFitTestPitch")->second;
     for (int i = 0; i < 6; ++i) {
       const double v = 6 + i / 2;
       wind.pushBack({double(i), v});
       power.pushBack({double(i), 10 * v});
+      pitch.pushBack({double(i), 85.0 + i});
     }
     QSettings settings;
     const QString key = QStringLiteral("BladeScope/curveAnalysis");
     const auto previous = settings.value(key);
     const QJsonObject config{{"role0", "BladeFitTestWind"}, {"role1", "BladeFitTestPower"},
+                             {"role4", "BladeFitTestPitch"}, {"diameter", 221},
                              {"rated", 1500}, {"cutIn", 3}, {"ratedWind", 12}, {"cutOut", 25},
                              {"width", 1}, {"tolerance", 0}};
     settings.setValue(key, QJsonDocument(config).toJson(QJsonDocument::Compact));
@@ -43,6 +47,25 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
       fail(QStringLiteral("open analysis page"));
       return;
     }
+    auto* kind = panel->findChild<QComboBox*>("bladeFitKind");
+    auto* reload = panel->findChild<QPushButton*>("bladeFitReload");
+    auto* plot = panel->findChild<QwtPlot*>("bladeFitPlot");
+    if (!kind || !reload || !plot) {
+      fail(QStringLiteral("locate analysis controls"));
+      return;
+    }
+    using Layers = QMap<QString, QVector<QPointF>>;
+    struct SwitchState { int phase = 0; Layers initial; double upper = 0; };
+    auto state = std::make_shared<SwitchState>();
+    auto capture = [plot] {
+      Layers layers;
+      for (auto* item : plot->itemList(QwtPlotItem::Rtti_PlotCurve)) {
+        auto* curve = static_cast<QwtPlotCurve*>(item);
+        auto& points = layers[curve->title().text()];
+        for (size_t i = 0; i < curve->dataSize(); ++i) points.append(curve->sample(int(i)));
+      }
+      return layers;
+    };
     auto* poll = new QTimer(panel);
     auto elapsed = std::make_shared<QElapsedTimer>();
     elapsed->start();
@@ -56,6 +79,31 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
         return;
       }
       poll->stop();
+      const auto upper = plot->axisScaleDiv(QwtPlot::xBottom).upperBound();
+      if (state->phase == 1) {
+        if (upper < 85) {
+          fail(QStringLiteral("switch to M53 pitch axis"));
+          return;
+        }
+        state->phase = 2;
+        elapsed->restart();
+        kind->setCurrentIndex(int(M01));
+        poll->start(25);
+        return;
+      }
+      if (state->phase >= 2) {
+        if (capture() != state->initial || std::abs(upper - state->upper) > 1e-8) {
+          fail(QStringLiteral("M01 layers or axis changed after switch or reload"));
+          return;
+        }
+        if (state->phase == 2) {
+          state->phase = 3;
+          elapsed->restart();
+          reload->click();
+          poll->start(25);
+          return;
+        }
+      }
       auto inspect = [&](const char* buttonName, int rows, bool exportCsv) {
         auto* button = panel->findChild<QPushButton*>(buttonName);
         if (!button) return false;
@@ -106,6 +154,19 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
         button->click();
         return verified;
       };
+      if (state->phase == 0) {
+        state->initial = capture();
+        state->upper = upper;
+        if (state->initial.size() != 4 || upper > 30) {
+          fail(QStringLiteral("initial M01 drawing"));
+          return;
+        }
+        state->phase = 1;
+        elapsed->restart();
+        kind->setCurrentIndex(int(M53));
+        poll->start(25);
+        return;
+      }
       if (!inspect("bladeFitBins", 3, true)) {
         fail(QStringLiteral("inspect bins or export CSV"));
         return;
