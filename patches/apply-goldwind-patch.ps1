@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.17"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.18"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.17") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.18") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2020,18 +2020,32 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab, double first, double last) {
+        [this, plot](const QStringList& names, bool newTab, double first, double last, const QJsonObject& aliases) {
           auto* target = plot;
           if (newTab || !target || target->isXYPlot())
             target = _main_tabbed_widget->addTab({})->plotAt(0);
           if (!target)
             return;
+          size_t total = target->curveList().size();
+          for (const auto& name : names)
+            if (std::none_of(target->curveList().begin(), target->curveList().end(),
+                             [&](const auto& curve) { return curve.src_name == name.toStdString(); }))
+              ++total;
+          if (total > 16)
+          {
+            QMessageBox::warning(this, QStringLiteral("录波分析"), QStringLiteral("此图页最多显示 16 条曲线。"));
+            return;
+          }
           for (const auto& name : names)
           {
             const auto raw = name.toStdString();
             const auto& curves = target->curveList();
             if (std::none_of(curves.begin(), curves.end(), [&](const auto& c) { return c.src_name == raw; }))
-              target->addCurve(raw);
+              if (auto* added = target->addCurve(raw))
+              {
+                const auto alias = aliases.value(name).toString();
+                if (!alias.isEmpty()) added->curve->setTitle(alias);
+              }
           }
           target->zoomOut(false);
           if (first < last)
