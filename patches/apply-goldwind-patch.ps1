@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.19"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.14"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.19") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.14") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -1983,7 +1983,7 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
 $analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_analysis.h")
 Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"`n#include <qwt_plot.h>" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
   ui->menuBar->removeAction(ui->menuCloudData->menuAction());
   auto* bladeGroupManager = bladePlotMenu->addAction(QString::fromUtf8("测点组管理..."));
@@ -2020,32 +2020,18 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab, double first, double last, const QJsonObject& aliases) {
+        [this, plot](const QStringList& names, bool newTab, double first, double last) {
           auto* target = plot;
           if (newTab || !target || target->isXYPlot())
             target = _main_tabbed_widget->addTab({})->plotAt(0);
           if (!target)
             return;
-          size_t total = target->curveList().size();
-          for (const auto& name : names)
-            if (std::none_of(target->curveList().begin(), target->curveList().end(),
-                             [&](const auto& curve) { return curve.src_name == name.toStdString(); }))
-              ++total;
-          if (total > 16)
-          {
-            QMessageBox::warning(this, QStringLiteral("录波分析"), QStringLiteral("此图页最多显示 16 条曲线。"));
-            return;
-          }
           for (const auto& name : names)
           {
             const auto raw = name.toStdString();
             const auto& curves = target->curveList();
             if (std::none_of(curves.begin(), curves.end(), [&](const auto& c) { return c.src_name == raw; }))
-              if (auto* added = target->addCurve(raw))
-              {
-                const auto alias = aliases.value(name).toString();
-                if (!alias.isEmpty()) added->curve->setTitle(alias);
-              }
+              target->addCurve(raw);
           }
           target->zoomOut(false);
           if (first < last)
@@ -2058,75 +2044,6 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           }
           target->replot();
           onUndoableChange();
-        }, [this](const QStringList& names, const QJsonObject& aliases,
-                   BladeAnalysis::FilterPlotMode mode, const BladeAnalysis::FilteredSeries& samples) {
-          using Mode = BladeAnalysis::FilterPlotMode;
-          auto* target = _main_tabbed_widget->addTab({})->plotAt(0);
-          if (!target)
-            return false;
-          auto* axes = target->findChild<QwtPlot*>();
-          const bool xy = mode == Mode::XY;
-          if (mode == Mode::DualAxis && !axes)
-            return false;
-          if (xy && !QMetaObject::invokeMethod(target, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true)))
-            return false;
-
-          std::vector<std::string> keys;
-          QStringList titles;
-          for (int i = 0; i < names.size(); ++i)
-          {
-            const auto name = names[i];
-            const auto stem = (QStringLiteral("筛选结果/") + name).toStdString();
-            auto key = stem;
-            for (int suffix = 2; _mapped_plot_data.numeric.count(key); ++suffix)
-              key = stem + " [" + std::to_string(suffix) + "]";
-            auto& series = _mapped_plot_data.addNumeric(key)->second;
-            for (const auto& point : samples[size_t(i)])
-              series.pushBack(point);
-            keys.push_back(key);
-            const auto chineseNames = qApp->property("bladeScopeTagAliases").toMap();
-            titles << aliases.value(name).toString(chineseNames.value(name, name).toString());
-          }
-
-          size_t added = 0;
-          if (xy)
-          {
-            if (auto* curve = target->addCurveXY(keys[0], keys[1], titles[1] + QStringLiteral(" 对 ") + titles[0]))
-            {
-              curve->curve->setStyle(QwtPlotCurve::Dots);
-              ++added;
-            }
-          }
-          else
-          {
-            for (size_t i = 0; i < keys.size(); ++i)
-              if (auto* curve = target->addCurve(keys[i]))
-              {
-                ++added;
-                curve->curve->setTitle(titles[int(i)]);
-                if (mode == Mode::DualAxis && i == 1)
-                {
-                  axes->setAxisVisible(QwtAxis::YRight);
-                  axes->setAxisAutoScale(QwtAxis::YRight);
-                  curve->curve->setYAxis(QwtAxis::YRight);
-                }
-              }
-          }
-          if (added != (xy ? size_t(1) : keys.size()))
-          {
-            target->removeAllCurves();
-            for (const auto& key : keys)
-              _mapped_plot_data.numeric.erase(key);
-            return false;
-          }
-          for (const auto& key : keys)
-            _curvelist_widget->addCurve(key);
-          _curvelist_widget->updateFilter();
-          emit target->curveListChanged();
-          target->zoomOut(false);
-          target->replot();
-          onUndoableChange();
-          return true;
         });
   });
 '@ }
@@ -2167,12 +2084,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_xy_math.h", "bladescope_xy_dialog.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_xy_dialog.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2207,12 +2124,6 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   };
   connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
   connect(ui->menuTools->addAction(QStringLiteral("曲线分析")), &QAction::triggered, this, showFitPanel);
-  connect(ui->menuTools->addAction(QStringLiteral("XY 拟合与差值统计")), &QAction::triggered, this, [this] {
-    BladeXY::open(this, _mapped_plot_data, [this] {
-      return _main_tabbed_widget->addTab({})->plotAt(0);
-    });
-    _curvelist_widget->updateFilter();
-  });
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
   if (!fitAcceptanceOutput.isEmpty())
   {
