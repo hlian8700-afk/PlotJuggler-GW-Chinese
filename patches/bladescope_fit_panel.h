@@ -434,6 +434,7 @@ class Panel : public QWidget
     const int k=displayKind;const auto labels=axes(k);
     plot->qwtPlot()->setAxisTitle(QwtPlot::xBottom,labels[0]);plot->qwtPlot()->setAxisTitle(QwtPlot::yLeft,labels[1]);
     layer(k==M01&&p.reference.empty()?QStringLiteral("机组参数估算参考"):QStringLiteral("理论参考"),r.reference,0,QColor("#a57bd5"));
+    size_t markedCount = 0;
     Points means;
     for(auto& e:r.bins)means.push_back({e.second.x,e.second.y});
     if(k==M11)drawRose();
@@ -443,9 +444,15 @@ class Panel : public QWidget
       Points raw,marked;
       std::array<Points,4> colors;
       auto tile=[](const Record& a){return std::make_pair(static_cast<long long>(a.x/5),static_cast<long long>(std::clamp(a.y,-1e12,1e12)));};
+      if(!current->marked.empty()){
+        for(const auto& point : r.raw)
+          if(current->marked.count(point.id)) {
+            ++markedCount;
+            if(marked.size() < 50000) marked.push_back({point.x, point.y});
+          }
+      }
       for(auto index:r.display){
         const auto& a=r.raw[index];
-        if(current->marked.count(a.id))marked.push_back({a.x,a.y});
         if(k==M12&&density->isChecked()){
           auto v=r.density.at(tile(a));colors[v<5?0:v<20?1:v<100?2:3].push_back({a.x,a.y});
         }else raw.push_back({a.x,a.y});
@@ -469,7 +476,7 @@ class Panel : public QWidget
             k==M12?QwtPlotCurve::Dots:QwtPlotCurve::Lines);
     }
     plot->setKeepRatioXY(k==M11);plot->zoomOut(false);plot->replot();
-    QString summary=QStringLiteral("有效 %1　已筛除 %2　标注 %3").arg(qulonglong(r.raw.size())).arg(qulonglong(r.rejected)).arg(qulonglong(current->marked.size()));
+    QString summary=QStringLiteral("有效 %1　已筛除 %2　标注 %3").arg(qulonglong(r.raw.size())).arg(qulonglong(r.rejected)).arg(qulonglong(markedCount));
     if(k==M02)summary+=std::isfinite(r.shape)?QStringLiteral("　Weibull k=%1，A=%2 m/s").arg(num(r.shape),num(r.scale)):QStringLiteral("　样本不足以估计 Weibull 参数");
     if(k==M41)summary+=QStringLiteral("　实测传动比 %1").arg(num(r.slope));
     if(k==M11)summary+=QStringLiteral("　正北向上，顺时针　风速分级 <4 / 4–8 / 8–12 / ≥12 m/s");
@@ -510,7 +517,21 @@ class Panel : public QWidget
   {
     const auto& r=*active;const int k=displayKind;
     stats={{"箱序号","横轴均值","纵轴均值","样本数","样本标准差","最小值","最大值","拟合值","参考值","偏差(%)","频率(%)","扇区平均功率(kW)"}};
-    for(auto& entry:r.bins){
+    if(k==M02){
+      stats={{"箱序号","风速下界 (m/s)","风速上界 (m/s)","样本数","实测频率 (%)","Weibull 频率 (%)"}};
+      const double width = current->params.width;
+      for(const auto& entry : r.bins){
+        const double lower = entry.first * width;
+        const double upper = lower + width;
+        const double expected = std::isfinite(r.shape)
+          ? 100 * (std::exp(-std::pow(lower/r.scale, r.shape)) - std::exp(-std::pow(upper/r.scale, r.shape)))
+          : missing();
+        stats.append({QString::number(qlonglong(entry.first)), num(lower), num(upper),
+                      QString::number(qulonglong(entry.second.n)), num(100.*entry.second.n/r.raw.size()),
+                      num(expected)});
+      }
+    }
+    else for(auto& entry:r.bins){
       const auto& b=entry.second;double ref=interpolate(r.reference,b.x),fit=interpolate(r.fit,b.x);
       stats.append({QString::number(qlonglong(entry.first)),num(b.x),num(b.y),QString::number(qulonglong(b.n)),num(b.sd()),num(b.lo),num(b.hi),
                    num(fit),num(ref),num(ref!=0?100*(fit-ref)/ref:missing()),num(100.*b.n/r.raw.size()),

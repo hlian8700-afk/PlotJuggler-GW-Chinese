@@ -153,7 +153,8 @@ inline double match(const Points& series,size_t& cursor,double t,double tol,bool
   if(i==series.size() || (state && series[i].x>t) || std::abs(series[i].x-t)>tol) return missing();
   return series[i].y;
 }
-struct Record { double x,y,t; size_t id; };
+using SampleId = std::pair<int, size_t>;
+struct Record { double x,y,t; SampleId id; };
 struct Bin
 {
   double x=0,y=0,m2=0,lo=0,hi=0;
@@ -237,7 +238,7 @@ inline void curves(int kind,const Params& p,Result& r)
   if(kind==M41)
   {
     long double xx=0,xy=0;
-    for(const auto a:r.raw){xx+=a.x*a.x;xy+=a.x*a.y;}
+    for(const auto& a:r.raw){xx+=a.x*a.x;xy+=a.x*a.y;}
     if(xx>0){r.slope=double(xy/xx);r.models.push_back({lo,hi,0,1,"y=k*x",{r.slope}});r.fit=sample(lo,hi,[&](double x){return x*r.slope;});}
     if(p.ratio>0) r.reference=sample(lo,hi,[&](double x){return x*p.ratio;});
     return;
@@ -308,7 +309,7 @@ inline void curves(int kind,const Params& p,Result& r)
   }
 }
 
-using Masks=std::set<size_t>;
+using Masks=std::set<SampleId>;
 template<class Month> Result analyze(int kind,const Channels& channels,const Params& p,const Masks& exclude,Month month,const std::atomic_bool* stop=nullptr)
 {
   const auto requiredRoles=required(kind,p);
@@ -327,8 +328,7 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
   if(p.filterState && channels[Status].empty()) throw std::runtime_error("请关联运行状态");
   Result out;
   std::array<size_t,NRoles> cursors{};
-  int anchorRole=Wind;
-  while(anchorRole<NRoles && channels[anchorRole].empty()) ++anchorRole;
+  const auto anchorRole = requiredRoles.front();
   const auto& anchor=channels[anchorRole];
   double typical=0;
   if(kind==M01){
@@ -350,7 +350,8 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     SeriesRow row;
     row.fill(missing());
     auto read=[&](int role){return role==anchorRole?anchor[i].y:match(channels[role],cursors[role],t,p.tolerance,role==Status || role>=FaultFlag);};
-    bool valid=!exclude.count(i);
+    const SampleId sampleId{anchorRole, i};
+    bool valid=!exclude.count(sampleId);
     for(int role:requiredRoles){row[role]=read(role);valid &= std::isfinite(row[role]);}
     for(const auto& limit:p.limits){
       double value=read(limit.first);
@@ -395,7 +396,7 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
       case M55:x=month(t);y=cp;break;
     }
     if(!valid||!std::isfinite(x)||!std::isfinite(y)){++out.rejected;continue;}
-    out.raw.push_back({x,y,t,i});
+    out.raw.push_back({x,y,t,sampleId});
     double index=std::floor(x/(kind==M55?1:p.width));
     if(!std::isfinite(index)||std::abs(index)>=double(std::numeric_limits<long long>::max()))
       throw std::runtime_error("测量值超出分箱范围，请检查单位或设置有效上下限");
@@ -405,11 +406,15 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
       ++bands[bin][v<4?0:v<8?1:v<12?2:3];
       const double power=read(Power);
       if(std::isfinite(power)) sectorP[bin].add(x,power);
+      // Average angles on the continuous interval around the sector centre.
+      const double centre = 360.0 * bin / p.sectors;
+      x = centre + wrap(x - centre + 180, 360) - 180;
     }
     out.bins[bin].add(x,y);
   }
   if(out.raw.empty()) throw std::runtime_error("当前条件下没有有效样本");
   if(kind==M11){
+    for(auto& entry : out.bins) entry.second.x = wrap(entry.second.x, 360);
     for(int s=0;s<p.sectors;++s){
       out.sectorPower.push_back(sectorP[s].n?sectorP[s].y:missing());
       double radius=0;
