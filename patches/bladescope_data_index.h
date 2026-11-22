@@ -2,7 +2,6 @@
 #include "bladescope_sqlite_recording.h"
 #include <QRegularExpression>
 #include <QMap>
-#include <map>
 
 namespace BladeDataIndex
 {
@@ -160,41 +159,24 @@ inline QStringList importFiles(QWidget* parent, const QStringList& paths,
       progress.setWindowModality(Qt::WindowModal);
       auto worker = std::unique_ptr<QThread>(QThread::create([&] {
         try {
-          using Sample = std::pair<double, double>;
-          std::map<std::string, std::vector<Sample>> points;
+          Samples samples(static_cast<size_t>(options.selection.measurements.size()));
           for (const auto& member : members) {
             if (canceled) return;
-            auto result = read(member, options.selection, {}, canceled);
-            if (!result.error.isEmpty() || result.data.numeric.empty()) {
+            size_t previousCount = 0;
+            for (const auto& channel : samples) previousCount += channel.size();
+            auto result = readSamples(member, options.selection, samples, canceled);
+            if (canceled) return;
+            size_t currentCount = 0;
+            for (const auto& channel : samples) currentCount += channel.size();
+            if (!result.error.isEmpty() || currentCount == previousCount) {
               errors << QFileInfo(member).fileName() + ": " +
                   (result.error.isEmpty() ? QStringLiteral("\u9009\u5b9a\u8303\u56f4\u65e0\u6709\u6548\u6d4b\u70b9") : result.error);
               continue;
             }
             ++loaded;
             totalRows += size_t(result.rows);
-            for (const auto& entry : result.data.numeric) {
-              auto& samples = points[entry.first];
-              const auto& curve = entry.second;
-              for (size_t i = 0; i < curve.size() && !canceled; ++i)
-                samples.emplace_back(curve.at(i).x, curve.at(i).y);
-            }
           }
-          const auto byTime = [](const Sample& a, const Sample& b) { return a.first < b.first; };
-          for (auto& entry : points) {
-            if (canceled) return;
-            auto name = entry.first;
-            for (int suffix = 2; !names.insert(name).second; ++suffix)
-              name = entry.first + " [" + std::to_string(suffix) + "]";
-            auto& pointsForTag = entry.second;
-            if (!std::is_sorted(pointsForTag.cbegin(), pointsForTag.cend(), byTime))
-              std::stable_sort(pointsForTag.begin(), pointsForTag.end(), byTime);
-            auto& target = data.addNumeric(name)->second;
-            for (const auto& p : pointsForTag) {
-              if (canceled) return;
-              target.pushBack({p.first, p.second});
-            }
-            std::vector<Sample>().swap(pointsForTag);
-          }
+          buildSeries(data, options.selection, samples, names, canceled);
         } catch (const std::exception& ex) {
           data.numeric.clear();
           errors << QString::fromUtf8(ex.what());

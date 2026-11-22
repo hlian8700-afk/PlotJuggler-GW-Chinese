@@ -98,8 +98,11 @@ struct ReadResult
   qsizetype invalidValues = 0;
 };
 
-inline ReadResult read(const QString& path, const Selection& selection,
-                       std::unordered_set<std::string> names, const std::atomic_bool& canceled)
+using Sample = std::pair<double, double>;
+using Samples = std::vector<std::vector<Sample>>;
+
+inline ReadResult readSamples(const QString& path, const Selection& selection,
+                              Samples& samples, const std::atomic_bool& canceled)
 {
   ReadResult result;
   Connection connection(path);
@@ -123,8 +126,9 @@ inline ReadResult read(const QString& path, const Selection& selection,
     result.error = query.lastError().text();
     return result;
   }
-  using Sample = std::pair<double,double>;
-  std::vector<std::vector<Sample>> samples(static_cast<size_t>(selection.measurements.size()));
+  std::vector<size_t> initialSizes;
+  initialSizes.reserve(samples.size());
+  for (const auto& channel : samples) initialSizes.push_back(channel.size());
   while (!canceled && query.next()) {
     const double t = timeValue(query.value(0),selection.milliseconds);
     if (!std::isfinite(t)) { ++result.invalidTime; continue; }
@@ -146,8 +150,15 @@ inline ReadResult read(const QString& path, const Selection& selection,
   }
   if (query.lastError().isValid()) {
     result.error = query.lastError().text();
+    for (size_t i = 0; i < samples.size(); ++i) samples[i].resize(initialSizes[i]);
     return result;
   }
+  return result;
+}
+
+inline void buildSeries(PJ::PlotDataMapRef& data, const Selection& selection, Samples& samples,
+                        std::unordered_set<std::string>& names, const std::atomic_bool& canceled)
+{
   const auto byTime = [](const Sample& a,const Sample& b){return a.first < b.first;};
   for (int i=0;i<selection.measurements.size() && !canceled;++i) {
     auto& points = samples[size_t(i)];
@@ -157,13 +168,22 @@ inline ReadResult read(const QString& path, const Selection& selection,
     const auto base = selection.measurements[i].toStdString();
     auto name = base;
     for (int suffix=2;!names.insert(name).second;++suffix) name=base+" ["+std::to_string(suffix)+"]";
-    auto& series = result.data.addNumeric(name)->second;
+    auto& series = data.addNumeric(name)->second;
     for (const auto& point : points) {
       if (canceled) break;
       series.pushBack({point.first,point.second});
     }
     std::vector<Sample>().swap(points);
   }
+}
+
+inline ReadResult read(const QString& path, const Selection& selection,
+                       std::unordered_set<std::string> names, const std::atomic_bool& canceled)
+{
+  Samples samples(static_cast<size_t>(selection.measurements.size()));
+  auto result = readSamples(path, selection, samples, canceled);
+  if (result.error.isEmpty() && !canceled)
+    buildSeries(result.data, selection, samples, names, canceled);
   return result;
 }
 

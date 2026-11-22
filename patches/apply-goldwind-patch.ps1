@@ -946,6 +946,10 @@ $curvePanelLayout = @'
   bladeActionRow->addWidget(bladeFilterData, 1);
   bladeActionRow->addWidget(bladeClearSearch, 1);
   ui->leftLayout->insertWidget(1, bladeSignalActions);
+  auto* deleteLoadedData = new QPushButton(QStringLiteral("\u5220\u9664\u5168\u90e8\u6570\u636e"), bladeSignalActions);
+  deleteLoadedData->setToolTip(QStringLiteral("\u6e05\u9664\u5df2\u52a0\u8f7d\u7684\u6570\u636e\u548c\u66f2\u7ebf"));
+  bladeActionRow->addWidget(deleteLoadedData, 1);
+  connect(deleteLoadedData, &QPushButton::clicked, this, &MainWindow::on_actionDeleteAllData_triggered);
   connect(bladeLoadData, &QPushButton::clicked, ui->buttonLoadDatafile, &QPushButton::click);
   connect(bladeFilterData, &QPushButton::clicked, this, [this]() {
     auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
@@ -1828,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.10"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.11"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.10") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.11") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2458,5 +2462,66 @@ private:
   _plot_widget_A->removeAllCurves();
   static_cast<FftTimePlot*>(_plot_widget_A)->setTimeOrigin(0);
   _plot_widget_A->resetZoom();
+'@ }
+)
+
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = @'
+  connect(plot, &PlotWidget::curveListChanged, this, [this]() {
+    updateTimeOffset();
+    updateTimeSlider();
+    updatedDisplayTime();
+  });
+'@; New = @'
+  connect(plot, &PlotWidget::curveListChanged, this, [this]() {
+    if (property("bladeDeletingAllData").toBool()) return;
+    updateTimeOffset();
+    updateTimeSlider();
+    updatedDisplayTime();
+  });
+'@ }
+  @{ Old = @'
+void MainWindow::deleteAllData()
+{
+  forEachWidget([](PlotWidget* plot) { plot->removeAllCurves(); });
+'@; New = @'
+void MainWindow::deleteAllData()
+{
+  const bool previousUpdates = updatesEnabled();
+  setUpdatesEnabled(false);
+  setProperty("bladeDeletingAllData", true);
+  forEachWidget([](PlotWidget* plot) { plot->removeAllCurves(); });
+'@ }
+  @{ Old = @'
+  _loaded_datafiles_history.clear();
+  _undo_states.clear();
+  _redo_states.clear();
+
+  bool stopped = false;
+'@; New = @'
+  _loaded_datafiles_history.clear();
+  _undo_states.clear();
+  _redo_states.clear();
+  setProperty("bladeDeletingAllData", false);
+  updateTimeOffset();
+  updateTimeSlider();
+  updatedDisplayTime();
+  setUpdatesEnabled(previousUpdates);
+
+  bool stopped = false;
+'@ }
+  @{ Old = @'
+  for (const auto& added_curve : added_curves)
+  {
+    _curvelist_widget->addCurve(added_curve);
+  }
+'@; New = @'
+  const bool previousUpdates = _curvelist_widget->updatesEnabled();
+  _curvelist_widget->setUpdatesEnabled(false);
+  for (const auto& added_curve : added_curves)
+  {
+    _curvelist_widget->addCurve(added_curve);
+  }
+  _curvelist_widget->setUpdatesEnabled(previousUpdates);
 '@ }
 )
