@@ -46,7 +46,8 @@ inline QStringList readHeader(QFile& file)
 }
 
 inline ReadResult read(const QString& path, int timeColumn, std::unordered_set<std::string> names,
-                       const std::atomic_bool& canceled)
+                       const std::atomic_bool& canceled,
+                       const BladeSqliteRecording::Selection* selection = nullptr)
 {
   ReadResult result;
   QFile file(path);
@@ -67,7 +68,8 @@ inline ReadResult read(const QString& path, int timeColumn, std::unordered_set<s
   };
   std::vector<Signal> signalsToRead;
   for (int i = 0; i < header.size(); ++i)
-    if (i != timeColumn && !header[i].isEmpty())
+    if (i != timeColumn && !header[i].isEmpty() &&
+        (!selection || selection->measurements.contains(header[i])))
       signalsToRead.push_back({i, header[i], {}});
   QSet<double> seenTimes;
   while (!file.atEnd() && !canceled) {
@@ -84,11 +86,13 @@ inline ReadResult read(const QString& path, int timeColumn, std::unordered_set<s
     if (!date.isValid()) date = QDateTime::fromString(row.value(timeColumn), Qt::ISODate);
     bool numeric = false;
     const double timestamp = date.isValid() ? date.toMSecsSinceEpoch() / 1000.0
-                                            : row.value(timeColumn).toDouble(&numeric);
+                                            : row.value(timeColumn).toDouble(&numeric) /
+                                                  (selection && selection->milliseconds ? 1000.0 : 1.0);
     if ((!date.isValid() && !numeric) || !std::isfinite(timestamp)) {
       ++result.invalidTime;
       continue;
     }
+    if (selection && (timestamp < selection->from || timestamp > selection->until)) continue;
     if (seenTimes.contains(timestamp)) ++result.duplicateTime;
     else seenTimes.insert(timestamp);
     ++result.rows;
@@ -135,39 +139,22 @@ inline ReadResult open(QWidget* parent, const QString& path, const std::unordere
                          QStringLiteral("\u65e0\u6cd5\u8bfb\u53d6 TXT \u5f55\u6ce2\u8868\u5934\u3002"));
     return {};
   }
-  const auto firstRow = BladeRecordingIndex::cells(QString::fromUtf8(preview.readLine(maxLine)), ',');
   preview.close();
-  QDialog dialog(parent);
-  dialog.setWindowTitle(QStringLiteral("TXT \u5f55\u6ce2\u5bfc\u5165"));
-  QFormLayout form(&dialog);
-  QComboBox columns;
-  columns.setMinimumWidth(320);
-  columns.setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  columns.setPlaceholderText(QStringLiteral("\u8bf7\u9009\u62e9\u65f6\u95f4\u5217"));
-  for (int i = 0; i < header.size(); ++i)
-    if (!header[i].isEmpty())
-      columns.addItem(QStringLiteral("%1  (%2)").arg(header[i], firstRow.value(i)), i);
-  columns.setCurrentIndex(-1);
-  form.addRow(QStringLiteral("\u6587\u4ef6"), new QLabel(QFileInfo(path).fileName()));
-  form.addRow(QStringLiteral("\u65f6\u95f4\u5217"), &columns);
-  QDialogButtonBox actions(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-  actions.button(QDialogButtonBox::Ok)->setText(QStringLiteral("\u5bfc\u5165"));
-  actions.button(QDialogButtonBox::Cancel)->setText(QStringLiteral("\u53d6\u6d88"));
-  actions.button(QDialogButtonBox::Ok)->setEnabled(false);
-  QObject::connect(&columns, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog,
-                   [&](int index) { actions.button(QDialogButtonBox::Ok)->setEnabled(index >= 0); });
-  QObject::connect(&actions, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-  QObject::connect(&actions, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-  form.addRow(&actions);
-  if (dialog.exec() != QDialog::Accepted || columns.currentIndex() < 0) return {};
-  const int timeColumn = columns.currentData().toInt();
+  auto fields = header;
+  fields.removeAll(QString());
+  fields.removeDuplicates();
+  const auto options = BladeSqliteRecording::selectRecording(
+      parent, QStringLiteral("TXT \u5f55\u6ce2\u5bfc\u5165"), path, {},
+      [&](const QString&) { return fields; });
+  if (!options) return {};
+  const int timeColumn = header.indexOf(options->selection.time);
 
   std::atomic_bool canceled{false};
   ReadResult result;
   QProgressDialog progress(QStringLiteral("正在读取 TXT 录波…"),QStringLiteral("取消"),0,0,parent);
   progress.setWindowModality(Qt::WindowModal);
   auto worker = std::unique_ptr<QThread>(QThread::create([&] {
-    try { result=read(path,timeColumn,names,canceled); }
+    try { result=read(path,timeColumn,names,canceled,&options->selection); }
     catch(const std::exception& ex) { result.error=QString::fromUtf8(ex.what()); }
   }));
   QEventLoop loop;
@@ -184,6 +171,7 @@ inline ReadResult open(QWidget* parent, const QString& path, const std::unordere
                          result.error.isEmpty()?QStringLiteral("未找到有效的数值测点。"):result.error);
     return {};
   }
+  BladeTimeDisplay::setPrecision(options->precision);
   return result;
 }
 
