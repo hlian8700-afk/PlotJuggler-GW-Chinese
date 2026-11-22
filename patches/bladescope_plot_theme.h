@@ -334,20 +334,23 @@ public:
     const bool openGLBackdrop = plot() && plot()->property("bladeScopeCanvasPass").toInt() == 3;
     const bool canvasPaint = screen && plot() && qAbs(rect.width() - plot()->canvas()->width()) < 3 &&
                              qAbs(rect.height() - plot()->canvas()->height()) < 3;
+    const bool graphite = (openGLBackdrop || canvasPaint) &&
+                          qApp->property("bladeScopeDarkInterface").toBool();
     auto& cache = openGLBackdrop || canvasPaint ? screenCache : exportCache;
-    if (cache.pixmap.size() != pixels || cache.size != rect.size() || cache.revision != revision)
+    if (cache.pixmap.size() != pixels || cache.size != rect.size() || cache.revision != revision ||
+        cache.graphite != graphite)
     {
       cache.pixmap = QPixmap(pixels);
       cache.pixmap.fill(Qt::transparent);
       QPainter fill(&cache.pixmap);
       fill.scale(pixels.width() / rect.width(), pixels.height() / rect.height());
       const QRectF bounds(QPointF(), rect.size());
-      // Composite translucent plot colors against a stable base on screen.
-      if (openGLBackdrop || canvasPaint)
-        fill.fillRect(bounds, Qt::white);
+      if (graphite)
+        fill.fillRect(bounds, QColor("#3d4958"));
       fill.fillRect(bounds, backgroundBrush(current(), rect.size()));
       cache.size = rect.size();
       cache.revision = revision;
+      cache.graphite = graphite;
     }
     painter->drawPixmap(rect, cache.pixmap, QRectF(cache.pixmap.rect()));
   }
@@ -358,6 +361,7 @@ private:
     QPixmap pixmap;
     QSizeF size;
     quint64 revision = 0;
+    bool graphite = false;
   };
   mutable Cache screenCache, exportCache;
 };
