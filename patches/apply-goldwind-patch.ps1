@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.26"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.27"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.26") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.27") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2022,7 +2022,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter) {
+        [this, plot](const QStringList& names, bool newTab, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
           const bool createTab = newTab || !plot || plot->isXYPlot();
           const size_t existing = createTab ? 0 : plot->curveList().size();
           if (existing + size_t(names.size()) > 16)
@@ -2031,6 +2031,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             return;
           }
           QStringList derived;
+          QMap<QString, QString> titles;
           for (const auto& name : names)
           {
             const auto raw = name.toStdString();
@@ -2048,7 +2049,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             BladeTimeView::select(begin, end, detail,
                 [&](size_t i) { return series.at(i).y; },
                 [&](size_t i) { const auto value = series.at(i); if (!filter || filter(series,value.x,value.y)) output.pushBack({value.x,value.y}); });
-            if (output.size()) derived << QString::fromStdString(key);
+            if (output.size())
+            {
+              const auto derivedName = QString::fromStdString(key);
+              derived << derivedName;
+              titles.insert(derivedName, aliases.value(name).toString());
+            }
             else _mapped_plot_data.numeric.erase(key);
           }
           if (derived.isEmpty())
@@ -2059,7 +2065,14 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           auto* target = createTab ? _main_tabbed_widget->addTab({})->plotAt(0) : plot;
           if (!target) return;
           for (const auto& name : derived)
-            if (!target->addCurve(name.toStdString())) _mapped_plot_data.numeric.erase(name.toStdString());
+          {
+            if (auto* layer = target->addCurve(name.toStdString()))
+            {
+              const auto title = titles.value(name);
+              if (!title.isEmpty()) layer->curve->setTitle(title);
+            }
+            else _mapped_plot_data.numeric.erase(name.toStdString());
+          }
           emit target->curveListChanged();
           _curvelist_widget->updateFilter();
           target->zoomOut(false);
@@ -2073,8 +2086,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           }
           target->replot();
           onUndoableChange();
-        }, [this](const QStringList& names, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter) {
-          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail, filter);
+        }, [this](const QStringList& names, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
+          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail, filter, aliases);
         });
   });
 '@ }

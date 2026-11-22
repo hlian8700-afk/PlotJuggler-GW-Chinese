@@ -106,9 +106,17 @@ inline bool match(const PJ::PlotData& series, double time, double tolerance,
   return std::abs(sample.x - time) <= tolerance && std::isfinite(value);
 }
 
+inline constexpr auto measurementAliasesKey = "BladeScope/measurementGroupAliases";
+inline QJsonObject storedGroupAliases(const QSettings& settings)
+{
+  return QJsonDocument::fromJson(settings.value(measurementAliasesKey).toByteArray()).object();
+}
+
 inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObject& groups,
                          const std::function<void(const QJsonObject&)>& persist)
 {
+  QSettings settings;
+  auto labels = storedGroupAliases(settings);
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("测点组管理"));
   dialog.resize(760, 480);
@@ -132,7 +140,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     for (const auto value : groups.value(current()).toArray())
     {
       const auto raw = value.toString();
-      const auto alias = aliases.value(raw).toString();
+      const auto alias = labels.value(current()).toObject().value(raw).toString(aliases.value(raw).toString());
       auto* item = new QListWidgetItem(alias.isEmpty() ? raw : alias + " (" + raw + ")", members);
       item->setData(Qt::UserRole, raw);
       if (!available.isEmpty() && !available.contains(raw))
@@ -151,6 +159,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
   };
   const auto commit = [&](const QString& name) {
     persist(groups);
+    settings.setValue(measurementAliasesKey, QJsonDocument(labels).toJson(QJsonDocument::Compact));
     reload(name);
   };
   QObject::connect(groupList, &QListWidget::currentItemChanged, &dialog, showMembers);
@@ -194,6 +203,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
       const auto points = groups.value(old);
       groups.remove(old);
       groups.insert(name, points);
+      if (labels.contains(old)) labels.insert(name, labels.take(old));
       commit(name);
     }
   });
@@ -204,6 +214,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
           QString::fromUtf8("删除测点组「%1」？").arg(name)) == QMessageBox::Yes)
     {
       groups.remove(name);
+      labels.remove(name);
       commit({});
     }
   });
@@ -218,6 +229,11 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     auto list = groups.value(name).toArray();
     if (ok && !raw.isEmpty() && !list.contains(QJsonValue(raw)))
     {
+      if (list.size() >= 16)
+      {
+        QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("手动添加测点时，每组最多 16 个。"));
+        return;
+      }
       list.append(raw);
       groups.insert(name, list);
       commit(name);
@@ -229,6 +245,9 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     if (row < 0 || name.isEmpty())
       return;
     auto list = groups.value(name).toArray();
+    auto names = labels.value(name).toObject();
+    names.remove(list.at(row).toString());
+    labels.insert(name, names);
     list.removeAt(row);
     groups.insert(name, list);
     commit(name);
@@ -246,6 +265,41 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     commit(name);
     members->setCurrentRow(next);
   };
+  button(memberRow, "批量编辑别名", [&] {
+    const auto name = current();
+    const auto list = groups.value(name).toArray();
+    if (list.isEmpty()) return;
+    QDialog editor(&dialog);
+    editor.setWindowTitle(QStringLiteral("组内曲线别名"));
+    editor.resize(580, 420);
+    QVBoxLayout form(&editor);
+    QTableWidget table(list.size(), 2);
+    table.setHorizontalHeaderLabels({QStringLiteral("原始字段"), QStringLiteral("显示别名（留空使用默认）")});
+    table.horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    const auto existing = labels.value(name).toObject();
+    for (int i = 0; i < list.size(); ++i)
+    {
+      const auto raw = list.at(i).toString();
+      auto* key = new QTableWidgetItem(raw);
+      key->setFlags(key->flags() & ~Qt::ItemIsEditable);
+      table.setItem(i, 0, key);
+      table.setItem(i, 1, new QTableWidgetItem(existing.value(raw).toString()));
+    }
+    form.addWidget(&table);
+    QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form.addWidget(&buttons);
+    QObject::connect(&buttons, &QDialogButtonBox::accepted, &editor, &QDialog::accept);
+    QObject::connect(&buttons, &QDialogButtonBox::rejected, &editor, &QDialog::reject);
+    if (editor.exec() != QDialog::Accepted) return;
+    QJsonObject edited;
+    for (int i = 0; i < list.size(); ++i)
+    {
+      const auto label = table.item(i, 1)->text().trimmed();
+      if (!label.isEmpty()) edited.insert(list.at(i).toString(), label);
+    }
+    labels.insert(name, edited);
+    commit(name);
+  });
   button(memberRow, "上移", [&] { reorder(-1); });
   button(memberRow, "下移", [&] { reorder(1); });
   button(groupRow, "导出配置", [&] {
@@ -256,7 +310,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     if (!path.endsWith(".json", Qt::CaseInsensitive))
       path += ".json";
     QSaveFile file(path);
-    const auto bytes = QJsonDocument(QJsonObject{{"version", 1}, {"groups", groups}}).toJson();
+    const auto bytes = QJsonDocument(QJsonObject{{"version", 1}, {"groups", groups}, {"aliases", labels}}).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
       QMessageBox::warning(&dialog, dialog.windowTitle(), QString::fromUtf8("无法保存测点组配置。"));
   });
@@ -265,7 +319,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
                                                   {}, QStringLiteral("测点组文件 (*.xlsx *.json);;Excel (*.xlsx);;JSON (*.json)"));
     if (path.isEmpty())
       return;
-    QJsonObject imported;
+    QJsonObject imported, importedLabels;
     if (path.endsWith(".xlsx", Qt::CaseInsensitive))
     {
       const auto sheets = BladeFitUI::readWorkbookRows(path, 64);
@@ -325,6 +379,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
         return;
       }
       imported = envelope.value("groups").toObject();
+      importedLabels = envelope.value("aliases").toObject();
     }
     for (auto it = imported.begin(); it != imported.end(); ++it)
     {
@@ -344,6 +399,12 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
       for (int suffix = 2; groups.contains(name); ++suffix)
         name = QStringLiteral("%1 (%2)").arg(it.key()).arg(suffix);
       groups.insert(name, it.value());
+      const auto aliases = importedLabels.value(it.key()).toObject();
+      QJsonObject validAliases;
+      for (const auto tag : it.value().toArray())
+        if (aliases.value(tag.toString()).isString())
+          validAliases.insert(tag.toString(), aliases.value(tag.toString()));
+      if (!validAliases.isEmpty()) labels.insert(name, validAliases);
       if (firstImported.isEmpty())
         firstImported = name;
     }
@@ -397,14 +458,15 @@ inline bool conditionPasses(const Condition& rule, double value)
 
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
-                 const std::function<void(const QStringList&, bool, double, double, bool, const SampleFilter&)>& plot,
-                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&)>& dual)
+                 const std::function<void(const QStringList&, bool, double, double, bool, const SampleFilter&, const QJsonObject&)>& plot,
+                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& dual)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
   dialog.resize(760, 650);
   auto* layout = new QVBoxLayout(&dialog);
   auto* channels = new QListWidget;
+  channels->setSelectionMode(QAbstractItemView::ExtendedSelection);
   auto* search = new QLineEdit;
   search->setPlaceholderText(QString::fromUtf8("搜索测点"));
   layout->addWidget(search);
@@ -458,11 +520,12 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     row->addWidget(button);
     QObject::connect(button, &QPushButton::clicked, &dialog, action);
   };
-  addButton(groupRow, "保存测点组", [&] {
-    const QString name = groups->currentText().trimmed();
-    const QStringList list = selected();
+  QString activeGroup;
+  const auto graphAliases = [&] { return storedGroupAliases(settings).value(activeGroup).toObject(); };
+  const auto saveGroup = [&](const QString& name, const QStringList& list) {
     if (name.isEmpty() || list.isEmpty())
       return warn(QString::fromUtf8("请输入组名并勾选测点。"));
+    if (list.size() > 16) return warn(QStringLiteral("每组最多保存 16 个测点。"));
     if (saved.contains(name) &&
         QMessageBox::question(&dialog, dialog.windowTitle(), QString::fromUtf8("覆盖同名测点组？"))
             != QMessageBox::Yes)
@@ -472,21 +535,53 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     saved.insert(name, QJsonArray::fromStringList(list));
     settings.setValue(key, QJsonDocument(saved).toJson(QJsonDocument::Compact));
     groups->setCurrentText(name);
+    auto allAliases = storedGroupAliases(settings);
+    const auto previous = allAliases.value(name).toObject();
+    QJsonObject retained;
+    for (const auto& field : list)
+      if (previous.contains(field)) retained.insert(field, previous.value(field));
+    allAliases.insert(name, retained);
+    settings.setValue(measurementAliasesKey, QJsonDocument(allAliases).toJson(QJsonDocument::Compact));
+    activeGroup = name;
+    for (int i = 0; i < channels->count(); ++i)
+    {
+      auto* item = channels->item(i);
+      item->setCheckState(list.contains(item->data(Qt::UserRole).toString()) ? Qt::Checked : Qt::Unchecked);
+    }
+  };
+  addButton(groupRow, "保存测点组", [&] { saveGroup(groups->currentText().trimmed(), selected()); });
+  channels->setContextMenuPolicy(Qt::CustomContextMenu);
+  QObject::connect(channels, &QListWidget::customContextMenuRequested, &dialog, [&](QPoint position) {
+    const auto items = channels->selectedItems();
+    if (items.isEmpty()) return;
+    QMenu menu;
+    auto* create = menu.addAction(QStringLiteral("保存选中测点为新组"));
+    if (menu.exec(channels->viewport()->mapToGlobal(position)) != create) return;
+    bool ok = false;
+    const auto name = QInputDialog::getText(&dialog, dialog.windowTitle(),
+        QStringLiteral("组名"), QLineEdit::Normal, {}, &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    if (saved.contains(name)) return warn(QStringLiteral("组名已经存在。"));
+    QStringList fields;
+    for (const auto* item : items) fields << item->data(Qt::UserRole).toString();
+    saveGroup(name, fields);
   });
   addButton(groupRow, "管理测点组", [&] {
     const QString selectedGroup = groups->currentText();
     manageGroups(&dialog, names, saved, [&](const QJsonObject& value) {
       settings.setValue(key, QJsonDocument(value).toJson(QJsonDocument::Compact));
     });
+    if (!saved.contains(activeGroup)) activeGroup.clear();
     groups->clear();
     groups->addItems(saved.keys());
     if (saved.contains(selectedGroup))
       groups->setCurrentText(selectedGroup);
   });
-  addButton(groupRow, "载入测点组", [&] {
+  const auto loadGroup = [&] {
     const auto group = saved.value(groups->currentText().trimmed()).toArray();
     if (!saved.contains(groups->currentText().trimmed()))
       return warn(QString::fromUtf8("请选择已保存的测点组。"));
+    activeGroup = groups->currentText().trimmed();
     QStringList missing;
     for (const auto value : group)
       if (!names.contains(value.toString()))
@@ -512,7 +607,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     }
     if (!missing.isEmpty())
       warn(QString::fromUtf8("录波中缺失：") + missing.join(", "));
-  });
+  };
+  addButton(groupRow, "载入测点组", loadGroup);
+  QObject::connect(groups, QOverload<int>::of(&QComboBox::activated), &dialog, loadGroup);
   layout->addLayout(groupRow);
 
   auto* fields = new QFormLayout;
@@ -695,7 +792,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (!a || !b || !std::isfinite(first) || !std::isfinite(last) || first > last)
       return warn(QStringLiteral("请输入有效的起止时间。"));
     SampleFilter filter;
-    if (makeFilter(filter)) plot(selected(), newTab, first, last, false, filter);
+    if (makeFilter(filter)) plot(selected(), newTab, first, last, false, filter, graphAliases());
   };
   auto* plotRow = new QHBoxLayout;
   layout->addLayout(plotRow);
@@ -831,7 +928,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     const auto choice = QInputDialog::getItem(&dialog, QStringLiteral("双轴对照"),
         QStringLiteral("数据视图"), viewModes, statisticsMode->currentIndex(), false, &accepted);
     SampleFilter filter;
-    if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter);
+    if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter, graphAliases());
   });
   addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;
@@ -841,7 +938,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
         !std::isfinite(last) || first >= last)
       return warn(QString::fromUtf8("请选择测点并输入有效的起止时间。"));
     SampleFilter filter;
-    if (makeFilter(filter)) plot(selected(), true, first, last, true, filter);
+    if (makeFilter(filter)) plot(selected(), true, first, last, true, filter, graphAliases());
   });
   addButton(actions, "预览筛选与统计", [&] { run(false); });
   addButton(actions, "导出筛选采样 CSV", [&] { run(true); });

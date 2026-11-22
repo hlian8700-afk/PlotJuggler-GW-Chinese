@@ -9,7 +9,7 @@
 namespace BladeDualTime
 {
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
-                 double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter)
+                 double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases)
 {
   const auto title = QStringLiteral("时序双轴对照");
   if (channels.size() < 2 || channels.size() > 16)
@@ -120,10 +120,14 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     return;
   }
 
-  const auto append = [](PlotWidget* plot, const QStringList& names, bool rightAxis) {
+  const auto append = [&aliases](PlotWidget* plot, const QStringList& names, bool rightAxis) {
     for (const auto& name : names)
       if (auto* layer = plot->addCurve(name.toStdString()))
+      {
         if (rightAxis) layer->curve->setAxes(QwtPlot::xBottom, QwtPlot::yRight);
+        const auto title = aliases.value(name).toString();
+        if (!title.isEmpty()) layer->curve->setTitle(title);
+      }
   };
   append(top, left, false);
   append(bottom, right, false);
