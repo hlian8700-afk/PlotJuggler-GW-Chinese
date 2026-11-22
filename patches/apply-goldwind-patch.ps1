@@ -658,7 +658,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
     QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#edf2f6","#e3eaf1","#35485b","#c5d1dc"}};
   const int firstPurpleInterface = themeNames.size();
   for (const auto& entry : BladePlotTheme::purplePalettes()) {
-    themeNames << QString::fromUtf8(entry.name);
+    themeNames << entry.name;
     palettes << entry.colors;
   }
   const QString styleTemplate = QString::fromUtf8(

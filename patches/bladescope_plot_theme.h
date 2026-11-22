@@ -79,7 +79,7 @@ struct Theme
 
 struct PurplePalette
 {
-  const char* name;
+  QString name;
   QStringList colors;
 };
 
@@ -87,13 +87,13 @@ inline const std::array<PurplePalette, 4>& purplePalettes()
 {
   // Window, input, toolbar, text, accent, border, plot top, plot bottom, axis ink, grid.
   static const std::array<PurplePalette, 4> palettes = {{
-    { "青蛤壳紫 · 雪山白", { "#f1e9ef", "#f8f8f8", "#fcf8fb", "#322135", "#bc84a8", "#cfb8c8",
+    { QStringLiteral("\u9752\u86e4\u58f3\u7d2b \u00b7 \u96ea\u5c71\u767d"), { "#f1e9ef", "#f8f8f8", "#fcf8fb", "#322135", "#bc84a8", "#cfb8c8",
                              "#ead7e3", "#f8f8f8", "#452d45", "#836379" } },
-    { "薰衣草紫 · 银白", { "#eae4f2", "#f1f0ed", "#faf8fd", "#2d2343", "#b89ad9", "#c9b9dc",
+    { QStringLiteral("\u85b0\u8863\u8349\u7d2b \u00b7 \u94f6\u767d"), { "#eae4f2", "#f1f0ed", "#faf8fd", "#2d2343", "#b89ad9", "#c9b9dc",
                              "#e4d9f0", "#f1f0ed", "#42335c", "#796493" } },
-    { "藤萝紫 · 汉白玉", { "#e8e3eb", "#f8f4ed", "#fcf9f5", "#100c1a", "#8076a3", "#b6adc8",
+    { QStringLiteral("\u85e4\u841d\u7d2b \u00b7 \u6c49\u767d\u7389"), { "#e8e3eb", "#f8f4ed", "#fcf9f5", "#100c1a", "#8076a3", "#b6adc8",
                              "#ddd6e6", "#f8f4ed", "#392e50", "#75688d" } },
-    { "豆蔻紫 · 鱼肚白", { "#f0e3e9", "#f7f4ed", "#fdf8f8", "#150c16", "#ad6598", "#c9a6bd",
+    { QStringLiteral("\u8c46\u853b\u7d2b \u00b7 \u9c7c\u809a\u767d"), { "#f0e3e9", "#f7f4ed", "#fdf8f8", "#150c16", "#ad6598", "#c9a6bd",
                              "#e8cfe0", "#f7f4ed", "#452641", "#895e7d" } }
   }};
   return palettes;
@@ -660,13 +660,13 @@ public:
     auto* layout = new QVBoxLayout(this);
     auto* presets = new QFormLayout;
     auto* library = new QComboBox;
-    library->setPlaceholderText(QString::fromUtf8("选择内置主题"));
+    library->setPlaceholderText(QStringLiteral("\u9009\u62e9\u5185\u7f6e\u4e3b\u9898"));
     library->addItems({QString::fromUtf8("办公纯色白底"), QString::fromUtf8("深色线性渐变"),
                        QString::fromUtf8("中心聚焦镜像渐变")});
     for (const auto& entry : purplePalettes())
-      library->addItem(QString::fromUtf8(entry.name));
+      library->addItem(entry.name);
     library->setCurrentIndex(-1);
-    presets->addRow(QString::fromUtf8("主题库"), library);
+    presets->addRow(QStringLiteral("\u4e3b\u9898\u5e93"), library);
     connect(library, QOverload<int>::of(&QComboBox::activated), this,
             [this](int index) { load(preset(index)); });
     layout->addLayout(presets);
