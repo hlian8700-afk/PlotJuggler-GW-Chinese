@@ -28,28 +28,53 @@ inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int wid
   Points rows;
   for(auto p:input) if(p.x>=lo && p.x<=hi && std::isfinite(p.y)) rows.push_back(p);
   if(rows.empty()) throw std::runtime_error("当前时段没有有效样本");
-  if(mode)
+  const auto rSquared = [&](const Points& estimates) {
+    const double score = determination(rows, estimates);
+    return std::isfinite(score) ? QString::number(score,'g',8) : QStringLiteral("不适用");
+  };
+  if(mode==2)
+  {
+    const auto fit = fitExponential(rows);
+    Points estimates;
+    estimates.reserve(rows.size());
+    for (auto point : rows) estimates.push_back({point.x, fit(point.x)});
+    return {sample(rows.front().x,rows.back().x,fit),
+      QStringLiteral("y = %1 + (%2) × exp(−%3 × (t−%4))，R² %5，样本 %6")
+        .arg(fit.offset,0,'g',12).arg(fit.amplitude,0,'g',12)
+        .arg(fit.decayPerSecond,0,'g',12).arg(fit.origin,0,'g',16)
+        .arg(rSquared(estimates)).arg(qulonglong(rows.size()))};
+  }
+  if(mode==1)
   {
     auto smooth=average(rows,width);
+    const auto score = rSquared(smooth);
     if(smooth.size()>200){
       Points display;display.reserve(200);
       for(size_t i=0;i<200;++i)display.push_back(smooth[i*(smooth.size()-1)/199]);
       smooth=std::move(display);
     }
-    return {std::move(smooth),QString::fromUtf8("滑动平均 · %1 点窗口 · %2 个样本").arg(width).arg(qulonglong(rows.size()))};
+    return {std::move(smooth),QString::fromUtf8("滑动平均 · %1 点窗口 · %2 个样本 · R² %3").arg(width).arg(qulonglong(rows.size())).arg(score)};
   }
   const auto poly=regress(rows,degree);
   QStringList coeff;
   long double error=0;
-  for(auto p:rows){auto d=poly(p.x)-p.y;error+=d*d;}
+  Points estimates;
+  estimates.reserve(rows.size());
+  for (auto p : rows)
+  {
+    const double fitted = poly(p.x);
+    estimates.push_back({p.x,fitted});
+    const long double d = fitted-p.y;
+    error += d*d;
+  }
   for(double v:poly.coefficients) coeff<<QString::number(v,'g',12);
   return {sample(rows.front().x,rows.back().x,poly),
-    QString::fromUtf8("z=(t−%1)/%2，p₀…pₙ = [%3]，RMSE %4，样本 %5")
+    QString::fromUtf8("z=(t−%1)/%2，p₀…pₙ = [%3]，RMSE %4，样本 %5，R² %6")
     .arg(poly.origin,0,'g',16).arg(poly.scale,0,'g',12).arg(coeff.join(", "))
-    .arg(std::sqrt(double(error/rows.size())),0,'g',8).arg(qulonglong(rows.size()))};
+    .arg(std::sqrt(double(error/rows.size())),0,'g',8).arg(qulonglong(rows.size())).arg(rSquared(estimates))};
 }
 
-inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
+inline void open(PlotWidget* plot,QwtPlot*,const std::string& source)
 {
   auto& map=plot->datamap();
   const auto it=map.numeric.find(source);
@@ -60,7 +85,7 @@ inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
   QDialog dialog(plot);
   dialog.setWindowTitle(QString::fromUtf8("添加趋势线 · ")+QString::fromStdString(source));
   auto* form=new QFormLayout(&dialog);
-  auto* model=new QComboBox;model->addItems({QStringLiteral("多项式"),QStringLiteral("滑动平均")});
+  auto* model=new QComboBox;model->addItems({QStringLiteral("多项式"),QStringLiteral("滑动平均"),QStringLiteral("指数衰减 / 温升饱和")});
   auto* degree=new QSpinBox;degree->setRange(0,6);degree->setValue(1);
   auto* window=new QSpinBox;window->setRange(1,10000000);window->setValue(11);
   auto* range=new QComboBox;range->addItems({QStringLiteral("全部数据"),QStringLiteral("当前可视时段")});
@@ -75,20 +100,15 @@ inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
   form->addRow(buttons);
   auto* ok=buttons->button(QDialogButtonBox::Ok);
   ok->setText(QStringLiteral("添加到当前图"));buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-  QwtPlotCurve preview(QStringLiteral("趋势预览"));
-  preview.setItemAttribute(QwtPlotItem::Legend,false);
-  preview.attach(canvasPlot);
-  auto style=[&]{preview.setPen(QPen(color,penWidth->value()));plot->replot();};
   QObject::connect(colorButton,&QPushButton::clicked,&dialog,[&]{
-    const auto c=QColorDialog::getColor(color,&dialog,QStringLiteral("趋势线"),QColorDialog::ShowAlphaChannel);
-    if(c.isValid()) {color=c;style();}
+    const auto chosen=QColorDialog::getColor(color,&dialog,QStringLiteral("趋势线"),QColorDialog::ShowAlphaChannel);
+    if(chosen.isValid()) color=chosen;
   });
-  QObject::connect(penWidth,qOverload<double>(&QDoubleSpinBox::valueChanged),&dialog,[&]{style();});
   Trend result;
   QTimer timer;timer.setSingleShot(true);timer.setInterval(140);
   quint64 revision=0;bool busy=false;
   auto changed=[&]{++revision;ok->setEnabled(false);degree->setEnabled(model->currentIndex()==0);
-    window->setEnabled(model->currentIndex()!=0);timer.start();};
+    window->setEnabled(model->currentIndex()==1);timer.start();};
   QObject::connect(&timer,&QTimer::timeout,&dialog,[&]{
     if(busy) return;
     busy=true;
@@ -101,9 +121,7 @@ inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
       busy=false;
       if(ticket!=revision){timer.start();return;}
       result=std::move(data);
-      QVector<QPointF> display;
-      for(auto p:result.points) display.append(QPointF(p.x-plot->timeOffset(),p.y));
-      preview.setSamples(display);style();summary->setText(err.isEmpty()?result.summary:err);
+      summary->setText(err.isEmpty()?result.summary:err);
       ok->setEnabled(err.isEmpty()&&!result.points.empty());
     });
   });
@@ -113,7 +131,6 @@ inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
   QObject::connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
   changed();
   const bool accepted=dialog.exec()==QDialog::Accepted;
-  preview.detach();
   if(accepted && !result.points.empty()){
     const std::string prefix=source+"/Trend";
     std::string name=prefix;
