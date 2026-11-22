@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.16"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.14"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.16") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.14") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2064,21 +2064,6 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       updateDataAndReplot(true);
     }, [this] { return _mapped_plot_data.getAllNames(); });
   });
-  auto* bladeTimeSeries = bladeFileMenu->addAction(QStringLiteral("时序分析..."));
-  connect(bladeTimeSeries, &QAction::triggered, this, [this] {
-    BladeTimeSeries::open(this, _mapped_plot_data);
-  });
-  auto* bladeIndexedTimeSeries = bladeFileMenu->addAction(QStringLiteral("从 DATA 索引打开时序分析..."));
-  connect(bladeIndexedTimeSeries, &QAction::triggered, this, [this] {
-    BladeDataIndex::open(this, [this](const QStringList& files) {
-      PlotDataMapRef session;
-      const auto messages = BladeDataIndex::importFiles(this, files, {},
-          [&session](PlotDataMapRef& data) { session.numeric.merge(data.numeric); });
-      if (!messages.isEmpty())
-        QMessageBox::information(this, QStringLiteral("DATA 读取结果"), messages.join('\n'));
-      if (!session.numeric.empty()) BladeTimeSeries::open(this, session);
-    });
-  });
   auto* dataIndex = bladeFileMenu->addAction(QStringLiteral("DATA \u5f55\u6ce2\u76ee\u5f55\u7d22\u5f15..."));
   connect(dataIndex, &QAction::triggered, this, [this] {
     BladeDataIndex::open(this, [this](const QStringList& files) {
@@ -2188,16 +2173,12 @@ Copy-Item (Join-Path $PSScriptRoot "bladescope_time_display.h") "plotjuggler_plu
 $txtHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_txt_recording.h")
 Set-Content -Path "plotjuggler_app/bladescope_txt_recording.h" -Value $txtHeader -Encoding UTF8BOM
 Copy-Item (Join-Path $PSScriptRoot "bladescope_data_index.h") "plotjuggler_app/bladescope_data_index.h" -Force
-foreach ($timeSeriesHeader in @("bladescope_timeseries.h", "bladescope_timeseries_math.h")) {
-  $timeSeriesSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $timeSeriesHeader)
-  Set-Content -Path (Join-Path "plotjuggler_app" $timeSeriesHeader) -Value $timeSeriesSource -Encoding UTF8BOM
-}
 $sqliteHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_sqlite_recording.h")
 Set-Content -Path "plotjuggler_app/bladescope_sqlite_recording.h" -Value $sqliteHeader -Encoding UTF8BOM
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'find_package(Qt5 REQUIRED COMPONENTS Sql)' -Encoding UTF8
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::Sql)' -Encoding UTF8
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"`n#include `"bladescope_txt_recording.h`"`n#include `"bladescope_data_index.h`"`n#include `"bladescope_timeseries.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"`n#include `"bladescope_txt_recording.h`"`n#include `"bladescope_data_index.h`"" }
   @{ Old = '#include <QFileDialog>'; New = @'
 #include <QFileDialog>
 #include <QComboBox>
