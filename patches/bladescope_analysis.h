@@ -348,7 +348,8 @@ inline void openGroupManager(QWidget* parent, const PJ::PlotDataMapRef& data)
 
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
-                 const std::function<void(const QStringList&, bool, double, double, bool)>& plot)
+                 const std::function<void(const QStringList&, bool, double, double, bool)>& plot,
+                 const std::function<void(const QStringList&, double, double, bool)>& dual)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
@@ -660,6 +661,17 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     }
     results->setPlainText(rows.join('\n'));
   };
+  addButton(actions, "双轴对照", [&] {
+    bool firstOK = false, lastOK = false;
+    const double first = from->text().toDouble(&firstOK), last = to->text().toDouble(&lastOK);
+    if (!firstOK || !lastOK || !std::isfinite(first) || !std::isfinite(last) || first >= last)
+      return warn(QStringLiteral("请输入有效的起止时间。"));
+    bool accepted = false;
+    const QStringList modes{QStringLiteral("常规视图（每条最多 5 万点）"), QStringLiteral("细化 TS 明细（全原始点）")};
+    const auto choice = QInputDialog::getItem(&dialog, QStringLiteral("双轴对照"),
+        QStringLiteral("数据视图"), modes, 0, false, &accepted);
+    if (accepted) dual(selected(), first, last, choice == modes.back());
+  });
   addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;
     const auto first = from->text().toDouble(&startOK);

@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.22"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.23"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.22") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.23") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -1983,8 +1983,9 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
 $analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_analysis.h")
 Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
 Copy-Item (Join-Path $PSScriptRoot "bladescope_time_view_math.h") "plotjuggler_app/bladescope_time_view_math.h" -Force
+Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_dual_time.h") | Set-Content -Path "plotjuggler_app/bladescope_dual_time.h" -Encoding UTF8BOM
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"`n#include `"bladescope_dual_time.h`"" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
   ui->menuBar->removeAction(ui->menuCloudData->menuAction());
   auto* bladeGroupManager = bladePlotMenu->addAction(QString::fromUtf8("测点组管理..."));
@@ -2071,6 +2072,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           }
           target->replot();
           onUndoableChange();
+        }, [this](const QStringList& names, double first, double last, bool detail) {
+          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail);
         });
   });
 '@ }
