@@ -1828,10 +1828,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.9"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.10"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.9") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.10") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2060,6 +2060,22 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       updateDataAndReplot(true);
     }, [this] { return _mapped_plot_data.getAllNames(); });
   });
+  auto* dataIndex = bladeFileMenu->addAction(QStringLiteral("DATA \u5f55\u6ce2\u76ee\u5f55\u7d22\u5f15..."));
+  connect(dataIndex, &QAction::triggered, this, [this] {
+    BladeDataIndex::open(this, [this](const QStringList& files) {
+      const auto messages = BladeDataIndex::importFiles(this, files, _mapped_plot_data.getAllNames(),
+          [this](PlotDataMapRef& data) { importPlotDataMap(data, false); });
+      if (messages.isEmpty()) return;
+      forEachWidget([this](PlotWidget* plot) {
+        plot->on_changeDateTimeScale(ui->buttonUseDateTime->isChecked());
+      });
+      _curvelist_widget->updateFilter();
+      updateDataAndReplot(true);
+      linkedZoomOut();
+      updatedDisplayTime();
+      QMessageBox::information(this, QStringLiteral("DATA \u5bfc\u5165\u7ed3\u679c"), messages.join('\n'));
+    });
+  });
   auto* bladeReload = bladeFileMenu->addAction
 '@ }
 )
@@ -2152,12 +2168,13 @@ Copy-Item (Join-Path $PSScriptRoot "bladescope_time_display.h") "plotjuggler_app
 Copy-Item (Join-Path $PSScriptRoot "bladescope_time_display.h") "plotjuggler_plugins/ToolboxFFT/bladescope_time_display.h" -Force
 $txtHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_txt_recording.h")
 Set-Content -Path "plotjuggler_app/bladescope_txt_recording.h" -Value $txtHeader -Encoding UTF8BOM
+Copy-Item (Join-Path $PSScriptRoot "bladescope_data_index.h") "plotjuggler_app/bladescope_data_index.h" -Force
 $sqliteHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_sqlite_recording.h")
 Set-Content -Path "plotjuggler_app/bladescope_sqlite_recording.h" -Value $sqliteHeader -Encoding UTF8BOM
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'find_package(Qt5 REQUIRED COMPONENTS Sql)' -Encoding UTF8
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::Sql)' -Encoding UTF8
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"`n#include `"bladescope_txt_recording.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"`n#include `"bladescope_txt_recording.h`"`n#include `"bladescope_data_index.h`"" }
   @{ Old = '#include <QFileDialog>'; New = @'
 #include <QFileDialog>
 #include <QComboBox>
@@ -2206,7 +2223,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     updateRecentDataMenu(ordinaryFiles);
   if (ordinaryFiles.size() == fileNames.size()) return;
 
-  QStringList summaries;
+  QStringList summaries, dataFiles;
   for (const auto& path : fileNames)
   {
     if (BladeTxtRecording::isRecordingExtension(path))
@@ -2221,15 +2238,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
         .arg(qlonglong(recording.invalidValues));
       continue;
     }
-    if (!BladeSqliteRecording::isRecordingExtension(path)) continue;
-    auto recording = BladeSqliteRecording::open(this, path, _mapped_plot_data.getAllNames());
-    if (recording.data.numeric.empty()) continue;
-    const auto series = recording.data.numeric.size();
-    importPlotDataMap(recording.data, false);
-    summaries << QStringLiteral("%1：%2 行，%3 个测点，跳过 %4 条无效时间和 %5 个无效测点值。")
-      .arg(QFileInfo(path).fileName()).arg(qlonglong(recording.rows)).arg(qulonglong(series))
-      .arg(qlonglong(recording.invalidTime)).arg(qlonglong(recording.invalidValues));
+    if (BladeSqliteRecording::isRecordingExtension(path)) dataFiles << path;
   }
+  summaries << BladeDataIndex::importFiles(this, dataFiles, _mapped_plot_data.getAllNames(),
+      [this](PlotDataMapRef& data) { importPlotDataMap(data, false); });
   if (!summaries.isEmpty())
   {
     forEachWidget([this](PlotWidget* plot) {
