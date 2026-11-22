@@ -18,20 +18,22 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   }
   using BladeFit::Point;
   using BladeFit::Points;
-  QMap<QString, Points> prepared;
+  QMap<QString, Points> unfiltered, filtered;
   for (const auto& name : channels)
   {
     const auto it = source.numeric.find(name.toStdString());
     if (it == source.numeric.end()) continue;
     const auto& series = it->second;
-    auto& values = prepared[name];
+    auto& raw = unfiltered[name];
+    auto& kept = filtered[name];
     BladeTimeView::select(BladeAnalysis::boundary(series, first),
         BladeAnalysis::boundary(series,last,true), detail,
         [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
       const auto sample = series.at(i);
-      if (std::isfinite(sample.x) && std::isfinite(sample.y) &&
-          (!filter || filter(series, sample.x, sample.y)))
-        values.push_back({sample.x, sample.y});
+      if (!std::isfinite(sample.x) || !std::isfinite(sample.y)) return;
+      const Point point{sample.x, sample.y};
+      raw.push_back(point);
+      if (filter && filter(series, sample.x, sample.y)) kept.push_back(point);
     });
   }
 
@@ -64,6 +66,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   QDoubleSpinBox tolerance;
   tolerance.setRange(0., 3600.);
   tolerance.setDecimals(6);
+  QCheckBox filterEnabled(QStringLiteral("应用录波条件筛选"));
+  filterEnabled.setChecked(bool(filter));
+  filterEnabled.setEnabled(bool(filter));
+  parameters.addRow(&filterEnabled);
   QCheckBox difference(QStringLiteral("确认两测点单位一致，输出 Y−X"));
   parameters.addRow(QStringLiteral("X 测点"), &x);
   parameters.addRow(QStringLiteral("Y 测点"), &y);
@@ -89,10 +95,15 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   QObject::connect(&copy, &QPushButton::clicked, &dialog, [&] {
     QApplication::clipboard()->setText(report.toPlainText());
   });
-  const auto generate = [&] {
+  QString renderedX, renderedY;
+  const auto generate = [&](bool preserveViewport) {
     const auto xName = x.currentData().toString(), yName = y.currentData().toString();
-    const auto& xs = prepared[xName];
-    const auto& ys = prepared[yName];
+    const bool enabled = filterEnabled.isChecked();
+    const auto& prepared = enabled ? filtered : unfiltered;
+    const Points empty;
+    const auto xSeries = prepared.constFind(xName), ySeries = prepared.constFind(yName);
+    const auto& xs = xSeries == prepared.cend() ? empty : xSeries.value();
+    const auto& ys = ySeries == prepared.cend() ? empty : ySeries.value();
     const auto dt = tolerance.value();
     const int degree = model.currentData().toInt();
     Points pairs, fitted;
@@ -125,7 +136,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
                       .arg(detail ? QStringLiteral("细化原始点") : QStringLiteral("常规抽稀点"),
                            BladeAnalysis::number(first), BladeAnalysis::number(last)),
                      QStringLiteral("筛选%1；目标候选 %2，成功配对 %3，未配对 %4")
-                      .arg(filter ? QStringLiteral("已启用") : QStringLiteral("未启用"))
+                      .arg(enabled ? QStringLiteral("已启用") : QStringLiteral("未启用"))
                       .arg(qulonglong(ys.size())).arg(qulonglong(pairs.size())).arg(qulonglong(ys.size()-pairs.size()))};
     BladeAnalysis::appendStatistics(rows, x.currentText(), xStats, &xValues);
     BladeAnalysis::appendStatistics(rows, y.currentText(), yStats, &yValues);
@@ -172,6 +183,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       }
     }
 
+    const auto viewport = plot->currentBoundingRect();
+    const bool restore = preserveViewport && renderedX == xName && renderedY == yName &&
+                         !plot->curveList().empty() && !pairs.empty();
     plot->removeAllCurves();
     plotted.scatter_xy.clear();
     QMetaObject::invokeMethod(plot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true));
@@ -192,11 +206,15 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     add(name, pairs, true);
     add(name + QStringLiteral(" · 拟合"), fitted, false);
     plot->zoomOut(false);
+    if (restore) plot->setZoomRectangle(viewport, false);
+    renderedX = xName;
+    renderedY = yName;
     plot->replot();
     report.setPlainText(rows.join(QLatin1Char('\n')));
   };
-  QObject::connect(&refresh, &QPushButton::clicked, &dialog, generate);
-  generate();
+  QObject::connect(&refresh, &QPushButton::clicked, &dialog, [&] { generate(false); });
+  QObject::connect(&filterEnabled, &QCheckBox::toggled, &dialog, [&] { generate(true); });
+  generate(false);
   dialog.exec();
 }
 }
