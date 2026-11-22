@@ -649,13 +649,18 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   bladeSettingsMenu->addAction(ui->actionPreferences);
   bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
   auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
-  const QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
-  const QList<QStringList> palettes = {
+  QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
+  QList<QStringList> palettes = {
     QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#ffffff","#fdfdfd","#49382d","#e6e9ec"},
     QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#ffffff","#fcfdff","#29445d","#e4eaf0"},
     QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#ffffff","#fdfefe","#3d4540","#e5e9e6"},
     QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
     QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#edf2f6","#e3eaf1","#35485b","#c5d1dc"}};
+  const int firstPurpleInterface = themeNames.size();
+  for (const auto& entry : BladePlotTheme::purplePalettes()) {
+    themeNames << QString::fromUtf8(entry.name);
+    palettes << entry.colors;
+  }
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;font-size:9pt;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
@@ -716,7 +721,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
             "QToolButton:checked:enabled,QToolButton:hover:enabled{color:#241b14;}") : QString());
   }
   auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
-  auto applyBladeTheme = [this, themeSettings, themeStyles, palettes](int index) {
+  auto applyBladeTheme = [this, themeSettings, themeStyles, palettes, firstPurpleInterface](int index) {
     if (index < 0 || index >= themeStyles.size()) index = 0;
     const auto p = palettes[index];
     const bool dark = QColor(p[0]).lightness() < 128;
@@ -761,12 +766,15 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
         ++itemIt;
       }
     }
-    BladePlotTheme::interfaceChanged(dark);
+    const int plotPreset = index >= firstPurpleInterface
+        ? BladePlotTheme::firstPurplePreset + index - firstPurpleInterface : 0;
+    BladePlotTheme::interfaceChanged(dark, plotPreset);
     BladePlotTheme::refreshButtonIcons(this, dark);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
   for (int i = 0; i < themeNames.size(); ++i) {
+    if (i == firstPurpleInterface) themeMenu->addSeparator();
     QAction* themeAction = themeMenu->addAction(themeNames[i]);
     connect(themeAction, &QAction::triggered, this, [applyBladeTheme, i]() { applyBladeTheme(i); });
   }
@@ -1740,10 +1748,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.3"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.4"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.3") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.4") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.

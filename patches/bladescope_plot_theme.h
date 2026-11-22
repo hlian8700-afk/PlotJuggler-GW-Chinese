@@ -77,6 +77,30 @@ struct Theme
   std::array<QColor, 2> gridColor = {{ QColor("#805a738a"), QColor("#805a738a") }};
 };
 
+struct PurplePalette
+{
+  const char* name;
+  QStringList colors;
+};
+
+inline const std::array<PurplePalette, 4>& purplePalettes()
+{
+  // Window, input, toolbar, text, accent, border, plot top, plot bottom, axis ink, grid.
+  static const std::array<PurplePalette, 4> palettes = {{
+    { "青蛤壳紫 · 雪山白", { "#f1e9ef", "#f8f8f8", "#fcf8fb", "#322135", "#bc84a8", "#cfb8c8",
+                             "#ead7e3", "#f8f8f8", "#452d45", "#836379" } },
+    { "薰衣草紫 · 银白", { "#eae4f2", "#f1f0ed", "#faf8fd", "#2d2343", "#b89ad9", "#c9b9dc",
+                             "#e4d9f0", "#f1f0ed", "#42335c", "#796493" } },
+    { "藤萝紫 · 汉白玉", { "#e8e3eb", "#f8f4ed", "#fcf9f5", "#100c1a", "#8076a3", "#b6adc8",
+                             "#ddd6e6", "#f8f4ed", "#392e50", "#75688d" } },
+    { "豆蔻紫 · 鱼肚白", { "#f0e3e9", "#f7f4ed", "#fdf8f8", "#150c16", "#ad6598", "#c9a6bd",
+                             "#e8cfe0", "#f7f4ed", "#452641", "#895e7d" } }
+  }};
+  return palettes;
+}
+
+inline constexpr int firstPurplePreset = 3;
+
 inline Theme preset(int index)
 {
   Theme t;
@@ -90,6 +114,20 @@ inline Theme preset(int index)
   }
   if (index == 2)
     t.mode = Mirror;
+  const int purple = index - firstPurplePreset;
+  if (purple >= 0 && purple < int(purplePalettes().size()))
+  {
+    const auto& colors = purplePalettes()[purple].colors;
+    t.mode = Linear;
+    t.solid = QColor(colors[7]);
+    t.stops = {{ 0.0, QColor(colors[6]) }, { 1.0, t.solid }};
+    const QColor ink(colors[8]);
+    for (auto& axis : t.axes)
+      axis = {{ ink, ink, ink }};
+    QColor grid(colors[9]);
+    grid.setAlpha(96);
+    t.gridColor = {{ grid, grid }};
+  }
   return t;
 }
 
@@ -473,12 +511,12 @@ inline bool& customized()
   return value;
 }
 
-inline void interfaceChanged(bool dark)
+inline void interfaceChanged(bool dark, int plotPreset = 0)
 {
   qApp->setProperty("bladeScopeDarkInterface", dark);
   if (!customized())
   {
-    auto theme = preset(dark ? 1 : 0);
+    auto theme = preset(dark ? 1 : plotPreset);
     theme.grid = current().grid;
     if (activeBackground(current()) != activeBackground(theme))
       ++backgroundRevision();
@@ -620,11 +658,17 @@ public:
   {
     setWindowTitle(QString::fromUtf8("绘图主题调色盘"));
     auto* layout = new QVBoxLayout(this);
-    auto* presets = new QHBoxLayout;
-    const QStringList names = {QString::fromUtf8("办公纯色白底"), QString::fromUtf8("深色线性渐变"),
-                               QString::fromUtf8("中心聚焦镜像渐变")};
-    for (int i = 0; i < names.size(); ++i)
-      button(presets, names.at(i), [this, i] { load(preset(i)); });
+    auto* presets = new QFormLayout;
+    auto* library = new QComboBox;
+    library->setPlaceholderText(QString::fromUtf8("选择内置主题"));
+    library->addItems({QString::fromUtf8("办公纯色白底"), QString::fromUtf8("深色线性渐变"),
+                       QString::fromUtf8("中心聚焦镜像渐变")});
+    for (const auto& entry : purplePalettes())
+      library->addItem(QString::fromUtf8(entry.name));
+    library->setCurrentIndex(-1);
+    presets->addRow(QString::fromUtf8("主题库"), library);
+    connect(library, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int index) { load(preset(index)); });
     layout->addLayout(presets);
 
     auto* scroll = new QScrollArea;
