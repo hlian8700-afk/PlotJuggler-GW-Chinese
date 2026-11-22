@@ -3,6 +3,8 @@
 #include "bladescope_time_view_math.h"
 #include <QtWidgets>
 #include <QMap>
+#include <QClipboard>
+#include <vector>
 #include "bladescope_fit_xlsx.h"
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -665,46 +667,50 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     };
     return true;
   };
+  const auto plotOverview = [&](bool newTab) {
+    bool a = false, b = false;
+    const auto first = from->text().toDouble(&a), last = to->text().toDouble(&b);
+    if (!a || !b || !std::isfinite(first) || !std::isfinite(last) || first > last)
+      return warn(QStringLiteral("请输入有效的起止时间。"));
+    SampleFilter filter;
+    if (makeFilter(filter)) plot(selected(), newTab, first, last, false, filter);
+  };
   auto* plotRow = new QHBoxLayout;
   layout->addLayout(plotRow);
   addButton(plotRow, "常规视图（每条最多 5 万点）", [&] {
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
-    SampleFilter filter;
-    if (!makeFilter(filter)) return;
-    plot(selected(), true, 0, 0, false, filter);
+    plotOverview(true);
   });
   addButton(plotRow, "追加到当前图页", [&] {
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
-    SampleFilter filter;
-    if (!makeFilter(filter)) return;
-    plot(selected(), false, 0, 0, false, filter);
+    plotOverview(false);
   });
   auto* results = new QPlainTextEdit;
   results->setReadOnly(true);
   layout->addWidget(results, 1);
   auto* actions = new QHBoxLayout;
+  const QStringList viewModes{QStringLiteral("常规视图（每条最多 5 万点）"),
+                              QStringLiteral("细化 TS 明细（全原始点）")};
+  auto* statisticsMode = new QComboBox;
+  statisticsMode->addItems(viewModes);
+  actions->addWidget(statisticsMode);
   auto run = [&](bool exportSamples) {
     const QStringList targets = selected();
-    bool fromOK, toOK, thresholdOK, upperOK, toleranceOK;
+    bool fromOK = false, toOK = false, toleranceOK = false;
     const double first = from->text().toDouble(&fromOK);
     const double last = to->text().toDouble(&toOK);
-    const double limit = threshold->text().toDouble(&thresholdOK);
-    const double high = upper->text().toDouble(&upperOK);
     const double dt = tolerance->text().toDouble(&toleranceOK);
-    const int operation = op->currentIndex();
-    const auto get = [&](QComboBox* box) -> const PJ::PlotData* {
-      const auto it = data.numeric.find(box->currentData().toString().toStdString());
-      return it == data.numeric.end() ? nullptr : &it->second;
-    };
-    const auto* criterion = get(condition);
-    const auto* baseline = get(reference);
+    const auto referenceKey = reference->currentData().toString().toStdString();
+    const auto referenceEntry = data.numeric.find(referenceKey);
+    const auto* baseline = referenceEntry == data.numeric.end() ? nullptr : &referenceEntry->second;
     if (targets.isEmpty() || !fromOK || !toOK || !std::isfinite(first) || !std::isfinite(last) ||
-        first > last || ((criterion || baseline) && (!toleranceOK || !std::isfinite(dt) || dt < 0)) ||
-        (criterion && (!thresholdOK || !std::isfinite(limit) ||
-         (operation == 6 && (!upperOK || !std::isfinite(high) || high < limit)))))
-      return warn(QString::fromUtf8("请检查测点、时间区间、条件值和匹配时间差。"));
+        first > last || (baseline && (!toleranceOK || !std::isfinite(dt) || dt < 0)))
+      return warn(QStringLiteral("请检查测点、时间区间和参考测点的匹配时间差。"));
+    SampleFilter filter;
+    if (!makeFilter(filter)) return;
+    const bool detail = statisticsMode->currentIndex() == 1;
     if (baseline && !units->isChecked())
       return warn(QString::fromUtf8("计算差值前请确认单位一致。"));
 
@@ -726,16 +732,26 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       csv << "raw_tag,timestamp,value,reference_value,difference\n";
     QStringList rows;
     rows << QString::fromUtf8("时间区间：%1 至 %2").arg(number(first), number(last));
-    if (criterion)
-      rows << QString::fromUtf8("条件：%1 %2 %3 %4").arg(condition->currentData().toString(),
-          op->currentText(), number(limit), operation == 6 ? number(high) : QString());
-    const auto summary = [&](const QString& name, const Statistics& v) {
-      rows << QString::fromUtf8("%1：有效 %2，无法匹配 %3，无效 %4")
+    rows << QStringLiteral("数据口径：%1；筛选%2").arg(statisticsMode->currentText(),
+        filter ? QStringLiteral("已启用") : QStringLiteral("未启用"));
+    const auto summary = [&](const QString& name, const Statistics& v, std::vector<double>* values = nullptr) {
+      rows << QStringLiteral("%1：有效 %2，无法匹配 %3，无效 %4")
                   .arg(name).arg(qulonglong(v.count)).arg(qulonglong(v.unmatched)).arg(qulonglong(v.invalid));
-      if (v.count)
-        rows << QString::fromUtf8("最小 %1，最大 %2，峰峰 %3，均值 %4，标准差 %5")
-                    .arg(number(v.low), number(v.high), number(v.high - v.low), number(v.mean),
-                         number(std::sqrt(std::max(0.0, v.m2 / double(v.count)))));
+      if (!v.count) return;
+      rows << QStringLiteral("最小 %1，最大 %2，极差 %3，均值 %4，总体标准差 %5")
+                  .arg(number(v.low), number(v.high), number(v.high - v.low), number(v.mean),
+                       number(std::sqrt(std::max(0.0, v.m2 / double(v.count)))));
+      if (!values || values->empty()) return;
+      std::sort(values->begin(), values->end());
+      const auto percentile = [&](double ratio) {
+        const double position = ratio * (values->size() - 1);
+        const size_t index = size_t(position);
+        const auto lower = (*values)[index];
+        const auto upper = (*values)[std::min(index + 1, values->size() - 1)];
+        return number(lower + (upper - lower) * (position - index));
+      };
+      rows << QStringLiteral("P5 %1，P25 %2，中位数 %3，P75 %4，P95 %5")
+          .arg(percentile(.05), percentile(.25), percentile(.5), percentile(.75), percentile(.95));
     };
     for (const auto& name : targets)
     {
@@ -744,39 +760,34 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
         continue;
       const auto& series = it->second;
       Statistics full, filtered, delta;
+      const size_t firstIndex = boundary(series, first);
       const size_t stop = boundary(series, last, true);
+      std::vector<double> retained, differences;
       size_t rejected = 0;
-      for (size_t i = boundary(series, first); i < stop; ++i)
-      {
+      BladeTimeView::select(firstIndex, stop, detail, [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
         const auto& sample = series.at(i);
         if (!std::isfinite(sample.y))
         {
           ++full.invalid;
           ++filtered.invalid;
-          continue;
+          return;
         }
         full.add(sample.y);
-        double value = 0;
-        if (criterion && !match(*criterion, sample.x, dt, previous->isChecked(), value))
+        if (filter && !filter(series, sample.x, sample.y))
         {
-          ++filtered.unmatched;
-          continue;
-        }
-        if (criterion)
-        {
-          const bool keep[] = {value == limit, value != limit, value > limit, value >= limit,
-                               value < limit, value <= limit, value >= limit && value <= high};
-          if (!keep[operation])
-          {
-            ++rejected;
-            continue;
-          }
+          ++rejected;
+          return;
         }
         filtered.add(sample.y);
+        if (!exportSamples) retained.push_back(sample.y);
         double ref = 0;
         const bool paired = baseline && match(*baseline, sample.x, dt, false, ref);
         if (paired)
-          delta.add(sample.y - ref);
+        {
+          const auto difference = sample.y - ref;
+          delta.add(difference);
+          if (!exportSamples) differences.push_back(difference);
+        }
         else if (baseline)
           ++delta.unmatched;
         if (exportSamples)
@@ -788,16 +799,16 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
             csv << ',';
           csv << '\n';
         }
-      }
+      });
       rows << "" << name;
-      summary(QString::fromUtf8("全部样本"), full);
-      if (criterion)
+      if (filter)
       {
-        summary(QString::fromUtf8("筛选后"), filtered);
-        rows << QString::fromUtf8("条件排除：%1").arg(qulonglong(rejected));
+        summary(QStringLiteral("筛选前"), full);
+        rows << QStringLiteral("条件排除或无法配对：%1").arg(qulonglong(rejected));
       }
+      summary(filter ? QStringLiteral("筛选后") : QStringLiteral("全部样本"), filtered, &retained);
       if (baseline)
-        summary(QString::fromUtf8("参考差值"), delta);
+        summary(QStringLiteral("参考差值（目标−参考）"), delta, &differences);
     }
     if (exportSamples)
     {
@@ -813,11 +824,11 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (!firstOK || !lastOK || !std::isfinite(first) || !std::isfinite(last) || first >= last)
       return warn(QStringLiteral("请输入有效的起止时间。"));
     bool accepted = false;
-    const QStringList modes{QStringLiteral("常规视图（每条最多 5 万点）"), QStringLiteral("细化 TS 明细（全原始点）")};
+
     const auto choice = QInputDialog::getItem(&dialog, QStringLiteral("双轴对照"),
-        QStringLiteral("数据视图"), modes, 0, false, &accepted);
+        QStringLiteral("数据视图"), viewModes, statisticsMode->currentIndex(), false, &accepted);
     SampleFilter filter;
-    if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == modes.back(), filter);
+    if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter);
   });
   addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;
@@ -831,6 +842,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   });
   addButton(actions, "预览筛选与统计", [&] { run(false); });
   addButton(actions, "导出筛选采样 CSV", [&] { run(true); });
+  addButton(actions, "复制统计", [&] { QApplication::clipboard()->setText(results->toPlainText()); });
   addButton(actions, "关闭", [&] { dialog.reject(); });
   layout->addLayout(actions);
   dialog.exec();

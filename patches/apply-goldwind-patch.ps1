@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.24"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.25"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.24") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.25") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2037,8 +2037,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             const auto it = _mapped_plot_data.numeric.find(raw);
             if (it == _mapped_plot_data.numeric.end()) continue;
             const auto& series = it->second;
-            const size_t begin = detail ? BladeAnalysis::boundary(series, first) : 0;
-            const size_t end = detail ? BladeAnalysis::boundary(series, last, true) : series.size();
+            const size_t begin = BladeAnalysis::boundary(series, first);
+            const size_t end = BladeAnalysis::boundary(series, last, true);
             if (begin >= end) continue;
             const auto prefix = raw + (detail ? "/TS Detail" : "/TS Overview");
             auto key = prefix;
