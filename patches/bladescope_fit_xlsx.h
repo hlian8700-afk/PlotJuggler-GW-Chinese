@@ -28,7 +28,7 @@ inline QByteArray sheetPart(QZipReader& zip, const QString& path)
   return {};
 }
 
-inline CurveSheet readCurveSheet(const QString& path)
+inline QVector<QVector<QStringList>> readWorkbookRows(const QString& path, int columnCount)
 {
   QZipReader zip(path);
   QStringList shared;
@@ -41,20 +41,24 @@ inline CurveSheet readCurveSheet(const QString& path)
     if (strings.isEndElement() && strings.name() == "si") shared.append(value);
   }
   const QRegularExpression worksheet("^xl/worksheets/sheet[0-9]+[.]xml$");
-  const QRegularExpression address("^([A-D])[0-9]+$");
-  const QRegularExpression spaces("\\s+");
+  const QRegularExpression address("^([A-Z]{1,3})[0-9]+$");
+  QVector<QVector<QStringList>> sheets;
   for (const auto& entry : zip.fileInfoList()) {
     if (!worksheet.match(entry.filePath).hasMatch()) continue;
-    CurveSheet result;
+    QVector<QStringList> rows;
     QXmlStreamReader xml(sheetPart(zip, entry.filePath));
-    while (!xml.atEnd() && result.rows.size() < 10000) {
+    while (!xml.atEnd() && rows.size() < 10000) {
       xml.readNext();
       if (!xml.isStartElement() || xml.name() != "row") continue;
-      QStringList row{"", "", "", ""};
+      QStringList row;
+      for(int i=0;i<columnCount;++i) row.append(QString());
       while (xml.readNextStartElement()) {
         if (xml.name() != "c") { xml.skipCurrentElement(); continue; }
         const auto cell = address.match(xml.attributes().value("r").toString());
         if (!cell.hasMatch()) { xml.skipCurrentElement(); continue; }
+        int column=0;
+        for(QChar letter:cell.captured(1)) column=26*column+letter.unicode()-'A'+1;
+        if(column>columnCount){xml.skipCurrentElement(); continue;}
         const auto type = xml.attributes().value("t").toString();
         QString text;
         while (!xml.atEnd()) {
@@ -68,20 +72,28 @@ inline CurveSheet readCurveSheet(const QString& path)
           const int index = text.toInt(&ok);
           text = ok ? shared.value(index) : QString();
         }
-        row[cell.captured(1).at(0).unicode() - 'A'] = text.trimmed();
+        row[column-1] = text.trimmed();
       }
-      for (int col=0; col<row.size() && result.header<0; ++col) {
-        const auto label = QString(row[col]).toLower().remove(spaces);
-        if (label == "wind(m/s)" || label == QStringLiteral("风速(m/s)")) result.wind = col;
-        if (label == "power(kw)" || label == QStringLiteral("功率(kw)")) result.power = col;
-      }
-      if (result.header < 0) {
-        if (result.wind >= 0 && result.power >= 0) result.header = result.rows.size();
-        else result.wind = result.power = -1;
-      }
-      result.rows.append(row);
+      rows.append(row);
     }
-    if (!xml.hasError() && xml.atEnd() && result.header >= 0) return result;
+    if (!xml.hasError() && xml.atEnd() && !rows.isEmpty()) sheets.append(rows);
+  }
+  return sheets;
+}
+
+inline CurveSheet readCurveSheet(const QString& path)
+{
+  const QRegularExpression spaces("\\s+");
+  for (const auto& rows:readWorkbookRows(path,4)) {
+    for (int i=0;i<rows.size();++i) {
+      int wind=-1,power=-1;
+      for (int col=0;col<rows[i].size();++col) {
+        const auto label=QString(rows[i][col]).toLower().remove(spaces);
+        if(label=="wind(m/s)" || label==QStringLiteral("风速(m/s)")) wind=col;
+        if(label=="power(kw)" || label==QStringLiteral("功率(kw)")) power=col;
+      }
+      if(wind>=0 && power>=0) return {rows,i,wind,power};
+    }
   }
   return {};
 }

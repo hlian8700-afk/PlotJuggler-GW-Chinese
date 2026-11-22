@@ -1,5 +1,6 @@
 #pragma once
 #include "bladescope_fit_panel.h"
+#include "bladescope_label_xlsx.h"
 #include "bladescope_sqlite_recording.h"
 #include "bladescope_txt_recording.h"
 #include <QScreen>
@@ -23,6 +24,24 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
   };
 
   QTimer::singleShot(0, window, [=, &data] {
+    const auto mappingPath=QDir(output).filePath("acceptance-labels.xlsx");
+    const CurveSheet mapping{{QStringList{"系统","确认程度","中文含义","原始字段"},
+                              QStringList{"变流器","已核对","发电机转速","WGEN.Spd.Ra.F32"}},0,3,2};
+    const auto mappingBytes=writeCurveSheet(mapping);
+    QFile mappingFile(mappingPath);
+    if (mappingBytes.isEmpty() || !mappingFile.open(QIODevice::WriteOnly) ||
+        mappingFile.write(mappingBytes)!=mappingBytes.size()) {
+      fail(QStringLiteral("write XLSX label mapping fixture"));
+      return;
+    }
+    mappingFile.close();
+    const auto importedMapping=BladeLabels::readWorkbook(mappingPath);
+    if (importedMapping.size()!=1 || importedMapping.value("WGEN.Spd.Ra.F32").toArray()!=
+          QJsonArray{QStringLiteral("发电机转速"),QStringLiteral("变流器")} ||
+        !window->windowTitle().startsWith("BladeScope")) {
+      fail(QStringLiteral("XLSX mapping header recognition or BladeScope window title"));
+      return;
+    }
     const auto textPath = QDir(output).filePath("acceptance-high-rate.TXT");
     QFile textFixture(textPath);
     const QByteArray textBytes(

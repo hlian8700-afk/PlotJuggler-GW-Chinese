@@ -30,6 +30,9 @@ $src = $src.Replace($includeNeedle, @'
 #include <QFile>
 #include <QCoreApplication>
 #include <QTextCodec>
+#include "bladescope_label_xlsx.h"
+#include <QFileInfo>
+#include <QJsonDocument>
 #include <QDir>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
@@ -43,8 +46,16 @@ bool& goldwindGroupBySystem()
   return enabled;
 }
 
+QHash<QString,QString>& goldwindImportedSystems()
+{
+  static QHash<QString,QString> systems;
+  return systems;
+}
+
 QString goldwindSystemGroup(const QString& raw)
 {
+  const auto explicitSystem=goldwindImportedSystems().value(raw);
+  if (!explicitSystem.isEmpty()) return explicitSystem;
   const QString prefix = raw.section('.', 0, 0).toUpper();
   if (prefix == "WTPS") return QString::fromUtf8("变桨系统");
   if (prefix == "WCNV") return QString::fromUtf8("变流器");
@@ -59,71 +70,54 @@ int& goldwindLabelMode()
   return mode;
 }
 
+QString goldwindMappingPath()
+{
+  return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/gw_tag_mapping.json";
+}
+
+QHash<QString,QString> goldwindReadNames()
+{
+  QHash<QString,QString> names;
+  auto& systems=goldwindImportedSystems();
+  systems.clear();
+  QFile json(goldwindMappingPath());
+  if (json.open(QIODevice::ReadOnly))
+  {
+    const auto mapping=QJsonDocument::fromJson(json.readAll()).object();
+    for(auto it=mapping.begin();it!=mapping.end();++it)
+    {
+      const auto row=it.value().toArray();
+      if(row.size()!=2 || row[0].toString().isEmpty()) continue;
+      names.insert(it.key(),row[0].toString());
+      if(!row[1].toString().isEmpty()) systems.insert(it.key(),row[1].toString());
+    }
+    return names;
+  }
+  const QString userMap=QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/gw_tag_mapping.csv";
+  QFile file(QFile::exists(userMap)?userMap:QCoreApplication::applicationDirPath()+"/gw_tag_mapping.csv");
+  if(!file.open(QIODevice::ReadOnly|QIODevice::Text)) return names;
+  QTextStream stream(&file);
+  stream.setCodec("UTF-8");
+  while(!stream.atEnd())
+  {
+    const auto line=stream.readLine();
+    const int comma=line.indexOf(',');
+    if(comma<=0 || line.trimmed().compare("raw_tag,cn_name",Qt::CaseInsensitive)==0) continue;
+    const auto tag=line.left(comma).trimmed(), name=line.mid(comma+1).trimmed();
+    if(!tag.isEmpty() && !name.isEmpty()) names.insert(tag,name);
+  }
+  return names;
+}
+
 QHash<QString, QString>& goldwindChineseNames()
 {
-  static QHash<QString, QString> names = [] {
-    QHash<QString, QString> result;
-    const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
-    QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-    {
-      qWarning() << "Goldwind tag dictionary not found:" << file.fileName();
-      return result;
-    }
-    QTextStream stream(&file);
-    stream.setCodec("UTF-8");
-    bool first_line = true;
-    while (!stream.atEnd())
-    {
-      QString line = stream.readLine();
-      if (first_line)
-      {
-        first_line = false;
-        if (!line.isEmpty() && line.front() == QChar(0xFEFF))
-        {
-          line.remove(0, 1);
-        }
-        if (line == "raw_tag,cn_name")
-        {
-          continue;
-        }
-      }
-      const int comma = line.indexOf(',');
-      if (comma <= 0)
-      {
-        continue;
-      }
-      const QString raw = line.left(comma).trimmed();
-      const QString chinese = line.mid(comma + 1).trimmed();
-      if (!raw.isEmpty() && !chinese.isEmpty())
-      {
-        result.insert(raw, chinese);
-      }
-    }
-    qInfo() << "Loaded Goldwind Chinese labels:" << result.size();
-    return result;
-  }();
+  static auto names=goldwindReadNames();
   return names;
 }
 
 void goldwindReloadChineseNames()
 {
-  auto& names = goldwindChineseNames();
-  names.clear();
-  const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
-  QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
-  QTextStream stream(&file);
-  stream.setCodec("UTF-8");
-  while (!stream.atEnd())
-  {
-    const QString line = stream.readLine();
-    const int comma = line.indexOf(',');
-    if (comma <= 0) continue;
-    const QString key = line.left(comma).trimmed();
-    const QString value = line.mid(comma + 1).trimmed();
-    if (!key.isEmpty() && !value.isEmpty()) names.insert(key, value);
-  }
+  goldwindChineseNames()=goldwindReadNames();
 }
 
 QString goldwindChineseName(const QString& raw_name)
@@ -221,8 +215,8 @@ $layoutReplacement = @'
     }
 
     // An empty override prevents falling back to the bundled mapping on restart.
-    const QByteArray header("raw_tag,cn_name\n");
-    QSaveFile file(dir + "/gw_tag_mapping.csv");
+    const QByteArray header("{}\n");
+    QSaveFile file(goldwindMappingPath());
     if (!file.open(QIODevice::WriteOnly) || file.write(header) != header.size() || !file.commit())
     {
       QMessageBox::warning(this, title, file.errorString());
@@ -232,63 +226,76 @@ $layoutReplacement = @'
   });
   connect(goldwindImport, &QPushButton::clicked, this, [this, refreshMapping]() {
     const QString path = QFileDialog::getOpenFileName(
-        this, QString::fromUtf8("选择新的标签映射 CSV"), QString(),
-        QString::fromUtf8("CSV 文件 (*.csv)"));
+        this, QString::fromUtf8("选择标签点表"), QString(),
+        QString::fromUtf8("标签点表 (*.xlsx *.csv)"));
     if (path.isEmpty()) return;
-    QFile input(path);
-    if (!input.open(QIODevice::ReadOnly | QIODevice::Text))
+    QJsonObject checked;
+    QString detectedEncoding=QStringLiteral("XLSX");
+    if(QFileInfo(path).suffix().compare("xlsx",Qt::CaseInsensitive)==0)
     {
-      QMessageBox::warning(this, QString::fromUtf8("导入失败"), input.errorString());
-      return;
-    }
-    // Detect UTF-8 (with or without BOM) first; fall back to GB18030/GBK.
-    QByteArray rawBytes = input.readAll();
-    if (rawBytes.startsWith("\xEF\xBB\xBF")) rawBytes.remove(0, 3);
-    QTextCodec::ConverterState utf8State;
-    QTextCodec* utf8Codec = QTextCodec::codecForName("UTF-8");
-    QString decoded = utf8Codec->toUnicode(rawBytes.constData(), rawBytes.size(), &utf8State);
-    QString detectedEncoding = "UTF-8";
-    if (utf8State.invalidChars > 0)
-    {
-      QTextCodec* chineseCodec = QTextCodec::codecForName("GB18030");
-      if (!chineseCodec)
+      try { checked=BladeLabels::readWorkbook(path); }
+      catch(const std::exception& ex)
       {
-        QMessageBox::warning(this, QString::fromUtf8("导入失败"),
-                             QString::fromUtf8("当前程序不支持 GB18030 编码，文件未被修改。"));
+        QMessageBox::warning(this,QStringLiteral("导入失败"),QString::fromUtf8(ex.what()));
         return;
       }
-      QTextCodec::ConverterState gbState;
-      decoded = chineseCodec->toUnicode(rawBytes.constData(), rawBytes.size(), &gbState);
-      if (gbState.invalidChars > 0 || decoded.contains(QChar::ReplacementCharacter))
+    }
+    else
+    {
+      QFile input(path);
+      if (!input.open(QIODevice::ReadOnly | QIODevice::Text))
       {
-        QMessageBox::warning(this, QString::fromUtf8("编码识别失败"),
-                             QString::fromUtf8("文件既不是有效 UTF-8，也无法按 GB18030 解码。原映射保持不变。"));
+        QMessageBox::warning(this, QString::fromUtf8("导入失败"), input.errorString());
         return;
       }
-      detectedEncoding = "GB18030/GBK";
-    }
-    QHash<QString, QString> checked;
-    const QStringList lines = decoded.split('\n');
-    bool first = true;
-    for (QString line : lines)
-    {
-      if (line.endsWith('\r')) line.chop(1);
-      if (first)
+      // Detect UTF-8 (with or without BOM) first; fall back to GB18030/GBK.
+      QByteArray rawBytes = input.readAll();
+      if (rawBytes.startsWith("\xEF\xBB\xBF")) rawBytes.remove(0, 3);
+      QTextCodec::ConverterState utf8State;
+      QTextCodec* utf8Codec = QTextCodec::codecForName("UTF-8");
+      QString decoded = utf8Codec->toUnicode(rawBytes.constData(), rawBytes.size(), &utf8State);
+      detectedEncoding = "UTF-8";
+      if (utf8State.invalidChars > 0)
       {
-        first = false;
-        if (line.trimmed().compare("raw_tag,cn_name", Qt::CaseInsensitive) == 0) continue;
+        QTextCodec* chineseCodec = QTextCodec::codecForName("GB18030");
+        if (!chineseCodec)
+        {
+          QMessageBox::warning(this, QString::fromUtf8("导入失败"),
+                               QString::fromUtf8("当前程序不支持 GB18030 编码，文件未被修改。"));
+          return;
+        }
+        QTextCodec::ConverterState gbState;
+        decoded = chineseCodec->toUnicode(rawBytes.constData(), rawBytes.size(), &gbState);
+        if (gbState.invalidChars > 0 || decoded.contains(QChar::ReplacementCharacter))
+        {
+          QMessageBox::warning(this, QString::fromUtf8("编码识别失败"),
+                               QString::fromUtf8("文件既不是有效 UTF-8，也无法按 GB18030 解码。原映射保持不变。"));
+          return;
+        }
+        detectedEncoding = "GB18030/GBK";
       }
-      if (line.trimmed().isEmpty()) continue;
-      const int comma = line.indexOf(',');
-      if (comma <= 0) continue;
-      const QString key = line.left(comma).trimmed();
-      const QString val = line.mid(comma + 1).trimmed();
-      if (!key.isEmpty() && !val.isEmpty()) checked.insert(key, val);
+      const QStringList lines = decoded.split('\n');
+      bool first = true;
+      for (QString line : lines)
+      {
+        if (line.endsWith('\r')) line.chop(1);
+        if (first)
+        {
+          first = false;
+          if (line.trimmed().compare("raw_tag,cn_name", Qt::CaseInsensitive) == 0) continue;
+        }
+        if (line.trimmed().isEmpty()) continue;
+        const int comma = line.indexOf(',');
+        if (comma <= 0) continue;
+        const QString key = line.left(comma).trimmed();
+        const QString val = line.mid(comma + 1).trimmed();
+        if (!key.isEmpty() && !val.isEmpty()) checked.insert(key, QJsonArray{val,QString()});
+      }
     }
     if (checked.isEmpty())
     {
       QMessageBox::warning(this, QString::fromUtf8("导入失败"),
-                           QString::fromUtf8("未找到有效映射。需要 raw_tag,cn_name 两列"));
+                           QString::fromUtf8("未找到有效映射。XLSX 需要原始字段和中文含义，CSV 需要 raw_tag 和 cn_name。"));
       return;
     }
     if (QMessageBox::question(this, QString::fromUtf8("确认全部替换"),
@@ -300,26 +307,21 @@ $layoutReplacement = @'
       QMessageBox::warning(this, QString::fromUtf8("导入失败"), QString::fromUtf8("无法创建配置目录"));
       return;
     }
-    QSaveFile output(dir + "/gw_tag_mapping.csv");
+    QSaveFile output(goldwindMappingPath());
     if (!output.open(QIODevice::WriteOnly | QIODevice::Text))
     {
       QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
       return;
     }
-    QTextStream out(&output);
-    out.setCodec("UTF-8");
-    out << "raw_tag,cn_name\n";
-    for (auto it = checked.cbegin(); it != checked.cend(); ++it)
-      out << it.key() << "," << it.value() << "\n";
-    out.flush();
-    if (!output.commit())
+    const auto bytes=QJsonDocument(checked).toJson(QJsonDocument::Compact);
+    if (output.write(bytes)!=bytes.size() || !output.commit())
     {
       QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
       return;
     }
     refreshMapping();
     QMessageBox::information(this, QString::fromUtf8("导入成功"),
-                             QString::fromUtf8("已全部替换为 %1 条标签映射（识别编码：%2）").arg(checked.size()).arg(detectedEncoding));
+                             QString::fromUtf8("已全部替换为 %1 条标签映射（文件类型或编码：%2）").arg(checked.size()).arg(detectedEncoding));
   });
   layout1->addWidget(_tree_view, 1);
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -1738,10 +1740,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.2"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.2"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '  ui->setupUi(this);'; New = "  ui->setupUi(this);`n  setWindowTitle(QStringLiteral(`"BladeScope 3.17.0.2`"));" }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.2") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -1974,7 +1976,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
@@ -1983,6 +1985,13 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
+  fitEntry->setObjectName("bladeFitEntry");
+  fitEntry->setMinimumWidth(78);
+  fitEntry->setStyleSheet(QStringLiteral(
+    "QToolButton#bladeFitEntry { background: palette(base); color: palette(text); "
+    "border: 1px solid palette(mid); border-radius: 4px; padding: 0 7px; font-weight: 600; }"
+    "QToolButton#bladeFitEntry:hover { background: palette(alternate-base); }"
+    "QToolButton#bladeFitEntry:pressed { background: palette(highlight); color: palette(highlighted-text); }"));
   fitEntry->setFixedHeight(22);
   tabCornerLayout->insertWidget(0, fitEntry);
   auto showFitPanel = [this] {
@@ -2117,4 +2126,88 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = 'QDateTime::fromMSecsSinceEpoch((qint64)(v * 1000), Qt::UTC)'; New = 'QDateTime::fromMSecsSinceEpoch(qRound64(v * 1000), Qt::UTC)' }
+)
+
+Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
+  @{ Old = '#include "KissFFT/kiss_fftr.h"'; New = @'
+#include "KissFFT/kiss_fftr.h"
+#include "qwt_plot.h"
+#include "qwt_scale_draw.h"
+#include "qwt_text.h"
+#include <algorithm>
+
+namespace
+{
+class RecordingTimeScale final : public QwtScaleDraw
+{
+public:
+  explicit RecordingTimeScale(double origin) : _origin(origin) {}
+  QwtText label(double timestamp) const override
+  {
+    return QwtText(QString::number(timestamp - _origin, 'f', 3));
+  }
+private:
+  const double _origin;
+};
+
+class FftTimePlot final : public PJ::PlotWidgetBase
+{
+public:
+  using PJ::PlotWidgetBase::PlotWidgetBase;
+  void setTimeOrigin(double origin)
+  {
+    qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new RecordingTimeScale(origin));
+    qwtPlot()->setAxisTitle(QwtPlot::xBottom, QStringLiteral("相对时间 (s)"));
+  }
+};
+}
+'@ }
+  @{ Old = '  _plot_widget_A = new PJ::PlotWidgetBase(ui->framePlotPreviewA);'; New = @'
+  _plot_widget_A = new FftTimePlot(ui->framePlotPreviewA);
+  static_cast<FftTimePlot*>(_plot_widget_A)->setTimeOrigin(0);
+'@ }
+  @{ Old = @'
+  _zoom_range.min = std::numeric_limits<double>::lowest();
+  _zoom_range.max = std::numeric_limits<double>::max();
+'@; New = @'
+  _zoom_range.min = std::numeric_limits<double>::max();
+  _zoom_range.max = std::numeric_limits<double>::lowest();
+'@ }
+  @{ Old = @'
+    PlotData& curve_data = _plot_data->getOrCreateNumeric(curve_id);
+
+    _plot_widget_A->addCurve(curve_id, curve_data);
+    _curve_names.push_back(curve_id);
+    _zoom_range.min = std::min(_zoom_range.min, curve_data.front().x);
+    _zoom_range.max = std::max(_zoom_range.max, curve_data.back().x);
+  }
+
+  ui->pushButtonSave->setEnabled(true);
+'@; New = @'
+    const auto found = _plot_data->numeric.find(curve_id);
+    if (found == _plot_data->numeric.end() || found->second.size() == 0 ||
+        std::find(_curve_names.begin(), _curve_names.end(), curve_id) != _curve_names.end()) continue;
+    _plot_widget_A->addCurve(curve_id, found->second);
+    _curve_names.push_back(curve_id);
+  }
+  for (const auto& curve_id : _curve_names)
+  {
+    const auto found = _plot_data->numeric.find(curve_id);
+    if (found == _plot_data->numeric.end() || found->second.size() == 0) continue;
+    _zoom_range.min = std::min(_zoom_range.min, found->second.front().x);
+    _zoom_range.max = std::max(_zoom_range.max, found->second.back().x);
+  }
+  if (_zoom_range.min > _zoom_range.max) { _dragging_curves.clear(); return; }
+  static_cast<FftTimePlot*>(_plot_widget_A)->setTimeOrigin(_zoom_range.min);
+
+  ui->pushButtonSave->setEnabled(true);
+'@ }
+  @{ Old = @'
+  _plot_widget_A->removeAllCurves();
+  _plot_widget_A->resetZoom();
+'@; New = @'
+  _plot_widget_A->removeAllCurves();
+  static_cast<FftTimePlot*>(_plot_widget_A)->setTimeOrigin(0);
+  _plot_widget_A->resetZoom();
+'@ }
 )
