@@ -1983,7 +1983,7 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
 $analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_analysis.h")
 Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"`n#include <qwt_plot.h>" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
   ui->menuBar->removeAction(ui->menuCloudData->menuAction());
   auto* bladeGroupManager = bladePlotMenu->addAction(QString::fromUtf8("测点组管理..."));
@@ -2058,6 +2058,75 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           }
           target->replot();
           onUndoableChange();
+        }, [this](const QStringList& names, const QJsonObject& aliases,
+                   BladeAnalysis::FilterPlotMode mode, const BladeAnalysis::FilteredSeries& samples) {
+          using Mode = BladeAnalysis::FilterPlotMode;
+          auto* target = _main_tabbed_widget->addTab({})->plotAt(0);
+          if (!target)
+            return false;
+          auto* axes = target->findChild<QwtPlot*>();
+          const bool xy = mode == Mode::XY;
+          if (mode == Mode::DualAxis && !axes)
+            return false;
+          if (xy && !QMetaObject::invokeMethod(target, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true)))
+            return false;
+
+          std::vector<std::string> keys;
+          QStringList titles;
+          for (int i = 0; i < names.size(); ++i)
+          {
+            const auto name = names[i];
+            const auto stem = (QStringLiteral("筛选结果/") + name).toStdString();
+            auto key = stem;
+            for (int suffix = 2; _mapped_plot_data.numeric.count(key); ++suffix)
+              key = stem + " [" + std::to_string(suffix) + "]";
+            auto& series = _mapped_plot_data.addNumeric(key)->second;
+            for (const auto& point : samples[size_t(i)])
+              series.pushBack(point);
+            keys.push_back(key);
+            const auto chineseNames = qApp->property("bladeScopeTagAliases").toMap();
+            titles << aliases.value(name).toString(chineseNames.value(name, name).toString());
+          }
+
+          size_t added = 0;
+          if (xy)
+          {
+            if (auto* curve = target->addCurveXY(keys[0], keys[1], titles[1] + QStringLiteral(" 对 ") + titles[0]))
+            {
+              curve->curve->setStyle(QwtPlotCurve::Dots);
+              ++added;
+            }
+          }
+          else
+          {
+            for (size_t i = 0; i < keys.size(); ++i)
+              if (auto* curve = target->addCurve(keys[i]))
+              {
+                ++added;
+                curve->curve->setTitle(titles[int(i)]);
+                if (mode == Mode::DualAxis && i == 1)
+                {
+                  axes->setAxisVisible(QwtAxis::YRight);
+                  axes->setAxisAutoScale(QwtAxis::YRight);
+                  curve->curve->setYAxis(QwtAxis::YRight);
+                }
+              }
+          }
+          if (added != (xy ? size_t(1) : keys.size()))
+          {
+            target->removeAllCurves();
+            for (const auto& key : keys)
+              _mapped_plot_data.numeric.erase(key);
+            return false;
+          }
+          for (const auto& key : keys)
+            _curvelist_widget->addCurve(key);
+          _curvelist_widget->updateFilter();
+          emit target->curveListChanged();
+          target->zoomOut(false);
+          target->replot();
+          onUndoableChange();
+          return true;
         });
   });
 '@ }

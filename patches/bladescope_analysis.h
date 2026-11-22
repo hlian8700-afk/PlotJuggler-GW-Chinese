@@ -16,6 +16,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <vector>
 
 namespace BladeAnalysis
 {
@@ -347,9 +348,32 @@ inline void openGroupManager(QWidget* parent, const PJ::PlotDataMapRef& data)
   });
 }
 
+enum class FilterPlotMode { TimeSeries, DualAxis, XY };
+
+using FilteredSeries = std::vector<std::vector<PJ::PlotData::Point>>;
+
+inline bool passesRule(int operation, double value, double lower, double upper)
+{
+  const bool keep[] = {value == lower, value != lower, value > lower, value >= lower,
+                       value < lower, value <= lower, value > lower && value < upper};
+  return keep[operation];
+}
+
+inline bool nearestSample(const PJ::PlotData& series, double time, double tolerance, double& value)
+{
+  const int index = series.getIndexFromX(time);
+  if (index < 0)
+    return false;
+  const auto& sample = series.at(size_t(index));
+  value = sample.y;
+  return std::abs(sample.x - time) <= tolerance && std::isfinite(value);
+}
+
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
-                 const std::function<void(const QStringList&, bool, double, double, const QJsonObject&)>& plot)
+                 const std::function<void(const QStringList&, bool, double, double, const QJsonObject&)>& plot,
+                 const std::function<bool(const QStringList&, const QJsonObject&, FilterPlotMode,
+                                          const FilteredSeries&)>& plotFiltered)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
@@ -681,7 +705,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   results->setReadOnly(true);
   layout->addWidget(results, 1);
   auto* actions = new QHBoxLayout;
-  auto run = [&](bool exportSamples) {
+  auto run = [&](bool exportSamples, std::optional<FilterPlotMode> mode = std::nullopt) {
     const QStringList targets = selected();
     bool fromOK, toOK, toleranceOK;
     const double first = from->text().toDouble(&fromOK);
@@ -705,8 +729,53 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     }
     const auto* baseline = lookup(reference->currentData().toString());
     if (targets.isEmpty() || !fromOK || !toOK || !std::isfinite(first) || !std::isfinite(last) ||
-        first > last || ((!active.isEmpty() || baseline) && (!toleranceOK || !std::isfinite(dt) || dt < 0)))
+        first > last || ((!active.isEmpty() || baseline || mode) && (!toleranceOK || !std::isfinite(dt) || dt < 0)))
       return warn(QStringLiteral("请检查测点、时间区间和匹配时间差。"));
+    if (mode)
+    {
+      if (targets.size() > 16 || (*mode != FilterPlotMode::TimeSeries && targets.size() != 2))
+        return warn(QStringLiteral("时序图最多选择 16 条曲线，双轴和 XY 图须选择 2 个测点。"));
+      std::vector<const PJ::PlotData*> channels;
+      for (const auto& name : targets)
+      {
+        const auto* channel = lookup(name);
+        if (!channel)
+          return warn(QStringLiteral("当前录波缺少作图测点：%1").arg(name));
+        channels.push_back(channel);
+      }
+      const auto& clock = *channels.front();
+      FilteredSeries output(channels.size());
+      std::vector<double> aligned(channels.size());
+      const size_t stop = boundary(clock, last, true);
+      for (size_t i = boundary(clock, first); i < stop; ++i)
+      {
+        const auto& sample = clock.at(i);
+        aligned.front() = sample.y;
+        if (!std::isfinite(sample.y))
+          continue;
+        bool complete = true;
+        for (size_t j = 1; j < channels.size() && complete; ++j)
+          complete = nearestSample(*channels[j], sample.x, dt, aligned[j]);
+        for (int j = 0; j < active.size() && complete; ++j)
+        {
+          double value = sample.y;
+          const bool matched = inputs[j] == &clock ||
+              (previous->isChecked() ? match(*inputs[j], sample.x, dt, true, value)
+                                     : nearestSample(*inputs[j], sample.x, dt, value));
+          const auto& rule = active[j];
+          complete = matched && passesRule(rule.operation, value, rule.lower, rule.upper);
+        }
+        if (complete)
+          for (size_t j = 0; j < output.size(); ++j)
+            output[j].push_back({sample.x, aligned[j]});
+      }
+      if (output.front().empty())
+        return warn(QStringLiteral("当前时间区间和筛选条件下没有可作图的同步样本。"));
+      if (!plotFiltered(targets, plotAliases(), *mode, output))
+        return warn(QStringLiteral("无法在原版绘图控件中添加筛选结果。"));
+      dialog.accept();
+      return;
+    }
     if (baseline && !units->isChecked())
       return warn(QString::fromUtf8("计算差值前请确认单位一致。"));
 
@@ -769,10 +838,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
             accepted = false;
             break;
           }
-          const double limit = rule.lower;
-          const bool keep[] = {value == limit, value != limit, value > limit, value >= limit,
-                               value < limit, value <= limit, value > limit && value < rule.upper};
-          if (!keep[rule.operation])
+          if (!passesRule(rule.operation, value, rule.lower, rule.upper))
           {
             ++rejected;
             accepted = false;
@@ -826,6 +892,11 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     plot(selected(), true, first, last, plotAliases());
     dialog.accept();
   });
+  auto* filteredPlots = new QHBoxLayout;
+  addButton(filteredPlots, "筛选后时序图", [&] { run(false, FilterPlotMode::TimeSeries); });
+  addButton(filteredPlots, "筛选后双轴图", [&] { run(false, FilterPlotMode::DualAxis); });
+  addButton(filteredPlots, "筛选后 XY 图", [&] { run(false, FilterPlotMode::XY); });
+  layout->addLayout(filteredPlots);
   addButton(actions, "预览筛选与统计", [&] { run(false); });
   addButton(actions, "导出筛选采样 CSV", [&] { run(true); });
   addButton(actions, "关闭", [&] { dialog.reject(); });
