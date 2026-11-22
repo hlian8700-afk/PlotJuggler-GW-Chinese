@@ -102,6 +102,58 @@ inline Points average(const Points& p, size_t width)
   return out;
 }
 
+struct Exponential
+{
+  double origin = 0, offset = 0, amplitude = 0, decayPerSecond = 0;
+  double operator()(double time) const
+  {
+    return offset + amplitude * std::exp(-decayPerSecond * (time - origin));
+  }
+};
+
+inline Exponential fitExponential(const Points& points)
+{
+  if (points.size() < 3 || !(points.back().x > points.front().x))
+    throw std::runtime_error("指数拟合至少需要三个有效样本和非零时间跨度");
+  const double origin = points.front().x;
+  const double span = points.back().x - origin;
+  Exponential result;
+  long double bestError = std::numeric_limits<long double>::infinity();
+  double bestRate = 0;
+  const auto evaluate = [&](double rate) {
+    Points basis;
+    basis.reserve(points.size());
+    for (auto point : points)
+      basis.push_back({std::exp(-rate * ((point.x - origin) / span)), point.y});
+    const auto model = regress(basis, 1);
+    long double error = 0;
+    for (auto point : basis)
+    {
+      const long double residual = model(point.x) - point.y;
+      error += residual * residual;
+    }
+    if (error < bestError)
+    {
+      bestRate = rate;
+      bestError = error;
+      result = {origin, model(0), model.coefficients[1] / model.scale, rate / span};
+    }
+  };
+  // Search in dimensionless time so changing the recording duration preserves the search range.
+  constexpr double minRate = .01, maxRate = 32;
+  for (int i = 0; i <= 48; ++i)
+    evaluate(minRate * std::pow(maxRate / minRate, i / 48.));
+  for (double fraction : {.15, .04, .01, .002})
+  {
+    const double center = bestRate;
+    for (int i = -4; i <= 4; ++i)
+      evaluate(std::clamp(center * (1 + i * fraction / 4), minRate, maxRate));
+  }
+  if (!std::isfinite(bestError) || !std::isfinite(result.offset) || !std::isfinite(result.amplitude))
+    throw std::runtime_error("指数拟合未得到有效结果");
+  return result;
+}
+
 enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
             Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, NRoles };
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,
