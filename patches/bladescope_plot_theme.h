@@ -86,7 +86,7 @@ struct ThemePalette
 inline const std::array<ThemePalette, 17>& themePalettes()
 {
   // Window, input, toolbar, text, accent, border, plot top, plot bottom, axis ink, grid.
-  static const std::array<ThemePalette, 4> palettes = {{
+  static const std::array<ThemePalette, 17> palettes = {{
     { QStringLiteral("\u7eb8\u767d"), { "#f1f3f5", "#ffffff", "#f7f8fa", "#18202a", "#c8d9ee", "#c4ccd5", "#ffffff", "#ffffff", "#273544", "#8998a8" } },
     { QStringLiteral("\u96fe\u7070"), { "#e6e9ee", "#f3f4f6", "#eceff3", "#20262f", "#bfcbd8", "#aebac7", "#f1f3f6", "#f1f3f6", "#344454", "#8594a5" } },
     { QStringLiteral("\u9759\u84dd"), { "#e7edf4", "#f2f7fc", "#eef4fa", "#182c40", "#b6cce5", "#b6c8da", "#edf4fc", "#edf4fc", "#304967", "#7d9cbb" } },
