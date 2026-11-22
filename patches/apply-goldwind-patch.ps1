@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.23"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.24"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.23") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.24") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2022,7 +2022,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab, double first, double last, bool detail) {
+        [this, plot](const QStringList& names, bool newTab, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter) {
           const bool createTab = newTab || !plot || plot->isXYPlot();
           const size_t existing = createTab ? 0 : plot->curveList().size();
           if (existing + size_t(names.size()) > 16)
@@ -2047,8 +2047,9 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             auto& output = _mapped_plot_data.addNumeric(key)->second;
             BladeTimeView::select(begin, end, detail,
                 [&](size_t i) { return series.at(i).y; },
-                [&](size_t i) { const auto value = series.at(i); output.pushBack({value.x,value.y}); });
-            derived << QString::fromStdString(key);
+                [&](size_t i) { const auto value = series.at(i); if (!filter || filter(series,value.x,value.y)) output.pushBack({value.x,value.y}); });
+            if (output.size()) derived << QString::fromStdString(key);
+            else _mapped_plot_data.numeric.erase(key);
           }
           if (derived.isEmpty())
           {
@@ -2072,8 +2073,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           }
           target->replot();
           onUndoableChange();
-        }, [this](const QStringList& names, double first, double last, bool detail) {
-          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail);
+        }, [this](const QStringList& names, double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter) {
+          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail, filter);
         });
   });
 '@ }

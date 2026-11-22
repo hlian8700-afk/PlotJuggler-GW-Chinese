@@ -346,10 +346,35 @@ inline void openGroupManager(QWidget* parent, const PJ::PlotDataMapRef& data)
   });
 }
 
+using SampleFilter = std::function<bool(const PJ::PlotData&, double, double)>;
+struct Condition
+{
+  QString field;
+  int op;
+  double lower, upper;
+  bool enabled;
+};
+
+inline bool conditionPasses(const Condition& rule, double value)
+{
+  if (!std::isfinite(value)) return false;
+  switch (rule.op)
+  {
+    case 0: return value == rule.lower;
+    case 1: return value != rule.lower;
+    case 2: return value > rule.lower;
+    case 3: return value >= rule.lower;
+    case 4: return value < rule.lower;
+    case 5: return value <= rule.lower;
+    case 6: return value >= rule.lower && value <= rule.upper;
+  }
+  return false;
+}
+
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
-                 const std::function<void(const QStringList&, bool, double, double, bool)>& plot,
-                 const std::function<void(const QStringList&, double, double, bool)>& dual)
+                 const std::function<void(const QStringList&, bool, double, double, bool, const SampleFilter&)>& plot,
+                 const std::function<void(const QStringList&, double, double, bool, const SampleFilter&)>& dual)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
@@ -464,18 +489,6 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (!missing.isEmpty())
       warn(QString::fromUtf8("录波中缺失：") + missing.join(", "));
   });
-  addButton(groupRow, "常规视图（每条最多 5 万点）", [&] {
-    if (selected().isEmpty())
-      return warn(QString::fromUtf8("请勾选测点。"));
-    plot(selected(), true, 0, 0, false);
-    dialog.accept();
-  });
-  addButton(groupRow, "追加到当前图页", [&] {
-    if (selected().isEmpty())
-      return warn(QString::fromUtf8("请勾选测点。"));
-    plot(selected(), false, 0, 0, false);
-    dialog.accept();
-  });
   layout->addLayout(groupRow);
 
   auto* fields = new QFormLayout;
@@ -535,6 +548,139 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   fields->addRow(units);
   layout->addLayout(fields);
 
+  QVector<Condition> conditions;
+  auto* filtering = new QCheckBox(QStringLiteral("启用筛选"));
+  filtering->setChecked(true);
+  layout->addWidget(filtering);
+  auto* conditionsList = new QListWidget;
+  conditionsList->setMaximumHeight(100);
+  layout->addWidget(conditionsList);
+  auto* filters = new QHBoxLayout;
+  layout->addLayout(filters);
+  const auto refresh = [&] {
+    const QSignalBlocker block(conditionsList);
+    conditionsList->clear();
+    for (const auto& rule : conditions)
+    {
+      auto* item = new QListWidgetItem(QStringLiteral("%1 %2 %3 %4").arg(rule.field,
+          op->itemText(rule.op), number(rule.lower), rule.op == 6 ? number(rule.upper) : QString()),
+          conditionsList);
+      item->setCheckState(rule.enabled ? Qt::Checked : Qt::Unchecked);
+    }
+  };
+  QObject::connect(conditionsList, &QListWidget::itemChanged, &dialog, [&](QListWidgetItem* item) {
+    conditions[conditionsList->row(item)].enabled = item->checkState() == Qt::Checked;
+  });
+  addButton(filters, "添加 AND 条件", [&] {
+    bool lowerOK = false, upperOK = false;
+    const auto field = condition->currentData().toString();
+    const auto lower = threshold->text().toDouble(&lowerOK);
+    const auto high = upper->text().toDouble(&upperOK);
+    const int operation = op->currentIndex();
+    if (field.isEmpty() || !lowerOK || !std::isfinite(lower) ||
+        (operation == 6 && (!upperOK || !std::isfinite(high) || high < lower)))
+      return warn(QStringLiteral("请选择条件测点并填写有效阈值。"));
+    conditions.push_back({field, operation, lower, operation == 6 ? high : 0., true});
+    refresh();
+  });
+  addButton(filters, "删除条件", [&] {
+    if (conditionsList->currentRow() < 0) return;
+    conditions.removeAt(conditionsList->currentRow());
+    refresh();
+  });
+  addButton(filters, "清空条件", [&] { conditions.clear(); refresh(); });
+
+  const auto templateKey = QStringLiteral("BladeScope/waveformFilterTemplates");
+  auto templates = QJsonDocument::fromJson(settings.value(templateKey).toByteArray()).object();
+  auto* presets = new QComboBox;
+  presets->addItems(templates.keys());
+  filters->addWidget(presets, 1);
+  addButton(filters, "保存模板", [&] {
+    if (conditions.isEmpty()) return warn(QStringLiteral("请先添加条件。"));
+    bool ok = false;
+    const auto name = QInputDialog::getText(&dialog, QStringLiteral("筛选模板"),
+        QStringLiteral("模板名称"), QLineEdit::Normal, {}, &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    if (templates.contains(name) && QMessageBox::question(&dialog, dialog.windowTitle(),
+        QStringLiteral("覆盖同名筛选模板？"), QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No) != QMessageBox::Yes) return;
+    QJsonArray rows;
+    for (const auto& rule : conditions)
+      rows.append(QJsonObject{{"field",rule.field},{"op",rule.op},{"lower",rule.lower},
+                              {"upper",rule.upper},{"enabled",rule.enabled}});
+    if (!templates.contains(name)) presets->addItem(name);
+    templates.insert(name, rows);
+    presets->setCurrentText(name);
+    settings.setValue(templateKey, QJsonDocument(templates).toJson(QJsonDocument::Compact));
+  });
+  addButton(filters, "载入模板", [&] {
+    const auto rows = templates.value(presets->currentText()).toArray();
+    if (rows.isEmpty()) return;
+    QVector<Condition> loaded;
+    for (const auto value : rows)
+    {
+      const auto row = value.toObject();
+      const int operation = row.value("op").toInt(-1);
+      const auto field = row.value("field").toString();
+      if (operation < 0 || operation > 6 || field.isEmpty())
+        return warn(QStringLiteral("筛选模板格式无效。"));
+      loaded.push_back({field, operation, row.value("lower").toDouble(),
+                        row.value("upper").toDouble(), row.value("enabled").toBool(true)});
+    }
+    conditions = std::move(loaded);
+    refresh();
+  });
+
+  const auto makeFilter = [&](SampleFilter& result) {
+    if (!filtering->isChecked()) return true;
+    QVector<QPair<const PJ::PlotData*, Condition>> inputs;
+    for (const auto& rule : conditions)
+    {
+      if (!rule.enabled) continue;
+      const auto entry = data.numeric.find(rule.field.toStdString());
+      if (entry == data.numeric.end())
+      {
+        warn(QStringLiteral("缺少条件测点：%1").arg(rule.field));
+        return false;
+      }
+      inputs.append(qMakePair(&entry->second, rule));
+    }
+    if (inputs.isEmpty()) return true;
+    bool ok = false;
+    const double dt = tolerance->text().toDouble(&ok);
+    if (!ok || !std::isfinite(dt) || dt < 0)
+    {
+      warn(QStringLiteral("请输入有效的时间匹配容差。"));
+      return false;
+    }
+    const bool usePrevious = previous->isChecked();
+    result = [inputs,dt,usePrevious](const PJ::PlotData& series, double time, double value) {
+      for (const auto& input : inputs)
+      {
+        double comparison = value;
+        if (input.first != &series && !match(*input.first,time,dt,usePrevious,comparison)) return false;
+        if (!conditionPasses(input.second,comparison)) return false;
+      }
+      return true;
+    };
+    return true;
+  };
+  auto* plotRow = new QHBoxLayout;
+  layout->addLayout(plotRow);
+  addButton(plotRow, "常规视图（每条最多 5 万点）", [&] {
+    if (selected().isEmpty())
+      return warn(QString::fromUtf8("请勾选测点。"));
+    SampleFilter filter;
+    if (!makeFilter(filter)) return;
+    plot(selected(), true, 0, 0, false, filter);
+  });
+  addButton(plotRow, "追加到当前图页", [&] {
+    if (selected().isEmpty())
+      return warn(QString::fromUtf8("请勾选测点。"));
+    SampleFilter filter;
+    if (!makeFilter(filter)) return;
+    plot(selected(), false, 0, 0, false, filter);
+  });
   auto* results = new QPlainTextEdit;
   results->setReadOnly(true);
   layout->addWidget(results, 1);
@@ -670,7 +816,8 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     const QStringList modes{QStringLiteral("常规视图（每条最多 5 万点）"), QStringLiteral("细化 TS 明细（全原始点）")};
     const auto choice = QInputDialog::getItem(&dialog, QStringLiteral("双轴对照"),
         QStringLiteral("数据视图"), modes, 0, false, &accepted);
-    if (accepted) dual(selected(), first, last, choice == modes.back());
+    SampleFilter filter;
+    if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == modes.back(), filter);
   });
   addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;
@@ -679,8 +826,8 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (selected().isEmpty() || !startOK || !endOK || !std::isfinite(first) ||
         !std::isfinite(last) || first >= last)
       return warn(QString::fromUtf8("请选择测点并输入有效的起止时间。"));
-    plot(selected(), true, first, last, true);
-    dialog.accept();
+    SampleFilter filter;
+    if (makeFilter(filter)) plot(selected(), true, first, last, true, filter);
   });
   addButton(actions, "预览筛选与统计", [&] { run(false); });
   addButton(actions, "导出筛选采样 CSV", [&] { run(true); });

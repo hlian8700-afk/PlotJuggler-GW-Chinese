@@ -9,7 +9,7 @@
 namespace BladeDualTime
 {
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
-                 double first, double last, bool detail)
+                 double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter)
 {
   const auto title = QStringLiteral("时序双轴对照");
   if (channels.size() < 2 || channels.size() > 16)
@@ -77,6 +77,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
         [&](size_t i) { return series.at(i).y; },
         [&](size_t i) {
           const auto point = series.at(i);
+          if (filter && !filter(series, point.x, point.y)) return;
           points.pushBack({point.x, point.y});
           bounds.add(point.y);
         });
