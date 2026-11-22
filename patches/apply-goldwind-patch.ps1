@@ -1740,10 +1740,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.2"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.3"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.2") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.3") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2125,7 +2125,37 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 
 
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
-  @{ Old = 'QDateTime::fromMSecsSinceEpoch((qint64)(v * 1000), Qt::UTC)'; New = 'QDateTime::fromMSecsSinceEpoch(qRound64(v * 1000), Qt::UTC)' }
+  @{ Old = '    QDateTime dt = QDateTime::fromMSecsSinceEpoch((qint64)(v * 1000), Qt::UTC);'; New = @'
+    const auto utc = QDateTime::fromMSecsSinceEpoch(qRound64(v * 1000.0), Qt::UTC);
+    // Keep the existing elapsed-time format when the plot removes the time offset.
+    if (utc.date() == QDate(1970, 1, 1))
+    {
+      return utc.toString("HH:mm:ss.zzz");
+    }
+    return utc.toLocalTime().toString("HH:mm:ss.zzz\nyyyy MMM dd");
+'@ }
+  @{ Old = @'
+    if (dt.date().year() == 1970 && dt.date().month() == 1 && dt.date().day() == 1)
+    {
+      return dt.toString("hh:mm:ss.z");
+    }
+    return dt.toString("hh:mm:ss.z\nyyyy MMM dd");
+'@; New = '' }
+)
+
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = @'
+    updateTimeOffset();
+    updateTimeSlider();
+  });
+'@; New = @'
+    updateTimeOffset();
+    updateTimeSlider();
+    updatedDisplayTime();
+  });
+'@ }
+  @{ Old = 'time.toString("HH:mm::ss.zzz")'; New = 'time.toString("HH:mm:ss.zzz")' }
+  @{ Old = 'datetime.toString("[yyyy MMM dd] HH:mm::ss.zzz")'; New = 'datetime.toString("[yyyy MMM dd] HH:mm:ss.zzz")' }
 )
 
 Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
@@ -2134,17 +2164,29 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
 #include "qwt_plot.h"
 #include "qwt_scale_draw.h"
 #include "qwt_text.h"
+#include <QDateTime>
 #include <algorithm>
 
 namespace
 {
+// Plot data uses seconds for both date/time recordings and relative signals.
+bool isRecordingDateTime(double seconds)
+{
+  return seconds >= 946684800.0 && seconds < 4102444800.0;
+}
+
 class RecordingTimeScale final : public QwtScaleDraw
 {
 public:
   explicit RecordingTimeScale(double origin) : _origin(origin) {}
   QwtText label(double timestamp) const override
   {
-    return QwtText(QString::number(timestamp - _origin, 'f', 3));
+    if (isRecordingDateTime(_origin))
+    {
+      const auto local = QDateTime::fromMSecsSinceEpoch(qRound64(timestamp * 1000.0), Qt::LocalTime);
+      return QwtText(local.toString("HH:mm:ss.zzz\nyyyy-MM-dd"));
+    }
+    return QwtText(QString::number(timestamp, 'f', 3));
   }
 private:
   const double _origin;
@@ -2157,7 +2199,10 @@ public:
   void setTimeOrigin(double origin)
   {
     qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new RecordingTimeScale(origin));
-    qwtPlot()->setAxisTitle(QwtPlot::xBottom, QStringLiteral("相对时间 (s)"));
+    qwtPlot()->setAxisTitle(QwtPlot::xBottom,
+                           isRecordingDateTime(origin)
+                               ? QStringLiteral("\u5f55\u6ce2\u65f6\u95f4")
+                               : QStringLiteral("\u65f6\u95f4 (s)"));
   }
 };
 }
