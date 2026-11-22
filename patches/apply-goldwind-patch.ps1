@@ -1748,10 +1748,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.4"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.5"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.4") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.5") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2068,6 +2068,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::GuiPrivate)' -Encoding UTF8
 
+Copy-Item (Join-Path $PSScriptRoot "bladescope_time_display.h") "plotjuggler_app/bladescope_time_display.h" -Force
+Copy-Item (Join-Path $PSScriptRoot "bladescope_time_display.h") "plotjuggler_plugins/ToolboxFFT/bladescope_time_display.h" -Force
 $txtHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_txt_recording.h")
 Set-Content -Path "plotjuggler_app/bladescope_txt_recording.h" -Value $txtHeader -Encoding UTF8BOM
 $sqliteHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_sqlite_recording.h")
@@ -2076,6 +2078,33 @@ Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'find_package(Qt5 REQU
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'target_link_libraries(plotjuggler PRIVATE Qt5::Sql)' -Encoding UTF8
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_sqlite_recording.h`"`n#include `"bladescope_txt_recording.h`"" }
+  @{ Old = '#include <QFileDialog>'; New = @'
+#include <QFileDialog>
+#include <QComboBox>
+#include <QGridLayout>
+#include "bladescope_time_display.h"
+'@ }
+  @{ Old = '  loadDialog.setOption(QFileDialog::DontUseNativeDialog, true);'; New = @'
+  loadDialog.setOption(QFileDialog::DontUseNativeDialog, true);
+  auto* precisionBox = new QComboBox(&loadDialog);
+  precisionBox->addItems({QStringLiteral("\u7cfb\u7edf\u9ed8\u8ba4\uff08\u81ea\u52a8\uff09"),
+                          QStringLiteral("\u79d2"), QStringLiteral("\u6beb\u79d2")});
+  precisionBox->setCurrentIndex(BladeTimeDisplay::precision());
+  precisionBox->setToolTip(QStringLiteral("\u4ec5\u5f71\u54cd\u65f6\u95f4\u663e\u793a\uff0c\u4fdd\u7559\u539f\u59cb\u91c7\u6837\u65f6\u95f4\u3002"));
+  auto* fileLayout = static_cast<QGridLayout*>(loadDialog.layout());
+  const int precisionRow = fileLayout->rowCount();
+  fileLayout->addWidget(new QLabel(QStringLiteral("\u65f6\u95f4\u7cbe\u5ea6"), &loadDialog), precisionRow, 0);
+  fileLayout->addWidget(precisionBox, precisionRow, 1);
+'@ }
+  @{ Old = '  directory_path = QFileInfo(fileNames[0]).absolutePath();'; New = @'
+  BladeTimeDisplay::setPrecision(precisionBox->currentIndex());
+  forEachWidget([this](PlotWidget* plot) {
+    plot->on_changeDateTimeScale(ui->buttonUseDateTime->isChecked());
+    plot->replot();
+  });
+  updatedDisplayTime();
+  directory_path = QFileInfo(fileNames[0]).absolutePath();
+'@ }
   @{ Old = '  extensions.push_front(QString("All Supported Files (%1)").arg(single_line_extensions.trimmed()));'; New = @'
   const QString sqliteExtensions = QStringLiteral("*.data *.db *.sqlite *.sqlite3");
   single_line_extensions.append(sqliteExtensions + QStringLiteral(" *.txt"));
@@ -2133,22 +2162,60 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 
 
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
-  @{ Old = '    QDateTime dt = QDateTime::fromMSecsSinceEpoch((qint64)(v * 1000), Qt::UTC);'; New = @'
-    const auto utc = QDateTime::fromMSecsSinceEpoch(qRound64(v * 1000.0), Qt::UTC);
-    // Keep the existing elapsed-time format when the plot removes the time offset.
-    if (utc.date() == QDate(1970, 1, 1))
-    {
-      return utc.toString("HH:mm:ss.zzz");
-    }
-    return utc.toLocalTime().toString("HH:mm:ss.zzz\nyyyy MMM dd");
+  @{ Old = '#include "statistics_dialog.h"'; New = @'
+#include "statistics_dialog.h"
+#include "bladescope_time_display.h"
+#include "qwt_scale_div.h"
 '@ }
   @{ Old = @'
+  virtual QwtText label(double v) const
+  {
+    QDateTime dt = QDateTime::fromMSecsSinceEpoch((qint64)(v * 1000), Qt::UTC);
     if (dt.date().year() == 1970 && dt.date().month() == 1 && dt.date().day() == 1)
     {
       return dt.toString("hh:mm:ss.z");
     }
     return dt.toString("hh:mm:ss.z\nyyyy MMM dd");
-'@; New = '' }
+  }
+'@; New = @'
+public:
+  explicit TimeScaleDraw(bool clock) : _clock(clock) {}
+  QwtText label(double v) const override
+  {
+    if (!_clock && _precision == BladeTimeDisplay::Automatic)
+      return BladePlotTheme::ScaleDraw::label(v);
+    const auto ticks = scaleDiv().ticks(QwtScaleDiv::MajorTick);
+    const double step = ticks.size() > 1 ? ticks.at(1) - ticks.at(0) : v;
+    const bool calendar = BladeTimeDisplay::isCalendarTime(v);
+    return BladeTimeDisplay::format(v, _clock, calendar, calendar,
+                                   BladeTimeDisplay::decimals(_precision, step));
+  }
+
+private:
+  const bool _clock;
+  const BladeTimeDisplay::Precision _precision = BladeTimeDisplay::precision();
+'@ }
+  @{ Old = @'
+  if (enable && !isXYPlot())
+  {
+    if (!is_timescale)
+    {
+      qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new TimeScaleDraw());
+    }
+  }
+  else
+  {
+    if (is_timescale)
+    {
+      qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new BladePlotTheme::ScaleDraw);
+    }
+  }
+'@; New = @'
+  if (!isXYPlot())
+    qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new TimeScaleDraw(enable));
+  else if (is_timescale)
+    qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new BladePlotTheme::ScaleDraw);
+'@ }
 )
 
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
@@ -2162,8 +2229,34 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     updatedDisplayTime();
   });
 '@ }
-  @{ Old = 'time.toString("HH:mm::ss.zzz")'; New = 'time.toString("HH:mm:ss.zzz")' }
-  @{ Old = 'datetime.toString("[yyyy MMM dd] HH:mm::ss.zzz")'; New = 'datetime.toString("[yyyy MMM dd] HH:mm:ss.zzz")' }
+  @{ Old = @'
+  if (ui->buttonUseDateTime->isChecked())
+  {
+    if (ui->buttonRemoveTimeOffset->isChecked())
+    {
+      QTime time = QTime::fromMSecsSinceStartOfDay(std::round(relative_time * 1000.0));
+      timeLine->setText(time.toString("HH:mm::ss.zzz"));
+    }
+    else
+    {
+      QDateTime datetime = QDateTime::fromMSecsSinceEpoch(std::round(_tracker_time * 1000.0));
+      timeLine->setText(datetime.toString("[yyyy MMM dd] HH:mm::ss.zzz"));
+    }
+  }
+  else
+  {
+    timeLine->setText(QString::number(relative_time, 'f', 3));
+  }
+'@; New = @'
+  const bool clock = ui->buttonUseDateTime->isChecked();
+  const bool calendar = clock && !ui->buttonRemoveTimeOffset->isChecked() &&
+                        BladeTimeDisplay::isCalendarTime(_tracker_time);
+  const double time = calendar ? _tracker_time : relative_time;
+  const auto mode = BladeTimeDisplay::precision();
+  const int digits = mode == BladeTimeDisplay::Automatic ? 3 :
+                     BladeTimeDisplay::decimals(mode, 1.0);
+  timeLine->setText(BladeTimeDisplay::format(time, clock, calendar, calendar, digits));
+'@ }
 )
 
 Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
@@ -2172,32 +2265,28 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxFFT/toolbox_FFT.cpp" @(
 #include "qwt_plot.h"
 #include "qwt_scale_draw.h"
 #include "qwt_text.h"
-#include <QDateTime>
+#include "qwt_scale_div.h"
+#include "bladescope_time_display.h"
 #include <algorithm>
 
 namespace
 {
-// Plot data uses seconds for both date/time recordings and relative signals.
-bool isRecordingDateTime(double seconds)
-{
-  return seconds >= 946684800.0 && seconds < 4102444800.0;
-}
-
 class RecordingTimeScale final : public QwtScaleDraw
 {
 public:
-  explicit RecordingTimeScale(double origin) : _origin(origin) {}
+  RecordingTimeScale(double origin, bool showDate)
+    : _calendar(BladeTimeDisplay::isCalendarTime(origin)), _showDate(showDate) {}
   QwtText label(double timestamp) const override
   {
-    if (isRecordingDateTime(_origin))
-    {
-      const auto local = QDateTime::fromMSecsSinceEpoch(qRound64(timestamp * 1000.0), Qt::LocalTime);
-      return QwtText(local.toString("HH:mm:ss.zzz\nyyyy-MM-dd"));
-    }
-    return QwtText(QString::number(timestamp, 'f', 3));
+    const auto ticks = scaleDiv().ticks(QwtScaleDiv::MajorTick);
+    const double step = ticks.size() > 1 ? ticks.at(1) - ticks.at(0) : timestamp;
+    return BladeTimeDisplay::format(timestamp, _calendar, _calendar, _showDate,
+                                   BladeTimeDisplay::decimals(_precision, step));
   }
 private:
-  const double _origin;
+  const bool _calendar;
+  const bool _showDate;
+  const BladeTimeDisplay::Precision _precision = BladeTimeDisplay::precision();
 };
 
 class FftTimePlot final : public PJ::PlotWidgetBase
@@ -2206,18 +2295,29 @@ public:
   using PJ::PlotWidgetBase::PlotWidgetBase;
   void setTimeOrigin(double origin)
   {
-    qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new RecordingTimeScale(origin));
-    qwtPlot()->setAxisTitle(QwtPlot::xBottom,
-                           isRecordingDateTime(origin)
-                               ? QStringLiteral("\u5f55\u6ce2\u65f6\u95f4")
-                               : QStringLiteral("\u65f6\u95f4 (s)"));
+    _origin = origin;
+    qwtPlot()->setAxisScaleDraw(QwtPlot::xBottom, new RecordingTimeScale(origin, _showDate));
   }
+  void setShowDate(bool show)
+  {
+    _showDate = show;
+    setTimeOrigin(_origin);
+    qwtPlot()->replot();
+  }
+
+private:
+  double _origin = 0;
+  bool _showDate = false;
 };
 }
 '@ }
   @{ Old = '  _plot_widget_A = new PJ::PlotWidgetBase(ui->framePlotPreviewA);'; New = @'
   _plot_widget_A = new FftTimePlot(ui->framePlotPreviewA);
-  static_cast<FftTimePlot*>(_plot_widget_A)->setTimeOrigin(0);
+  auto* timePlot = static_cast<FftTimePlot*>(_plot_widget_A);
+  timePlot->setTimeOrigin(0);
+  connect(ui->checkShowDate, &QCheckBox::toggled, _widget, [timePlot](bool visible) {
+    timePlot->setShowDate(visible);
+  });
 '@ }
   @{ Old = @'
   _zoom_range.min = std::numeric_limits<double>::lowest();

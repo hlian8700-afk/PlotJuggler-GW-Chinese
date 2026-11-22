@@ -53,7 +53,7 @@
 </layout></widget>
     </widget>
    </item>
-   <item><layout class="QHBoxLayout" name="fftOptions" stretch="0,0,0,0,0,1"><item><widget class="QLabel" name="label_6">
+   <item><layout class="QHBoxLayout" name="fftOptions" stretch="0,0,0,0,0,0,1"><item><widget class="QLabel" name="label_6">
          <property name="text">
           <string>计算范围</string>
          </property>
@@ -84,6 +84,10 @@
           <string>计算 FFT</string>
          </property>
         </widget></item>
+<item><widget class="QCheckBox" name="checkShowDate">
+<property name="text"><string>显示日期</string></property>
+<property name="toolTip"><string>在时域横轴上显示录波日期</string></property>
+</widget></item>
 <item><spacer name="fftOptionsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
 
 </layout></item>
