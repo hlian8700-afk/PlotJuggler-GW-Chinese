@@ -63,29 +63,21 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       canvas->setAxisScale(axis, low - pad, high + pad);
     }
   };
-  Bounds leftBounds, rightBounds;
+  struct Sample { double time, value; bool passes; };
+  QMap<QString, std::vector<Sample>> cached;
   for (const auto& channel : channels)
   {
-    const auto key = channel.toStdString();
-    const auto it = source.numeric.find(key);
+    const auto it = source.numeric.find(channel.toStdString());
     if (it == source.numeric.end()) continue;
     const auto& series = it->second;
-    auto& points = snapshot.addNumeric(key)->second;
-    auto& bounds = right.contains(channel) ? rightBounds : leftBounds;
+    auto& points = cached[channel];
     BladeTimeView::select(BladeAnalysis::boundary(series, first),
                           BladeAnalysis::boundary(series, last, true), detail,
         [&](size_t i) { return series.at(i).y; },
         [&](size_t i) {
           const auto point = series.at(i);
-          if (filter && !filter(series, point.x, point.y)) return;
-          points.pushBack({point.x, point.y});
-          bounds.add(point.y);
+          points.push_back({point.x, point.y, !filter || filter(series, point.x, point.y)});
         });
-  }
-  if (!std::isfinite(leftBounds.low) || !std::isfinite(rightBounds.low))
-  {
-    QMessageBox::information(parent, title, QStringLiteral("所选区间内至少一组没有有效样本。"));
-    return;
   }
 
   QDialog dialog(parent);
@@ -102,6 +94,12 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   bar->addWidget(rightRange);
   auto* statistics = new QPushButton(QStringLiteral("统计与差值"));
   bar->addWidget(statistics);
+  auto* filterEnabled = new QCheckBox(QStringLiteral("应用录波条件筛选"));
+  filterEnabled->setChecked(bool(filter));
+  filterEnabled->setEnabled(bool(filter));
+  bar->addWidget(filterEnabled);
+  auto* sampleStatus = new QLabel;
+  layout.addWidget(sampleStatus);
   bar->addStretch();
   auto* pages = new QStackedWidget;
   layout.addWidget(pages, 1);
@@ -129,16 +127,6 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
         if (!title.isEmpty()) layer->curve->setTitle(title);
       }
   };
-  append(top, left, false);
-  append(bottom, right, false);
-  append(single, left, false);
-  append(single, right, true);
-  canvas->setAxisVisible(QwtPlot::yRight, true);
-  for (auto* plot : {top, bottom, single}) plot->zoomOut(false);
-  leftBounds.apply(canvas,QwtPlot::yLeft);
-  rightBounds.apply(canvas,QwtPlot::yRight);
-  single->replot();
-
   bool syncing = false;
   auto synchronize = [&](PlotWidget* sender, const QRectF& rectangle) {
     if (syncing || !(rectangle.width() > 0)) return;
@@ -155,6 +143,53 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       target->replot();
     }
   };
+  const auto rebuild = [&](bool preserveTime) {
+    auto* active = pages->currentIndex() == 0 ? top : single;
+    const auto visible = active->currentBoundingRect();
+    Bounds leftBounds, rightBounds;
+    size_t count = 0;
+    {
+      const QScopedValueRollback<bool> lock(syncing, true);
+      for (auto* plot : {top, bottom, single}) plot->removeAllCurves();
+      snapshot.numeric.clear();
+      for (auto it = cached.cbegin(); it != cached.cend(); ++it)
+      {
+        auto& points = snapshot.addNumeric(it.key().toStdString())->second;
+        auto& bounds = right.contains(it.key()) ? rightBounds : leftBounds;
+        for (const auto& point : it.value())
+        {
+          if (filterEnabled->isChecked() && !point.passes) continue;
+          points.pushBack({point.time, point.value});
+          bounds.add(point.value);
+          ++count;
+        }
+      }
+      append(top, left, false);
+      append(bottom, right, false);
+      append(single, left, false);
+      append(single, right, true);
+      canvas->setAxisVisible(QwtPlot::yRight, true);
+      for (auto* plot : {top, bottom, single}) plot->zoomOut(false);
+      leftBounds.apply(canvas,QwtPlot::yLeft);
+      rightBounds.apply(canvas,QwtPlot::yRight);
+      if (preserveTime && visible.width() > 0)
+      {
+        auto bounds = active->currentBoundingRect();
+        bounds.setLeft(visible.left());
+        bounds.setRight(visible.right());
+        active->setZoomRectangle(bounds, false);
+      }
+      single->replot();
+      active->replot();
+    }
+    const bool missing = !std::isfinite(leftBounds.low) || !std::isfinite(rightBounds.low);
+    sampleStatus->setText(missing
+        ? QStringLiteral("至少一组没有符合当前条件的有效样本。")
+        : QStringLiteral("当前显示 %1 个取样点").arg(qulonglong(count)));
+    auto* anchor = preserveTime ? active : single;
+    synchronize(anchor, anchor->currentBoundingRect());
+  };
+  QObject::connect(filterEnabled, &QCheckBox::toggled, &dialog, [&] { rebuild(true); });
   for (auto* plot : {top, bottom, single})
     if (auto* surface = plot->findChild<QwtPlot*>())
       QObject::connect(surface->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged,
@@ -235,7 +270,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       QStringList rows{QStringLiteral("当前可见时间（原始秒）：%1 至 %2")
                            .arg(BladeAnalysis::number(start), BladeAnalysis::number(end)),
                        detail ? QStringLiteral("细化 TS 原始点") : QStringLiteral("常规抽稀数据"),
-                       filter ? QStringLiteral("已应用条件筛选") : QStringLiteral("未启用条件筛选")};
+                       filterEnabled->isChecked() ? QStringLiteral("已应用条件筛选") : QStringLiteral("未启用条件筛选")};
       for (const auto& name : left + right)
       {
         const auto it = snapshot.numeric.find(name.toStdString());
@@ -304,7 +339,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     calculate();
     report.exec();
   });
-  synchronize(single, single->currentBoundingRect());
+  rebuild(false);
   dialog.exec();
 }
 }
