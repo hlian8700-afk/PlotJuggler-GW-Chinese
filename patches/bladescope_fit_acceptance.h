@@ -2,6 +2,7 @@
 #include "bladescope_fit_panel.h"
 #include <QScreen>
 #include "qwt_scale_div.h"
+#include "qwt_text.h"
 
 namespace BladeFitUI
 {
