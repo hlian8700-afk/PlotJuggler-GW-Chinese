@@ -836,7 +836,16 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
         ++itemIt;
       }
     }
-    BladePlotTheme::interfaceChanged(dark, BladePlotTheme::firstCatalogPreset + index);
+    int plotTheme = index;
+    if (dark) {
+      plotTheme = themeSettings->value("appearance/last_light_plot_theme", 0).toInt();
+      if (plotTheme < 0 || plotTheme >= palettes.size() ||
+          QColor(palettes[plotTheme][0]).lightness() < 128)
+        plotTheme = 0;
+    } else {
+      themeSettings->setValue("appearance/last_light_plot_theme", index);
+    }
+    BladePlotTheme::interfaceChanged(dark, BladePlotTheme::firstCatalogPreset + plotTheme);
     BladePlotTheme::refreshButtonIcons(this, dark);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
@@ -1819,10 +1828,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.7"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.8"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.7") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.8") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.

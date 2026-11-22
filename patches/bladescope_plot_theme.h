@@ -83,10 +83,10 @@ struct ThemePalette
   QStringList colors;
 };
 
-inline const std::array<ThemePalette, 17>& themePalettes()
+inline const std::array<ThemePalette, 9>& themePalettes()
 {
   // Window, input, toolbar, text, accent, border, plot top, plot bottom, axis ink, grid.
-  static const std::array<ThemePalette, 17> palettes = {{
+  static const std::array<ThemePalette, 9> palettes = {{
     { QStringLiteral("\u7eb8\u767d"), { "#f1f3f5", "#ffffff", "#f7f8fa", "#18202a", "#c8d9ee", "#c4ccd5", "#ffffff", "#ffffff", "#273544", "#8998a8" } },
     { QStringLiteral("\u96fe\u7070"), { "#e6e9ee", "#f3f4f6", "#eceff3", "#20262f", "#bfcbd8", "#aebac7", "#f1f3f6", "#f1f3f6", "#344454", "#8594a5" } },
     { QStringLiteral("\u9759\u84dd"), { "#e7edf4", "#f2f7fc", "#eef4fa", "#182c40", "#b6cce5", "#b6c8da", "#edf4fc", "#edf4fc", "#304967", "#7d9cbb" } },
@@ -100,14 +100,6 @@ inline const std::array<ThemePalette, 17>& themePalettes()
                              "#ddd6e6", "#f8f4ed", "#392e50", "#75688d" } },
     { QStringLiteral("\u8c46\u853b\u7d2b \u00b7 \u9c7c\u809a\u767d"), { "#f0e3e9", "#f7f4ed", "#fdf8f8", "#150c16", "#ad6598", "#c9a6bd",
                              "#e8cfe0", "#f7f4ed", "#452641", "#895e7d" } },
-    { QStringLiteral("\u6d77\u6cab \u00b7 \u5976\u6cb9"), { "#dfe3d7", "#fff0de", "#f1eadb", "#201b29", "#adcecb", "#c8d9d1", "#6fb4bc", "#fff0de", "#242032", "#578590" } },
-    { QStringLiteral("\u66ae\u7d2b \u00b7 \u6d45\u6a31"), { "#e4ced6", "#ffe6e3", "#f3dbdd", "#201b29", "#b8a8c1", "#d0bdcd", "#8379a8", "#ffe6e3", "#141021", "#655d82" } },
-    { QStringLiteral("\u8537\u8587 \u00b7 \u51b0\u9752"), { "#dfe0ec", "#e3fdff", "#e1f0f7", "#201b29", "#d9b2cf", "#dccbdf", "#d17aaa", "#e3fdff", "#242032", "#9a5d84" } },
-    { QStringLiteral("\u82d4\u7eff \u00b7 \u8584\u8377"), { "#d4ead6", "#e3fff3", "#dcf5e6", "#201b29", "#bcc8a7", "#c9dac0", "#9f9e6d", "#e3fff3", "#242032", "#78765a" } },
-    { QStringLiteral("\u7816\u7ea2 \u00b7 \u674f\u971c"), { "#e5c9bc", "#fff0df", "#f3decf", "#201b29", "#bc8b84", "#d3ada2", "#c89d94", "#fff0df", "#242032", "#69353b" } },
-    { QStringLiteral("\u9e22\u5c3e \u00b7 \u5ae9\u7eff"), { "#d0dfd6", "#e4f6da", "#dbebd8", "#201b29", "#b0bacf", "#c1ced3", "#898cc7", "#e4f6da", "#242032", "#696997" } },
-    { QStringLiteral("\u96fe\u84dd \u00b7 \u6de1\u7d2b"), { "#e2d9f1", "#fce5ff", "#f0e0f9", "#201b29", "#b9c6da", "#d0d0e6", "#87aebe", "#fce5ff", "#242032", "#678191" } },
-    { QStringLiteral("\u9752\u53f6 \u00b7 \u871c\u6843"), { "#e3decc", "#ffe8de", "#f2e4d6", "#201b29", "#b6ceae", "#ced7be", "#7fbb8a", "#ffe8de", "#242032", "#62896e" } }
   }};
   return palettes;
 }
@@ -349,7 +341,11 @@ public:
       cache.pixmap.fill(Qt::transparent);
       QPainter fill(&cache.pixmap);
       fill.scale(pixels.width() / rect.width(), pixels.height() / rect.height());
-      fill.fillRect(QRectF(QPointF(), rect.size()), backgroundBrush(current(), rect.size()));
+      const QRectF bounds(QPointF(), rect.size());
+      // Composite translucent plot colors against a stable base on screen.
+      if (openGLBackdrop || canvasPaint)
+        fill.fillRect(bounds, Qt::white);
+      fill.fillRect(bounds, backgroundBrush(current(), rect.size()));
       cache.size = rect.size();
       cache.revision = revision;
     }
