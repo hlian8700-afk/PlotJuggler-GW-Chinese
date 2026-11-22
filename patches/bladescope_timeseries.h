@@ -4,6 +4,8 @@
 #include "bladescope_analysis.h"
 #include "bladescope_recording_index.h"
 #include <QClipboard>
+#include <QShortcut>
+#include <optional>
 #include <QHeaderView>
 #include "qwt_date_scale_draw.h"
 #include "qwt_plot_curve.h"
@@ -165,6 +167,10 @@ inline void compare(QWidget* parent, const QStringList& names, const std::vector
   row->addWidget(x, 1);
   row->addWidget(new QLabel(xy ? QStringLiteral("Y") : QStringLiteral("右轴 / 被减量")));
   row->addWidget(y, 1);
+  auto* axisChannels = new QPushButton(QStringLiteral("配置左右轴曲线"));
+  axisChannels->setVisible(!xy);
+  row->addWidget(axisChannels);
+  QSet<int> extraLeft, extraRight;
   auto* stats = new QPushButton(QStringLiteral("统计与 Y−X"));
   row->addWidget(stats);
   auto* chart = new Chart(&dialog, !xy);
@@ -209,8 +215,24 @@ inline void compare(QWidget* parent, const QStringList& names, const std::vector
     }
     else
     {
+      QSet<int> leftAxes = extraLeft, rightAxes = extraRight;
+      leftAxes.insert(x->currentIndex());
+      rightAxes.insert(y->currentIndex());
+      if (leftAxes.size() + rightAxes.size() > 16)
+      {
+        readout->setText(QStringLiteral("双轴图最多显示 16 条曲线，请调整左右轴配置。"));
+        chart->reset();
+        return;
+      }
       chart->curve(x->currentText(), left, true, 0, true);
       chart->curve(y->currentText(), right, true, 1, true, QwtPlot::yRight);
+      for (int i = 0; i < names.size(); ++i)
+      {
+        if (i != x->currentIndex() && extraLeft.contains(i))
+          chart->curve(names[i], channels[size_t(i)], true, i + 2, true);
+        if (i != y->currentIndex() && extraRight.contains(i))
+          chart->curve(names[i], channels[size_t(i)], true, i + 2, true, QwtPlot::yRight);
+      }
     }
     chart->reset();
     readout->setText(QStringLiteral("有效配对 %1 / %2　时间容差 %3 s　差值要求两测点单位一致")
@@ -245,6 +267,49 @@ inline void compare(QWidget* parent, const QStringList& names, const std::vector
   for (auto* selector : {x, y})
     QObject::connect(selector, &QComboBox::currentTextChanged, &dialog, render);
   QObject::connect(log, &QCheckBox::toggled, &dialog, render);
+  QObject::connect(axisChannels, &QPushButton::clicked, &dialog, [&] {
+    QDialog editor(&dialog);
+    editor.setWindowTitle(QStringLiteral("配置左右轴曲线"));
+    QVBoxLayout layout(&editor);
+    QTableWidget table(names.size(), 3);
+    table.setHorizontalHeaderLabels({QStringLiteral("测点"), QStringLiteral("加到左轴"), QStringLiteral("加到右轴")});
+    table.horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    table.setEditTriggers(QAbstractItemView::NoEditTriggers);
+    for (int i = 0; i < names.size(); ++i)
+    {
+      table.setItem(i, 0, new QTableWidgetItem(names[i]));
+      for (int column = 1; column <= 2; ++column)
+      {
+        auto* item = new QTableWidgetItem;
+        item->setCheckState((column == 1 ? extraLeft : extraRight).contains(i) ? Qt::Checked : Qt::Unchecked);
+        table.setItem(i, column, item);
+      }
+    }
+    layout.addWidget(&table);
+    QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout.addWidget(&buttons);
+    QObject::connect(&buttons, &QDialogButtonBox::accepted, &editor, &QDialog::accept);
+    QObject::connect(&buttons, &QDialogButtonBox::rejected, &editor, &QDialog::reject);
+    if (editor.exec() != QDialog::Accepted) return;
+    QSet<int> left, right;
+    for (int i = 0; i < names.size(); ++i)
+    {
+      if (table.item(i, 1)->checkState() == Qt::Checked) left.insert(i);
+      if (table.item(i, 2)->checkState() == Qt::Checked) right.insert(i);
+    }
+    left.insert(x->currentIndex());
+    right.insert(y->currentIndex());
+    if (left.size() + right.size() > 16)
+    {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("双轴图最多显示 16 条曲线。"));
+      return;
+    }
+    left.remove(x->currentIndex());
+    right.remove(y->currentIndex());
+    extraLeft = std::move(left);
+    extraRight = std::move(right);
+    render();
+  });
   QObject::connect(stats, &QPushButton::clicked, &dialog, [&] {
     showStatistics(&dialog, describe(x->currentText(), channels[size_t(x->currentIndex())]) +
         QStringLiteral("\n\n") + describe(y->currentText(), channels[size_t(y->currentIndex())]) +
@@ -344,12 +409,78 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source)
     chart->reset();
     status->setText(QStringLiteral("%1 条曲线　%2 个有效分析点").arg(shown.size()).arg(qulonglong(count)));
   };
+  auto* cursorReadout = new QLabel;
+  cursorReadout->setWordWrap(true);
+  layout.addWidget(cursorReadout);
+  std::optional<double> cursorTime;
+  auto showCursor = [&](double timestamp) {
+    cursorTime = timestamp;
+    QStringList values{QDateTime::fromMSecsSinceEpoch(qint64(timestamp * 1000)).toString(Qt::ISODateWithMs)};
+    for (size_t i = 0; i < processed.size(); ++i)
+    {
+      const auto* hit = nearest(processed[i], timestamp, tolerance);
+      values << shown[int(i)] + QStringLiteral(" = ") +
+          (hit && std::isfinite(hit->y) ? QString::number(hit->y, 'g', 8) : QStringLiteral("—"));
+    }
+    cursorReadout->setText(values.join(QStringLiteral("　")));
+  };
+  chart->canvas()->setFocusPolicy(Qt::StrongFocus);
+  auto* cursorPicker = new QwtPlotPicker(chart->canvas());
+  cursorPicker->setStateMachine(new QwtPickerTrackerMachine);
+  cursorPicker->setTrackerMode(QwtPicker::AlwaysOn);
+  QObject::connect(cursorPicker, &QwtPlotPicker::moved, &dialog, [&](const QPointF& point) {
+    if (processed.empty()) return;
+    const auto* hit = nearest(processed.front(), point.x() / 1000, std::numeric_limits<double>::infinity());
+    if (hit) showCursor(hit->x);
+  });
+  for (const auto key : {Qt::Key_A, Qt::Key_D})
+  {
+    auto* shortcut = new QShortcut(QKeySequence(key), chart->canvas());
+    shortcut->setContext(Qt::WidgetShortcut);
+    QObject::connect(shortcut, &QShortcut::activated, &dialog, [&, key] {
+      if (processed.empty()) return;
+      const auto& points = processed.front();
+      if (points.empty()) return;
+      if (!cursorTime)
+      {
+        showCursor((key == Qt::Key_A ? points.back() : points.front()).x);
+        return;
+      }
+      if (key == Qt::Key_A)
+      {
+        const auto pos = std::lower_bound(points.cbegin(), points.cend(), *cursorTime,
+                                          [](Point point, double time) { return point.x < time; });
+        if (pos != points.cbegin()) showCursor((pos - 1)->x);
+      }
+      else
+      {
+        const auto pos = std::upper_bound(points.cbegin(), points.cend(), *cursorTime,
+                                          [](double time, Point point) { return time < point.x; });
+        if (pos != points.cend()) showCursor(pos->x);
+      }
+    });
+  }
   auto apply = [&] {
     ++revision;
+    cursorTime.reset();
+    cursorReadout->clear();
     trends.clear();
     processed = prepare(raw, visible, conditions, tolerance);
     render();
   };
+  auto copy = [&](std::vector<Points>& data, size_t index, double start, double end) {
+      auto& points = data[index];
+      if (!points.empty()) return;
+      const auto& series = source.numeric.at(names[int(index)].toStdString());
+      const auto begin = BladeAnalysis::boundary(series, start);
+      const auto endIndex = BladeAnalysis::boundary(series, end, true);
+      points.reserve(endIndex - begin);
+      for (size_t i = begin; i < endIndex; ++i)
+      {
+        const auto point = series.at(i);
+        points.push_back({point.x, point.y});
+      }
+    };
   auto read = [&](double start, double end, bool resetConditions) {
     if (std::isnan(start) || std::isnan(end) || end < start)
     {
@@ -370,22 +501,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source)
       return;
     }
     std::vector<Points> data(size_t(names.size()));
-    auto copy = [&](size_t index) {
-      auto& points = data[index];
-      if (!points.empty()) return;
-      const auto& series = source.numeric.at(names[int(index)].toStdString());
-      const auto begin = BladeAnalysis::boundary(series, start);
-      const auto endIndex = BladeAnalysis::boundary(series, end, true);
-      points.reserve(endIndex - begin);
-      for (size_t i = begin; i < endIndex; ++i)
-      {
-        const auto point = series.at(i);
-        points.push_back({point.x, point.y});
-      }
-    };
     if (resetConditions) conditions.clear();
-    for (auto index : selected) copy(index);
-    for (const auto condition : conditions) copy(condition.channel);
+    for (auto index : selected) copy(data, index, start, end);
+    for (const auto condition : conditions) copy(data, condition.channel, start, end);
     lo = start;
     hi = end;
     visible = std::move(selected);
@@ -486,18 +604,18 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source)
     editor.setWindowTitle(QStringLiteral("AND 条件筛选"));
     QVBoxLayout form(&editor);
     auto* rows = new QTableWidget(0, 3);
-    rows->setHorizontalHeaderLabels({QStringLiteral("已取数测点"), QStringLiteral("下限（含）"), QStringLiteral("上限（含）")});
+    rows->setHorizontalHeaderLabels({QStringLiteral("条件测点"), QStringLiteral("下限（含）"), QStringLiteral("上限（含）")});
     rows->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     form.addWidget(rows);
     auto append = [&](const Condition* condition) {
       const int row = rows->rowCount();
       rows->insertRow(row);
       auto* name = new QComboBox;
-      name->addItems(shown);
+      for (int i = 0; i < tags->count(); ++i)
+        name->addItem(tags->item(i)->text() + QStringLiteral(" — ") + names[i]);
       if (condition)
       {
-        const auto index = std::find(visible.begin(), visible.end(), condition->channel);
-        if (index != visible.end()) name->setCurrentIndex(int(index - visible.begin()));
+        name->setCurrentIndex(int(condition->channel));
         if (std::isfinite(condition->lower)) rows->setItem(row, 1, new QTableWidgetItem(QString::number(condition->lower, 'g', 16)));
         if (std::isfinite(condition->upper)) rows->setItem(row, 2, new QTableWidgetItem(QString::number(condition->upper, 'g', 16)));
       }
@@ -543,8 +661,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source)
           return;
         }
         if (std::isfinite(lower) || std::isfinite(upper))
-          valid.push_back({visible[size_t(qobject_cast<QComboBox*>(rows->cellWidget(i, 0))->currentIndex())], lower, upper});
+          valid.push_back({size_t(qobject_cast<QComboBox*>(rows->cellWidget(i, 0))->currentIndex()), lower, upper});
       }
+      for (const auto& condition : valid) copy(raw, condition.channel, lo, hi);
       conditions = std::move(valid);
       tolerance = diff->value();
       editor.accept();
