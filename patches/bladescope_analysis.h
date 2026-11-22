@@ -559,7 +559,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   op->addItems({"=", "!=", ">", ">=", "<", "<=", QString::fromUtf8("区间")});
   auto* threshold = new QLineEdit("0");
   auto* upper = new QLineEdit("1");
-  auto* tolerance = new QLineEdit("1");
+  auto* tolerance = new QLineEdit("0");
   auto* previous = new QCheckBox(QString::fromUtf8("条件测点使用之前最近有效样本"));
   previous->setChecked(true);
   auto* units = new QCheckBox(QString::fromUtf8("确认差值测点单位一致"));
@@ -746,10 +746,21 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       const auto& clock = *channels.front();
       FilteredSeries output(channels.size());
       std::vector<double> aligned(channels.size());
-      const size_t stop = boundary(clock, last, true);
-      for (size_t i = boundary(clock, first); i < stop; ++i)
+      const size_t begin = boundary(clock, first);
+      const size_t end = boundary(clock, last, true);
+      constexpr size_t maxPlotPoints = 50000;
+      const size_t available = end - begin;
+      const size_t requested = std::min(available, maxPlotPoints / channels.size());
+      for (auto& channel : output)
+        channel.reserve(requested);
+      const size_t intervals = std::max(requested, size_t(2)) - 1;
+      const size_t span = available ? available - 1 : 0;
+      const size_t stride = span / intervals;
+      const size_t remainder = span % intervals;
+      for (size_t row = 0; row < requested; ++row)
       {
-        const auto& sample = clock.at(i);
+        const size_t index = begin + stride * row + remainder * row / intervals;
+        const auto& sample = clock.at(index);
         aligned.front() = sample.y;
         if (!std::isfinite(sample.y))
           continue;
