@@ -1,4 +1,5 @@
 #pragma once
+#include "bladescope_analysis.h"
 #include "bladescope_recording_index.h"
 #include "bladescope_time_display.h"
 #include <QCompleter>
@@ -235,6 +236,34 @@ inline std::optional<RecordingOptions> selectRecording(
   auto* search = new QLineEdit;
   search->setPlaceholderText(QStringLiteral("搜索测点名或已有中文标签"));
   layout.addWidget(search);
+  auto* groupRow = new QHBoxLayout;
+  layout.addLayout(groupRow);
+  auto* groupCombo = new QComboBox;
+  groupCombo->setEditable(true);
+  groupCombo->setInsertPolicy(QComboBox::NoInsert);
+  groupCombo->lineEdit()->setPlaceholderText(QStringLiteral("选择或输入测点组名称"));
+  groupRow->addWidget(groupCombo, 1);
+  auto* loadGroup = new QPushButton(QStringLiteral("载入测点组"));
+  auto* saveGroup = new QPushButton(QStringLiteral("保存测点组"));
+  auto* manageGroups = new QPushButton(QStringLiteral("管理测点组"));
+  for (auto* button : {loadGroup, saveGroup, manageGroups})
+  {
+    button->setAutoDefault(false);
+    groupRow->addWidget(button);
+  }
+  QSettings settings;
+  const auto key = QString::fromLatin1(BladeAnalysis::measurementGroupsKey);
+  auto savedGroups = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
+  const auto refreshGroups = [&](const QString& name) {
+    groupCombo->clear();
+    groupCombo->addItems(savedGroups.keys());
+    groupCombo->setCurrentIndex(groupCombo->findText(name, Qt::MatchExactly));
+  };
+  refreshGroups({});
+  const auto persistGroups = [&](const QJsonObject& groups) {
+    settings.setValue(key, QJsonDocument(groups).toJson(QJsonDocument::Compact));
+  };
+
   auto* measurements = new QListWidget;
   layout.addWidget(measurements,1);
   auto* actions = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
@@ -248,7 +277,12 @@ inline std::optional<RecordingOptions> selectRecording(
     for(int i=0;i<measurements->count();++i)
       measurements->item(i)->setHidden(!measurements->item(i)->text().contains(search->text().trimmed(),Qt::CaseInsensitive));
   };
+  const auto timeField = [&] {
+    const int index = time->findText(time->currentText().trimmed(), Qt::MatchFixedString);
+    return index >= 0 ? time->itemText(index) : QString();
+  };
   auto populate=[&] {
+    const auto timeName = timeField();
     QSet<QString> checked;
     for(int i=0;i<measurements->count();++i) {
       auto* item=measurements->item(i);
@@ -256,7 +290,7 @@ inline std::optional<RecordingOptions> selectRecording(
     }
     measurements->clear();
     for(int i=0;i<time->count();++i) {
-      if(i==time->currentIndex()) continue;
+      if(time->itemText(i)==timeName) continue;
       const auto tag=time->itemText(i), alias=aliases.value(tag).toString();
       auto* item=new QListWidgetItem(alias.isEmpty()?tag:tag+" — "+alias,measurements);
       item->setData(Qt::UserRole,tag);
@@ -278,6 +312,7 @@ inline std::optional<RecordingOptions> selectRecording(
   };
   QObject::connect(table,&QComboBox::currentTextChanged,&dialog,changeTable);
   QObject::connect(time,QOverload<int>::of(&QComboBox::activated),&dialog,populate);
+  QObject::connect(time->lineEdit(), &QLineEdit::editingFinished, &dialog, populate);
   QObject::connect(search,&QLineEdit::textChanged,&dialog,filter);
   QObject::connect(all,&QPushButton::clicked,&dialog,[&]{
     for(int i=0;i<measurements->count();++i)
@@ -286,12 +321,92 @@ inline std::optional<RecordingOptions> selectRecording(
   QObject::connect(none,&QPushButton::clicked,&dialog,[&]{
     for(int i=0;i<measurements->count();++i) measurements->item(i)->setCheckState(Qt::Unchecked);
   });
+  const auto warn = [&](const QString& message) {
+    QMessageBox::warning(&dialog, dialog.windowTitle(), message);
+  };
+  QObject::connect(loadGroup, &QPushButton::clicked, &dialog, [&] {
+    const auto name = groupCombo->currentText().trimmed();
+    if (!savedGroups.contains(name))
+      return warn(QStringLiteral("请选择已保存的测点组。"));
+
+    const auto timeName = timeField();
+    QHash<QString, QListWidgetItem*> items;
+    for (int i = 0; i < measurements->count(); ++i)
+    {
+      auto* item = measurements->item(i);
+      const auto tag = item->data(Qt::UserRole).toString();
+      if (tag != timeName)
+        items.insert(tag, item);
+    }
+
+    QStringList missing;
+    QSet<QString> matched;
+    for (const auto member : savedGroups.value(name).toArray())
+    {
+      const auto tag = member.toString();
+      if (items.contains(tag))
+        matched.insert(tag);
+      else
+        missing << tag;
+    }
+    if (!matched.isEmpty())
+    {
+      for (auto it = items.cbegin(); it != items.cend(); ++it)
+        it.value()->setCheckState(matched.contains(it.key()) ? Qt::Checked : Qt::Unchecked);
+    }
+    if (!missing.isEmpty() || matched.isEmpty())
+    {
+      QMessageBox notice(&dialog);
+      notice.setIcon(QMessageBox::Information);
+      notice.setWindowTitle(QStringLiteral("载入测点组"));
+      notice.setText(matched.isEmpty()
+                         ? QStringLiteral("当前录波没有可勾选的组内测点，已保留原勾选。")
+                         : QStringLiteral("已勾选 %1 个测点，另有 %2 个测点在当前录波中不可用。")
+                               .arg(matched.size()).arg(missing.size()));
+      if (!missing.isEmpty())
+        notice.setDetailedText(missing.join(QLatin1Char('\n')));
+      notice.exec();
+    }
+  });
+  QObject::connect(saveGroup, &QPushButton::clicked, &dialog, [&] {
+    const auto name = groupCombo->currentText().trimmed();
+    const auto timeName = timeField();
+    QStringList tags;
+    for (int i = 0; i < measurements->count(); ++i)
+    {
+      const auto* item = measurements->item(i);
+      const auto tag = item->data(Qt::UserRole).toString();
+      if (item->checkState() == Qt::Checked && tag != timeName)
+        tags << tag;
+    }
+    if (name.isEmpty() || tags.isEmpty())
+      return warn(QStringLiteral("请输入组名并勾选测点。"));
+    if (savedGroups.contains(name) &&
+        QMessageBox::question(&dialog, dialog.windowTitle(), QStringLiteral("覆盖同名测点组？"),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+      return;
+    savedGroups.insert(name, QJsonArray::fromStringList(tags));
+    persistGroups(savedGroups);
+    refreshGroups(name);
+  });
+  QObject::connect(manageGroups, &QPushButton::clicked, &dialog, [&] {
+    const auto name = groupCombo->currentText().trimmed();
+    const auto timeName = timeField();
+    QStringList tags;
+    for (int i = 0; i < time->count(); ++i)
+    {
+      if (time->itemText(i) != timeName)
+        tags << time->itemText(i);
+    }
+    BladeAnalysis::manageGroups(&dialog, tags, savedGroups, persistGroups);
+    refreshGroups(name);
+  });
+
   Selection selection;
   QObject::connect(actions,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
   QObject::connect(actions,&QDialogButtonBox::accepted,&dialog,[&]{
     const double inf=std::numeric_limits<double>::infinity();
-    const int index = time->findText(time->currentText().trimmed(), Qt::MatchFixedString);
-    selection={table->currentText(),index >= 0 ? time->itemText(index) : QString(),{},
+    selection={table->currentText(),timeField(),{},
                from->text().trimmed().isEmpty()?-inf:BladeRecordingIndex::timestamp(from->text().trimmed()),
                until->text().trimmed().isEmpty()?inf:BladeRecordingIndex::timestamp(until->text().trimmed()),
                numericUnit->currentIndex()==1};

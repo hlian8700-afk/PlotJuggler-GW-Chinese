@@ -15,6 +15,7 @@
 
 namespace BladeAnalysis
 {
+inline constexpr auto measurementGroupsKey = "BladeScope/measurementGroups";
 inline QString number(double value)
 {
   return QString::number(value, 'g', 17);
@@ -280,7 +281,7 @@ inline void openGroupManager(QWidget* parent, const PJ::PlotDataMapRef& data)
   for (const auto& entry : data.numeric)
     available << QString::fromStdString(entry.first);
   available.sort(Qt::CaseInsensitive);
-  const QString key = "BladeScope/measurementGroups";
+  const QString key = measurementGroupsKey;
   QSettings settings;
   auto saved = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
   manageGroups(parent, available, saved, [&](const QJsonObject& value) {
@@ -338,7 +339,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   groups->setEditable(true);
   groups->setInsertPolicy(QComboBox::NoInsert);
   groups->lineEdit()->setPlaceholderText(QString::fromUtf8("选择或输入测点组名称"));
-  const QString key = "BladeScope/measurementGroups";
+  const QString key = measurementGroupsKey;
   QSettings settings;
   QJsonObject saved = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
   groups->addItems(saved.keys());
