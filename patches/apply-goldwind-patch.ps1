@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.18"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.19"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.18") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.19") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2098,12 +2098,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_xy_math.h", "bladescope_xy_dialog.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_xy_dialog.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2138,6 +2138,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   };
   connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
   connect(ui->menuTools->addAction(QStringLiteral("曲线分析")), &QAction::triggered, this, showFitPanel);
+  connect(ui->menuTools->addAction(QStringLiteral("XY 拟合与差值统计")), &QAction::triggered, this, [this] {
+    BladeXY::open(this, _mapped_plot_data, [this] {
+      return _main_tabbed_widget->addTab({})->plotAt(0);
+    });
+    _curvelist_widget->updateFilter();
+  });
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
   if (!fitAcceptanceOutput.isEmpty())
   {
