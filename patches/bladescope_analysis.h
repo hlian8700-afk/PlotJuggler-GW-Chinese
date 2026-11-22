@@ -1,6 +1,8 @@
 #pragma once
 #include "PlotJuggler/plotdata.h"
 #include <QtWidgets>
+#include <QMap>
+#include "bladescope_fit_xlsx.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTextStream>
@@ -235,20 +237,69 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
   });
   button(groupRow, "导入配置", [&] {
     const auto path = QFileDialog::getOpenFileName(&dialog, QString::fromUtf8("导入测点组"),
-                                                  {}, "JSON (*.json)");
+                                                  {}, QStringLiteral("测点组文件 (*.xlsx *.json);;Excel (*.xlsx);;JSON (*.json)"));
     if (path.isEmpty())
       return;
-    QFile file(path);
-    QJsonParseError error;
-    const auto doc = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll(), &error)
-                                                   : QJsonDocument();
-    const auto envelope = doc.object();
-    const auto imported = envelope.value("groups").toObject();
-    if (!doc.isObject() || envelope.value("version").toInt() != 1 ||
-        !envelope.value("groups").isObject())
+    QJsonObject imported;
+    if (path.endsWith(".xlsx", Qt::CaseInsensitive))
     {
-      QMessageBox::warning(&dialog, dialog.windowTitle(), QString::fromUtf8("测点组配置格式无效。"));
-      return;
+      const auto sheets = BladeFitUI::readWorkbookRows(path, 64);
+      for (const auto& rows : sheets)
+      {
+        for (int header = 0; header < rows.size(); ++header)
+        {
+          const int groupColumn = rows[header].indexOf(QStringLiteral("测点组"));
+          const int tagColumn = rows[header].indexOf(QStringLiteral("原始字段"));
+          if (groupColumn < 0 || tagColumn < 0)
+            continue;
+          if (!imported.isEmpty())
+          {
+            QMessageBox::warning(&dialog, dialog.windowTitle(),
+                                 QStringLiteral("Excel 中找到多张测点组表，请保留一张后重试。"));
+            return;
+          }
+          QMap<QString, QStringList> membersByGroup;
+          for (int row = header + 1; row < rows.size(); ++row)
+          {
+            const auto& name = rows[row][groupColumn];
+            const auto& tag = rows[row][tagColumn];
+            if (name.isEmpty() && tag.isEmpty())
+              continue;
+            if (name.isEmpty() || tag.isEmpty())
+            {
+              QMessageBox::warning(&dialog, dialog.windowTitle(),
+                                   QStringLiteral("测点组表的数据行 %1 缺少组名或原始字段。").arg(row + 1));
+              return;
+            }
+            auto& members = membersByGroup[name];
+            if (!members.contains(tag))
+              members.append(tag);
+          }
+          for (auto it = membersByGroup.cbegin(); it != membersByGroup.cend(); ++it)
+            imported.insert(it.key(), QJsonArray::fromStringList(it.value()));
+          break;
+        }
+      }
+      if (imported.isEmpty())
+      {
+        QMessageBox::warning(&dialog, dialog.windowTitle(),
+                             QStringLiteral("Excel 中没有可导入的测点组。请检查「测点组」和「原始字段」列。"));
+        return;
+      }
+    }
+    else
+    {
+      QFile file(path);
+      const auto doc = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll())
+                                                     : QJsonDocument();
+      const auto envelope = doc.object();
+      if (!doc.isObject() || envelope.value("version").toInt() != 1 ||
+          !envelope.value("groups").isObject())
+      {
+        QMessageBox::warning(&dialog, dialog.windowTitle(), QString::fromUtf8("测点组配置格式无效。"));
+        return;
+      }
+      imported = envelope.value("groups").toObject();
     }
     for (auto it = imported.begin(); it != imported.end(); ++it)
     {
@@ -261,14 +312,19 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
         return;
       }
     }
+    QString firstImported;
     for (auto it = imported.begin(); it != imported.end(); ++it)
     {
       QString name = it.key();
       for (int suffix = 2; groups.contains(name); ++suffix)
         name = QStringLiteral("%1 (%2)").arg(it.key()).arg(suffix);
       groups.insert(name, it.value());
+      if (firstImported.isEmpty())
+        firstImported = name;
     }
-    commit(current());
+    commit(firstImported.isEmpty() ? current() : firstImported);
+    QMessageBox::information(&dialog, dialog.windowTitle(),
+                             QStringLiteral("已导入 %1 个测点组。").arg(imported.size()));
   });
   button(memberRow, "关闭", [&] { dialog.accept(); });
   reload({});
