@@ -1,6 +1,7 @@
 #pragma once
 #include "bladescope_fit_panel.h"
 #include "bladescope_sqlite_recording.h"
+#include "bladescope_txt_recording.h"
 #include <QScreen>
 #include "qwt_scale_div.h"
 #include "qwt_text.h"
@@ -22,6 +23,37 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
   };
 
   QTimer::singleShot(0, window, [=, &data] {
+    const auto textPath = QDir(output).filePath("acceptance-high-rate.TXT");
+    QFile textFixture(textPath);
+    const QByteArray textBytes(
+        "\xef\xbb\xbf" "WindParkName: Test\r\nTurbineID : 6\r\n"
+        "SoftVersion: Test\r\nController: Test\r\n"
+        "TimeStamp,grRotorSpeed,grGeneratorSpeed\r\n"
+        "2025-07-14-15:32:28.329,9,103\r\n"
+        "2025-07-14-15:32:28.309,6,100\r\n"
+        "2025-07-14-15:32:28.319,8,102\r\n"
+        "2025-07-14-15:32:28.319,7,invalid\r\n"
+        "invalid,999,999\r\n");
+    if (!textFixture.open(QIODevice::WriteOnly) || textFixture.write(textBytes)!=textBytes.size()) {
+      fail(QStringLiteral("write TXT recording fixture"));
+      return;
+    }
+    textFixture.close();
+    const std::atomic_bool txtCanceled{false};
+    auto highRate = BladeTxtRecording::read(textPath, {}, txtCanceled);
+    const auto rotor = highRate.data.numeric.find("grRotorSpeed");
+    const auto generator = highRate.data.numeric.find("grGeneratorSpeed");
+    if (!highRate.error.isEmpty() || highRate.rows!=4 || highRate.duplicateTime!=1 ||
+        highRate.invalidTime!=1 || highRate.invalidValues!=1 ||
+        rotor==highRate.data.numeric.end() || rotor->second.size()!=4 ||
+        generator==highRate.data.numeric.end() || generator->second.size()!=3 ||
+        rotor->second.at(0).y!=6 || rotor->second.at(1).y!=8 || rotor->second.at(2).y!=7 ||
+        rotor->second.at(1).x!=rotor->second.at(2).x ||
+        std::abs(rotor->second.at(1).x-rotor->second.at(0).x-0.010)>1e-6 ||
+        generator->second.at(1).x!=rotor->second.at(1).x) {
+      fail(QStringLiteral("TXT metadata, time precision, duplicate order or channel alignment"));
+      return;
+    }
     const auto recordingPath = QDir(output).filePath("acceptance-recording.DATA");
     const auto connectionName = QUuid::createUuid().toString();
     bool fixtureReady = false;
