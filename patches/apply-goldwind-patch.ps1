@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.14"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.22"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.14") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.22") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -1982,6 +1982,7 @@ Update-BladeThemeSource "plotjuggler_plugins/ToolboxLuaEditor/lua_editor.cpp" @(
 
 $analysisHeader = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "bladescope_analysis.h")
 Set-Content -Path "plotjuggler_app/bladescope_analysis.h" -Value $analysisHeader -Encoding UTF8BOM
+Copy-Item (Join-Path $PSScriptRoot "bladescope_time_view_math.h") "plotjuggler_app/bladescope_time_view_math.h" -Force
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_analysis.h`"" }
   @{ Old = '  ui->menuBar->removeAction(ui->menuCloudData->menuAction());'; New = @'
@@ -2020,19 +2021,45 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       }
     }
     BladeAnalysis::open(this, _mapped_plot_data, selected, start, end,
-        [this, plot](const QStringList& names, bool newTab, double first, double last) {
-          auto* target = plot;
-          if (newTab || !target || target->isXYPlot())
-            target = _main_tabbed_widget->addTab({})->plotAt(0);
-          if (!target)
+        [this, plot](const QStringList& names, bool newTab, double first, double last, bool detail) {
+          const bool createTab = newTab || !plot || plot->isXYPlot();
+          const size_t existing = createTab ? 0 : plot->curveList().size();
+          if (existing + size_t(names.size()) > 16)
+          {
+            QMessageBox::warning(this, QStringLiteral("录波分析"), QStringLiteral("分析视图最多显示 16 条曲线。"));
             return;
+          }
+          QStringList derived;
           for (const auto& name : names)
           {
             const auto raw = name.toStdString();
-            const auto& curves = target->curveList();
-            if (std::none_of(curves.begin(), curves.end(), [&](const auto& c) { return c.src_name == raw; }))
-              target->addCurve(raw);
+            const auto it = _mapped_plot_data.numeric.find(raw);
+            if (it == _mapped_plot_data.numeric.end()) continue;
+            const auto& series = it->second;
+            const size_t begin = detail ? BladeAnalysis::boundary(series, first) : 0;
+            const size_t end = detail ? BladeAnalysis::boundary(series, last, true) : series.size();
+            if (begin >= end) continue;
+            const auto prefix = raw + (detail ? "/TS Detail" : "/TS Overview");
+            auto key = prefix;
+            for (int suffix = 2; _mapped_plot_data.numeric.count(key); ++suffix)
+              key = prefix + " [" + std::to_string(suffix) + "]";
+            auto& output = _mapped_plot_data.addNumeric(key)->second;
+            BladeTimeView::select(begin, end, detail,
+                [&](size_t i) { return series.at(i).y; },
+                [&](size_t i) { const auto value = series.at(i); output.pushBack({value.x,value.y}); });
+            derived << QString::fromStdString(key);
           }
+          if (derived.isEmpty())
+          {
+            QMessageBox::information(this, QStringLiteral("录波分析"), QStringLiteral("所选区间没有原始采样点。"));
+            return;
+          }
+          auto* target = createTab ? _main_tabbed_widget->addTab({})->plotAt(0) : plot;
+          if (!target) return;
+          for (const auto& name : derived)
+            if (!target->addCurve(name.toStdString())) _mapped_plot_data.numeric.erase(name.toStdString());
+          emit target->curveListChanged();
+          _curvelist_widget->updateFilter();
           target->zoomOut(false);
           if (first < last)
           {

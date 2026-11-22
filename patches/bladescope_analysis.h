@@ -1,5 +1,6 @@
 #pragma once
 #include "PlotJuggler/plotdata.h"
+#include "bladescope_time_view_math.h"
 #include <QtWidgets>
 #include <QMap>
 #include "bladescope_fit_xlsx.h"
@@ -347,7 +348,7 @@ inline void openGroupManager(QWidget* parent, const PJ::PlotDataMapRef& data)
 
 inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
-                 const std::function<void(const QStringList&, bool, double, double)>& plot)
+                 const std::function<void(const QStringList&, bool, double, double, bool)>& plot)
 {
   QDialog dialog(parent);
   dialog.setWindowTitle(QString::fromUtf8("录波分析"));
@@ -462,16 +463,16 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (!missing.isEmpty())
       warn(QString::fromUtf8("录波中缺失：") + missing.join(", "));
   });
-  addButton(groupRow, "新图页作图", [&] {
+  addButton(groupRow, "常规视图（每条最多 5 万点）", [&] {
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
-    plot(selected(), true, 0, 0);
+    plot(selected(), true, 0, 0, false);
     dialog.accept();
   });
   addButton(groupRow, "追加到当前图页", [&] {
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
-    plot(selected(), false, 0, 0);
+    plot(selected(), false, 0, 0, false);
     dialog.accept();
   });
   layout->addLayout(groupRow);
@@ -659,14 +660,14 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     }
     results->setPlainText(rows.join('\n'));
   };
-  addButton(actions, "打开区间细节图", [&] {
+  addButton(actions, "细化 TS 明细（全原始点）", [&] {
     bool startOK = false, endOK = false;
     const auto first = from->text().toDouble(&startOK);
     const auto last = to->text().toDouble(&endOK);
     if (selected().isEmpty() || !startOK || !endOK || !std::isfinite(first) ||
         !std::isfinite(last) || first >= last)
       return warn(QString::fromUtf8("请选择测点并输入有效的起止时间。"));
-    plot(selected(), true, first, last);
+    plot(selected(), true, first, last, true);
     dialog.accept();
   });
   addButton(actions, "预览筛选与统计", [&] { run(false); });
