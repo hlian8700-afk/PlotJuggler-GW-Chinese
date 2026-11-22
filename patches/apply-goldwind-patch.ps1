@@ -33,6 +33,8 @@ $src = $src.Replace($includeNeedle, @'
 #include "bladescope_label_xlsx.h"
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QDir>
 '@)
 $namespaceNeedle = "namespace`n{`nbool isCurveTreeItem("
@@ -70,41 +72,114 @@ int& goldwindLabelMode()
   return mode;
 }
 
-QString goldwindMappingPath()
+QString goldwindBatchPath()
 {
-  return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/gw_tag_mapping.json";
+  return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/gw_tag_mapping_batches.json";
+}
+
+QJsonObject goldwindBatch(const QString& name, const QJsonObject& entries)
+{
+  return {{"name", name}, {"entries", entries}};
+}
+
+QJsonArray goldwindReadBatches(QString* error = nullptr)
+{
+  const auto dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QFile batches(goldwindBatchPath());
+  if (batches.exists())
+  {
+    if (!batches.open(QIODevice::ReadOnly))
+    {
+      if (error) *error = batches.errorString();
+      return {};
+    }
+    const auto document = QJsonDocument::fromJson(batches.readAll());
+    if (!document.isArray())
+    {
+      if (error) *error = QStringLiteral("\u6620\u5c04\u6279\u6b21\u6587\u4ef6\u683c\u5f0f\u65e0\u6548\u3002");
+      return {};
+    }
+    return document.array();
+  }
+  QFile legacy(dir + "/gw_tag_mapping.json");
+  if (legacy.exists())
+  {
+    if (!legacy.open(QIODevice::ReadOnly))
+    {
+      if (error) *error = legacy.errorString();
+      return {};
+    }
+    const auto document = QJsonDocument::fromJson(legacy.readAll());
+    if (!document.isObject())
+    {
+      if (error) *error = QStringLiteral("\u65e7\u7248\u6620\u5c04\u6587\u4ef6\u683c\u5f0f\u65e0\u6548\u3002");
+      return {};
+    }
+    const auto entries = document.object();
+    return entries.isEmpty() ? QJsonArray{} :
+           QJsonArray{goldwindBatch(QStringLiteral("\u65e7\u7248\u6620\u5c04"), entries)};
+  }
+  const QString userPath = dir + "/gw_tag_mapping.csv";
+  const bool user = QFile::exists(userPath);
+  QFile file(user ? userPath : QCoreApplication::applicationDirPath()+"/gw_tag_mapping.csv");
+  if (!file.exists()) return {};
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+  {
+    if (error) *error = file.errorString();
+    return {};
+  }
+  QJsonObject entries;
+  QTextStream stream(&file);
+  stream.setCodec("UTF-8");
+  while (!stream.atEnd())
+  {
+    const auto line = stream.readLine();
+    const int comma = line.indexOf(',');
+    if (comma <= 0 || line.trimmed().compare("raw_tag,cn_name", Qt::CaseInsensitive) == 0) continue;
+    const auto tag = line.left(comma).trimmed(), name = line.mid(comma+1).trimmed();
+    if (!tag.isEmpty() && !name.isEmpty()) entries.insert(tag, QJsonArray{name, QString()});
+  }
+  return entries.isEmpty() ? QJsonArray{} :
+         QJsonArray{goldwindBatch(user ? QStringLiteral("\u65e7\u7248\u6620\u5c04") :
+                                   QStringLiteral("\u5185\u7f6e\u6620\u5c04"), entries)};
+}
+
+bool goldwindWriteBatches(QWidget* parent, const QJsonArray& batches)
+{
+  const auto path = goldwindBatchPath();
+  QSaveFile file(path);
+  const auto bytes = QJsonDocument(batches).toJson(QJsonDocument::Compact);
+  if (QDir().mkpath(QFileInfo(path).absolutePath()) && file.open(QIODevice::WriteOnly) &&
+      file.write(bytes) == bytes.size() && file.commit())
+    return true;
+  QMessageBox::warning(parent, QStringLiteral("\u4fdd\u5b58\u6620\u5c04\u5931\u8d25"), file.errorString());
+  return false;
+}
+
+QJsonObject goldwindEffectiveMapping(const QJsonArray& batches)
+{
+  QJsonObject result;
+  for (const auto& batch : batches)
+  {
+    const auto entries = batch.toObject().value("entries").toObject();
+    for (auto it = entries.begin(); it != entries.end(); ++it)
+      result.insert(it.key(), it.value());
+  }
+  return result;
 }
 
 QHash<QString,QString> goldwindReadNames()
 {
   QHash<QString,QString> names;
-  auto& systems=goldwindImportedSystems();
+  auto& systems = goldwindImportedSystems();
   systems.clear();
-  QFile json(goldwindMappingPath());
-  if (json.open(QIODevice::ReadOnly))
+  const auto mapping = goldwindEffectiveMapping(goldwindReadBatches());
+  for (auto it = mapping.begin(); it != mapping.end(); ++it)
   {
-    const auto mapping=QJsonDocument::fromJson(json.readAll()).object();
-    for(auto it=mapping.begin();it!=mapping.end();++it)
-    {
-      const auto row=it.value().toArray();
-      if(row.size()!=2 || row[0].toString().isEmpty()) continue;
-      names.insert(it.key(),row[0].toString());
-      if(!row[1].toString().isEmpty()) systems.insert(it.key(),row[1].toString());
-    }
-    return names;
-  }
-  const QString userMap=QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/gw_tag_mapping.csv";
-  QFile file(QFile::exists(userMap)?userMap:QCoreApplication::applicationDirPath()+"/gw_tag_mapping.csv");
-  if(!file.open(QIODevice::ReadOnly|QIODevice::Text)) return names;
-  QTextStream stream(&file);
-  stream.setCodec("UTF-8");
-  while(!stream.atEnd())
-  {
-    const auto line=stream.readLine();
-    const int comma=line.indexOf(',');
-    if(comma<=0 || line.trimmed().compare("raw_tag,cn_name",Qt::CaseInsensitive)==0) continue;
-    const auto tag=line.left(comma).trimmed(), name=line.mid(comma+1).trimmed();
-    if(!tag.isEmpty() && !name.isEmpty()) names.insert(tag,name);
+    const auto row = it.value().toArray();
+    if (row.size() != 2 || row[0].toString().isEmpty()) continue;
+    names.insert(it.key(), row[0].toString());
+    if (!row[1].toString().isEmpty()) systems.insert(it.key(), row[1].toString());
   }
   return names;
 }
@@ -178,7 +253,7 @@ $layoutReplacement = @'
   goldwindSelect->hide(); // Search box replaces the separate selection button.
   layout1->addLayout(goldwindToolbar);
   auto* goldwindImport = new QPushButton(QString::fromUtf8("导入标签映射"), this);
-  goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 文件并全部替换当前标签映射"));
+  goldwindImport->setToolTip(QString::fromUtf8("导入 CSV 或 XLSX 标签映射批次"));
   goldwindImport->hide(); // Available from File menu.
   const auto refreshMapping = [this] {
     goldwindReloadChineseNames();
@@ -201,27 +276,30 @@ $layoutReplacement = @'
   goldwindClearMapping->setObjectName("bladeScopeClearChineseMapping");
   goldwindClearMapping->hide();
   connect(goldwindClearMapping, &QPushButton::clicked, this, [this, refreshMapping] {
-    const auto title = QString::fromUtf8("清除中文映射");
-    if (QMessageBox::question(this, title,
-          QString::fromUtf8("清除当前中文映射并显示原始标签？重新导入 CSV 后可恢复中文显示。"),
-          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-      return;
-
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (!QDir().mkpath(dir))
+    const auto title = QStringLiteral("\u6e05\u9664\u4e2d\u6587\u6620\u5c04");
+    QString error;
+    auto batches = goldwindReadBatches(&error);
+    if (!error.isEmpty())
     {
-      QMessageBox::warning(this, title, QString::fromUtf8("无法创建配置目录。"));
+      QMessageBox::warning(this, title, error);
       return;
     }
-
-    // An empty override prevents falling back to the bundled mapping on restart.
-    const QByteArray header("{}\n");
-    QSaveFile file(goldwindMappingPath());
-    if (!file.open(QIODevice::WriteOnly) || file.write(header) != header.size() || !file.commit())
+    if (batches.isEmpty())
     {
-      QMessageBox::warning(this, title, file.errorString());
+      QMessageBox::information(this, title, QStringLiteral("\u5f53\u524d\u6ca1\u6709\u6620\u5c04\u6279\u6b21\u3002"));
       return;
     }
+    QStringList names;
+    for (const auto& batch : batches)
+      names << batch.toObject().value("name").toString();
+    bool confirmed = false;
+    const auto selected = QInputDialog::getItem(this, title,
+        QStringLiteral("\u9009\u62e9\u8981\u6e05\u9664\u7684\u6620\u5c04\u6279\u6b21"), names, 0, false, &confirmed);
+    if (!confirmed) return;
+    const int index = names.indexOf(selected);
+    if (index < 0) return;
+    batches.removeAt(index);
+    if (!goldwindWriteBatches(this, batches)) return;
     refreshMapping();
   });
   connect(goldwindImport, &QPushButton::clicked, this, [this, refreshMapping]() {
@@ -298,30 +376,58 @@ $layoutReplacement = @'
                            QString::fromUtf8("未找到有效映射。XLSX 需要原始字段和中文含义，CSV 需要 raw_tag 和 cn_name。"));
       return;
     }
-    if (QMessageBox::question(this, QString::fromUtf8("确认全部替换"),
-          QString::fromUtf8("将使用新文件的 %1 条标签完全替换当前映射。未包含的旧标签不再显示中文。是否继续？").arg(checked.size()),
-          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (!QDir().mkpath(dir))
+    const auto title = QStringLiteral("\u5bfc\u5165\u4e2d\u6587\u6620\u5c04");
+    QString error;
+    auto batches = goldwindReadBatches(&error);
+    if (!error.isEmpty())
     {
-      QMessageBox::warning(this, QString::fromUtf8("导入失败"), QString::fromUtf8("无法创建配置目录"));
+      QMessageBox::warning(this, title, error);
       return;
     }
-    QSaveFile output(goldwindMappingPath());
-    if (!output.open(QIODevice::WriteOnly | QIODevice::Text))
+    QStringList names;
+    for (const auto& batch : batches)
+      names << batch.toObject().value("name").toString();
+    const QString base = QFileInfo(path).completeBaseName();
+    QString name = base;
+    for (int suffix = 2; names.contains(name, Qt::CaseInsensitive); ++suffix)
+      name = QStringLiteral("%1 (%2)").arg(base).arg(suffix);
+    while (true)
     {
-      QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
-      return;
+      bool confirmed = false;
+      name = QInputDialog::getText(this, title, QStringLiteral("\u6620\u5c04\u6279\u6b21\u540d\u79f0"),
+                                  QLineEdit::Normal, name, &confirmed).trimmed();
+      if (!confirmed) return;
+      if (!name.isEmpty() && !names.contains(name, Qt::CaseInsensitive)) break;
+      QMessageBox::warning(this, title, QStringLiteral("\u8bf7\u8f93\u5165\u975e\u7a7a\u4e14\u4e0d\u91cd\u590d\u7684\u6279\u6b21\u540d\u79f0\u3002"));
     }
-    const auto bytes=QJsonDocument(checked).toJson(QJsonDocument::Compact);
-    if (output.write(bytes)!=bytes.size() || !output.commit())
+    const auto existing = goldwindEffectiveMapping(batches);
+    int duplicates = 0;
+    for (auto it = checked.begin(); it != checked.end(); ++it)
+      if (existing.contains(it.key())) ++duplicates;
+
+    bool replace = true;
+    if (duplicates > 0)
     {
-      QMessageBox::warning(this, QString::fromUtf8("导入失败"), output.errorString());
-      return;
+      QMessageBox conflict(QMessageBox::Question, title,
+          QStringLiteral("\u53d1\u73b0 %1 \u6761\u91cd\u590d\u6d4b\u70b9\uff0c\u8bf7\u9009\u62e9\u4f7f\u7528\u54ea\u4e00\u6279\u7684\u6620\u5c04\u3002").arg(duplicates),
+          QMessageBox::NoButton, this);
+      auto* useNew = conflict.addButton(QStringLiteral("\u66ff\u6362\u91cd\u590d\u6620\u5c04"), QMessageBox::AcceptRole);
+      auto* keep = conflict.addButton(QStringLiteral("\u4fdd\u7559\u5df2\u6709\u6620\u5c04"), QMessageBox::RejectRole);
+      auto* cancel = conflict.addButton(QStringLiteral("\u53d6\u6d88\u5bfc\u5165"), QMessageBox::RejectRole);
+      conflict.setDefaultButton(keep);
+      conflict.setEscapeButton(cancel);
+      conflict.exec();
+      if (conflict.clickedButton() != keep && conflict.clickedButton() != useNew) return;
+      replace = conflict.clickedButton() == useNew;
     }
+    const auto batch = goldwindBatch(name, checked);
+    if (replace) batches.append(batch);
+    else batches.prepend(batch);
+    if (!goldwindWriteBatches(this, batches)) return;
     refreshMapping();
-    QMessageBox::information(this, QString::fromUtf8("导入成功"),
-                             QString::fromUtf8("已全部替换为 %1 条标签映射（文件类型或编码：%2）").arg(checked.size()).arg(detectedEncoding));
+    QMessageBox::information(this, title,
+        QStringLiteral("\u5df2\u5bfc\u5165\u6279\u6b21\u300c%1\u300d\uff0c%2 \u6761\u6620\u5c04\uff08%3\uff09\u3002")
+            .arg(name).arg(checked.size()).arg(detectedEncoding));
   });
   layout1->addWidget(_tree_view, 1);
   connect(goldwindMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -385,6 +491,7 @@ $localizationReplacement = @'
       aliases.insert(it.key(), it.value());
     QCoreApplication::instance()->setProperty("bladeScopeTagAliases", aliases);
   }
+  goldwindReloadSearchAliases();
   // Real leading search icon/action, independent of placeholder text.
   auto* goldwindSearchIcon = new QAction(QString::fromUtf8("⌕"), ui->lineEditFilter);
   QPixmap goldwindSearchPixmap(18, 18);
@@ -487,24 +594,7 @@ namespace
 {
 QHash<QString, QString>& goldwindSearchAliases()
 {
-  static QHash<QString, QString> aliases = [] {
-    QHash<QString, QString> result;
-    const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
-    QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return result;
-    QTextStream stream(&file);
-    stream.setCodec("UTF-8");
-    while (!stream.atEnd())
-    {
-      const QString line = stream.readLine();
-      const int comma = line.indexOf(',');
-      if (comma <= 0) continue;
-      const QString key = line.left(comma).trimmed();
-      const QString value = line.mid(comma + 1).trimmed();
-      if (!key.isEmpty() && !value.isEmpty()) result.insert(key, value);
-    }
-    return result;
-  }();
+  static QHash<QString, QString> aliases;
   return aliases;
 }
 bool isCurveItem(
@@ -524,20 +614,9 @@ void goldwindReloadSearchAliases()
 {
   auto& aliases = goldwindSearchAliases();
   aliases.clear();
-  const QString userMap = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gw_tag_mapping.csv";
-  QFile file(QFile::exists(userMap) ? userMap : QCoreApplication::applicationDirPath() + "/gw_tag_mapping.csv");
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
-  QTextStream stream(&file);
-  stream.setCodec("UTF-8");
-  while (!stream.atEnd())
-  {
-    const QString line = stream.readLine();
-    const int comma = line.indexOf(',');
-    if (comma <= 0) continue;
-    const QString key = line.left(comma).trimmed();
-    const QString value = line.mid(comma + 1).trimmed();
-    if (!key.isEmpty() && !value.isEmpty()) aliases.insert(key, value);
-  }
+  const auto values = QCoreApplication::instance()->property("bladeScopeTagAliases").toMap();
+  for (auto it = values.begin(); it != values.end(); ++it)
+    aliases.insert(it.key(), it.value().toString());
 }
 '@
 if (!$treeSrc.Contains($reloadAnchor)) { throw "Missing tree namespace end" }
@@ -649,18 +728,9 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
   bladeSettingsMenu->addAction(ui->actionPreferences);
   bladeSettingsMenu->addAction(ui->actionColorMap_Editor);
   auto* themeMenu = bladeSettingsMenu->addMenu(QString::fromUtf8("界面主题"));
-  QStringList themeNames = {QString::fromUtf8("暖橙奶油（默认）"), QString::fromUtf8("清爽海蓝"), QString::fromUtf8("极简灰白"), QString::fromUtf8("雅致香槟"), QString::fromUtf8("柔和深色")};
-  QList<QStringList> palettes = {
-    QStringList{"#f7f1eb","#fffdfa","#fffaf5","#49382d","#c98250","#f8e8da","#ffffff","#fdfdfd","#49382d","#e6e9ec"},
-    QStringList{"#edf3f8","#fbfdff","#f7fbff","#29445d","#648fb2","#e8f2fa","#ffffff","#fcfdff","#29445d","#e4eaf0"},
-    QStringList{"#f0f1ef","#ffffff","#fafbfa","#3d4540","#8c998f","#edf0ed","#ffffff","#fdfefe","#3d4540","#e5e9e6"},
-    QStringList{"#f3efe9","#fffdf9","#fcf8f2","#514538","#aa8b65","#f2e9dc","#ffffff","#fdfdfd","#514538","#e9e5df"},
-    QStringList{"#202b38","#273443","#263342","#e8edf2","#d18b58","#435466","#edf2f6","#e3eaf1","#35485b","#c5d1dc"}};
-  const int firstPurpleInterface = themeNames.size();
-  for (const auto& entry : BladePlotTheme::purplePalettes()) {
-    themeNames << entry.name;
+  QList<QStringList> palettes;
+  for (const auto& entry : BladePlotTheme::themePalettes())
     palettes << entry.colors;
-  }
   const QString styleTemplate = QString::fromUtf8(
     "QMainWindow,QWidget{background:%1;color:%4;font-size:9pt;}"
     "QFrame#leftMainWindowFrame{background:%2;border-right:1px solid %6;}"
@@ -721,7 +791,7 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
             "QToolButton:checked:enabled,QToolButton:hover:enabled{color:#241b14;}") : QString());
   }
   auto* themeSettings = new QSettings("BladeScope", "BladeScope", this);
-  auto applyBladeTheme = [this, themeSettings, themeStyles, palettes, firstPurpleInterface](int index) {
+  auto applyBladeTheme = [this, themeSettings, themeStyles, palettes](int index) {
     if (index < 0 || index >= themeStyles.size()) index = 0;
     const auto p = palettes[index];
     const bool dark = QColor(p[0]).lightness() < 128;
@@ -766,16 +836,17 @@ $mainSrc = $mainSrc.Replace($mainUiAnchor, @'
         ++itemIt;
       }
     }
-    const int plotPreset = index >= firstPurpleInterface
-        ? BladePlotTheme::firstPurplePreset + index - firstPurpleInterface : 0;
-    BladePlotTheme::interfaceChanged(dark, plotPreset);
+    BladePlotTheme::interfaceChanged(dark, BladePlotTheme::firstCatalogPreset + index);
     BladePlotTheme::refreshButtonIcons(this, dark);
     themeSettings->setValue("appearance/theme_index", index);
     themeSettings->sync();
   };
-  for (int i = 0; i < themeNames.size(); ++i) {
-    if (i == firstPurpleInterface) themeMenu->addSeparator();
-    QAction* themeAction = themeMenu->addAction(themeNames[i]);
+  auto* solidThemes = themeMenu->addMenu(QStringLiteral("\u7eaf\u8272\u4e3b\u9898"));
+  auto* gradientThemes = themeMenu->addMenu(QStringLiteral("\u6e10\u53d8\u4e3b\u9898"));
+  const auto& catalog = BladePlotTheme::themePalettes();
+  for (int i = 0; i < int(catalog.size()); ++i) {
+    auto* group = i < BladePlotTheme::solidPaletteCount ? solidThemes : gradientThemes;
+    QAction* themeAction = group->addAction(catalog[i].name);
     connect(themeAction, &QAction::triggered, this, [applyBladeTheme, i]() { applyBladeTheme(i); });
   }
   applyBladeTheme(themeSettings->value("appearance/theme_index", 0).toInt());
@@ -1748,10 +1819,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.5"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.6"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.5") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.6") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.

@@ -77,16 +77,21 @@ struct Theme
   std::array<QColor, 2> gridColor = {{ QColor("#805a738a"), QColor("#805a738a") }};
 };
 
-struct PurplePalette
+struct ThemePalette
 {
   QString name;
   QStringList colors;
 };
 
-inline const std::array<PurplePalette, 4>& purplePalettes()
+inline const std::array<ThemePalette, 17>& themePalettes()
 {
   // Window, input, toolbar, text, accent, border, plot top, plot bottom, axis ink, grid.
-  static const std::array<PurplePalette, 4> palettes = {{
+  static const std::array<ThemePalette, 4> palettes = {{
+    { QStringLiteral("\u7eb8\u767d"), { "#f1f3f5", "#ffffff", "#f7f8fa", "#18202a", "#c8d9ee", "#c4ccd5", "#ffffff", "#ffffff", "#273544", "#8998a8" } },
+    { QStringLiteral("\u96fe\u7070"), { "#e6e9ee", "#f3f4f6", "#eceff3", "#20262f", "#bfcbd8", "#aebac7", "#f1f3f6", "#f1f3f6", "#344454", "#8594a5" } },
+    { QStringLiteral("\u9759\u84dd"), { "#e7edf4", "#f2f7fc", "#eef4fa", "#182c40", "#b6cce5", "#b6c8da", "#edf4fc", "#edf4fc", "#304967", "#7d9cbb" } },
+    { QStringLiteral("\u6696\u7c73"), { "#efe9df", "#fcf8ef", "#f6f0e6", "#31261a", "#e0c6a3", "#cdbda8", "#f9f4ea", "#f9f4ea", "#4d3928", "#a29379" } },
+    { QStringLiteral("\u77f3\u58a8"), { "#252a31", "#303743", "#2a313b", "#eef2f7", "#a5c3dc", "#566272", "#3d4958", "#3d4958", "#f2f6fc", "#a3bacf" } },
     { QStringLiteral("\u9752\u86e4\u58f3\u7d2b \u00b7 \u96ea\u5c71\u767d"), { "#f1e9ef", "#f8f8f8", "#fcf8fb", "#322135", "#bc84a8", "#cfb8c8",
                              "#ead7e3", "#f8f8f8", "#452d45", "#836379" } },
     { QStringLiteral("\u85b0\u8863\u8349\u7d2b \u00b7 \u94f6\u767d"), { "#eae4f2", "#f1f0ed", "#faf8fd", "#2d2343", "#b89ad9", "#c9b9dc",
@@ -94,12 +99,21 @@ inline const std::array<PurplePalette, 4>& purplePalettes()
     { QStringLiteral("\u85e4\u841d\u7d2b \u00b7 \u6c49\u767d\u7389"), { "#e8e3eb", "#f8f4ed", "#fcf9f5", "#100c1a", "#8076a3", "#b6adc8",
                              "#ddd6e6", "#f8f4ed", "#392e50", "#75688d" } },
     { QStringLiteral("\u8c46\u853b\u7d2b \u00b7 \u9c7c\u809a\u767d"), { "#f0e3e9", "#f7f4ed", "#fdf8f8", "#150c16", "#ad6598", "#c9a6bd",
-                             "#e8cfe0", "#f7f4ed", "#452641", "#895e7d" } }
+                             "#e8cfe0", "#f7f4ed", "#452641", "#895e7d" } },
+    { QStringLiteral("\u6d77\u6cab \u00b7 \u5976\u6cb9"), { "#dfe3d7", "#fff0de", "#f1eadb", "#201b29", "#adcecb", "#c8d9d1", "#6fb4bc", "#fff0de", "#242032", "#578590" } },
+    { QStringLiteral("\u66ae\u7d2b \u00b7 \u6d45\u6a31"), { "#e4ced6", "#ffe6e3", "#f3dbdd", "#201b29", "#b8a8c1", "#d0bdcd", "#8379a8", "#ffe6e3", "#141021", "#655d82" } },
+    { QStringLiteral("\u8537\u8587 \u00b7 \u51b0\u9752"), { "#dfe0ec", "#e3fdff", "#e1f0f7", "#201b29", "#d9b2cf", "#dccbdf", "#d17aaa", "#e3fdff", "#242032", "#9a5d84" } },
+    { QStringLiteral("\u82d4\u7eff \u00b7 \u8584\u8377"), { "#d4ead6", "#e3fff3", "#dcf5e6", "#201b29", "#bcc8a7", "#c9dac0", "#9f9e6d", "#e3fff3", "#242032", "#78765a" } },
+    { QStringLiteral("\u7816\u7ea2 \u00b7 \u674f\u971c"), { "#e5c9bc", "#fff0df", "#f3decf", "#201b29", "#bc8b84", "#d3ada2", "#c89d94", "#fff0df", "#242032", "#69353b" } },
+    { QStringLiteral("\u9e22\u5c3e \u00b7 \u5ae9\u7eff"), { "#d0dfd6", "#e4f6da", "#dbebd8", "#201b29", "#b0bacf", "#c1ced3", "#898cc7", "#e4f6da", "#242032", "#696997" } },
+    { QStringLiteral("\u96fe\u84dd \u00b7 \u6de1\u7d2b"), { "#e2d9f1", "#fce5ff", "#f0e0f9", "#201b29", "#b9c6da", "#d0d0e6", "#87aebe", "#fce5ff", "#242032", "#678191" } },
+    { QStringLiteral("\u9752\u53f6 \u00b7 \u871c\u6843"), { "#e3decc", "#ffe8de", "#f2e4d6", "#201b29", "#b6ceae", "#ced7be", "#7fbb8a", "#ffe8de", "#242032", "#62896e" } }
   }};
   return palettes;
 }
 
-inline constexpr int firstPurplePreset = 3;
+inline constexpr int firstCatalogPreset = 3;
+inline constexpr int solidPaletteCount = 5;
 
 inline Theme preset(int index)
 {
@@ -114,11 +128,11 @@ inline Theme preset(int index)
   }
   if (index == 2)
     t.mode = Mirror;
-  const int purple = index - firstPurplePreset;
-  if (purple >= 0 && purple < int(purplePalettes().size()))
+  const int palette = index - firstCatalogPreset;
+  if (palette >= 0 && palette < int(themePalettes().size()))
   {
-    const auto& colors = purplePalettes()[purple].colors;
-    t.mode = Linear;
+    const auto& colors = themePalettes()[palette].colors;
+    t.mode = palette < solidPaletteCount ? Solid : Linear;
     t.solid = QColor(colors[7]);
     t.stops = {{ 0.0, QColor(colors[6]) }, { 1.0, t.solid }};
     const QColor ink(colors[8]);
@@ -511,12 +525,12 @@ inline bool& customized()
   return value;
 }
 
-inline void interfaceChanged(bool dark, int plotPreset = 0)
+inline void interfaceChanged(bool dark, int plotPreset = -1)
 {
   qApp->setProperty("bladeScopeDarkInterface", dark);
   if (!customized())
   {
-    auto theme = preset(dark ? 1 : plotPreset);
+    auto theme = preset(plotPreset >= 0 ? plotPreset : dark ? 1 : firstCatalogPreset);
     theme.grid = current().grid;
     if (activeBackground(current()) != activeBackground(theme))
       ++backgroundRevision();
@@ -659,16 +673,23 @@ public:
     setWindowTitle(QString::fromUtf8("绘图主题调色盘"));
     auto* layout = new QVBoxLayout(this);
     auto* presets = new QFormLayout;
-    auto* library = new QComboBox;
-    library->setPlaceholderText(QStringLiteral("\u9009\u62e9\u5185\u7f6e\u4e3b\u9898"));
-    library->addItems({QString::fromUtf8("办公纯色白底"), QString::fromUtf8("深色线性渐变"),
-                       QString::fromUtf8("中心聚焦镜像渐变")});
-    for (const auto& entry : purplePalettes())
-      library->addItem(entry.name);
-    library->setCurrentIndex(-1);
-    presets->addRow(QStringLiteral("\u4e3b\u9898\u5e93"), library);
-    connect(library, QOverload<int>::of(&QComboBox::activated), this,
-            [this](int index) { load(preset(index)); });
+    const auto addLibrary = [this, presets](const QString& title, int first, int last) {
+      auto* library = new QComboBox;
+      library->setPlaceholderText(QStringLiteral("\u9009\u62e9\u5185\u7f6e\u4e3b\u9898"));
+      for (int i = first; i < last; ++i)
+        library->addItem(themePalettes()[i].name, firstCatalogPreset + i);
+      if (first == solidPaletteCount)
+      {
+        library->addItem(QStringLiteral("\u6df1\u8272\u7ebf\u6027\u6e10\u53d8"), 1);
+        library->addItem(QStringLiteral("\u4e2d\u5fc3\u805a\u7126\u955c\u50cf\u6e10\u53d8"), 2);
+      }
+      library->setCurrentIndex(-1);
+      presets->addRow(title, library);
+      connect(library, QOverload<int>::of(&QComboBox::activated), this,
+              [this, library](int index) { load(preset(library->itemData(index).toInt())); });
+    };
+    addLibrary(QStringLiteral("\u7eaf\u8272\u4e3b\u9898"), 0, solidPaletteCount);
+    addLibrary(QStringLiteral("\u6e10\u53d8\u4e3b\u9898"), solidPaletteCount, int(themePalettes().size()));
     layout->addLayout(presets);
 
     auto* scroll = new QScrollArea;
@@ -805,7 +826,7 @@ public:
       else
         QMessageBox::warning(this, windowTitle(), QString::fromUtf8("主题文件无法读取，或版本不受支持。"));
     });
-    button(actions, QString::fromUtf8("恢复默认"), [this] { load(preset(0)); });
+    button(actions, QString::fromUtf8("恢复默认"), [this] { load(preset(firstCatalogPreset)); });
     button(actions, QString::fromUtf8("关闭"), [this] { close(); });
     layout->addLayout(actions);
     connect(mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int m) {
