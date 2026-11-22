@@ -102,6 +102,42 @@ inline Points average(const Points& p, size_t width)
   return out;
 }
 
+inline Points movingLeastSquares(Points points, size_t neighbors)
+{
+  if (points.size() < 2 || neighbors < 2)
+    throw std::runtime_error("局部拟合至少需要两个有效配对点");
+  std::stable_sort(points.begin(), points.end(), [](Point a, Point b) { return a.x < b.x; });
+  if (points.front().x == points.back().x)
+    throw std::runtime_error("局部拟合需要不同的 X 值");
+  const size_t count = std::min(neighbors, points.size());
+  return sample(points.front().x, points.back().x, [&](double x) {
+    const auto split = std::lower_bound(points.begin(), points.end(), x,
+        [](Point point, double value) { return point.x < value; });
+    size_t first = size_t(split - points.begin()), end = first;
+    while (end - first < count)
+    {
+      if (first && (end == points.size() || x - points[first-1].x <= points[end].x - x))
+        --first;
+      else
+        ++end;
+    }
+    const auto radius = std::max(x - points[first].x, points[end-1].x - x);
+    long double weight = 0, meanX = 0, meanY = 0, xx = 0, xy = 0;
+    for (size_t i = first; i < end; ++i)
+    {
+      const long double offset = radius > 0 ? (points[i].x - x) / radius : 0;
+      const long double w = 1 / (1 + offset * offset);
+      weight += w;
+      const long double dx = offset - meanX, dy = points[i].y - meanY;
+      meanX += w * dx / weight;
+      meanY += w * dy / weight;
+      xx += w * dx * (offset - meanX);
+      xy += w * dx * (points[i].y - meanY);
+    }
+    return double(xx > 1e-12L * weight ? meanY - (xy / xx) * meanX : meanY);
+  });
+}
+
 enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
             Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, NRoles };
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,

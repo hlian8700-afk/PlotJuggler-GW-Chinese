@@ -54,6 +54,13 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   model.addItem(QStringLiteral("散点"), 0);
   for (int degree = 1; degree <= 6; ++degree)
     model.addItem(QStringLiteral("%1 阶多项式").arg(degree), degree);
+  model.addItem(QStringLiteral("移动最小二乘"), -1);
+  QSpinBox neighbors;
+  neighbors.setRange(3, 5000);
+  neighbors.setValue(41);
+  neighbors.setEnabled(false);
+  QObject::connect(&model, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog,
+                   [&](int) { neighbors.setEnabled(model.currentData().toInt() < 0); });
   QDoubleSpinBox tolerance;
   tolerance.setRange(0., 3600.);
   tolerance.setDecimals(6);
@@ -62,6 +69,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   parameters.addRow(QStringLiteral("Y 测点"), &y);
   parameters.addRow(QStringLiteral("配对容差（秒）"), &tolerance);
   parameters.addRow(QStringLiteral("拟合模型"), &model);
+  parameters.addRow(QStringLiteral("局部邻点数"), &neighbors);
   parameters.addRow(&difference);
   auto* plot = new PlotWidget(plotted, &dialog);
   layout.addWidget(plot, 3);
@@ -124,7 +132,20 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     if (difference.isChecked())
       BladeAnalysis::appendStatistics(rows, QStringLiteral("Y−X"), differenceStats, &differenceValues);
 
-    if (degree && !pairs.empty())
+    if (degree < 0 && !pairs.empty())
+    {
+      try
+      {
+        fitted = BladeFit::movingLeastSquares(pairs, size_t(neighbors.value()));
+        rows << QStringLiteral("移动最小二乘：每个位置最多 %1 个邻点，生成 %2 个拟合点")
+                    .arg(neighbors.value()).arg(qulonglong(fitted.size()));
+      }
+      catch (const std::exception& error)
+      {
+        rows << QStringLiteral("拟合不可用：%1").arg(QString::fromUtf8(error.what()));
+      }
+    }
+    if (degree > 0 && !pairs.empty())
     {
       try
       {
