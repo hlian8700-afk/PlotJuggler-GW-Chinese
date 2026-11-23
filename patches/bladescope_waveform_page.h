@@ -164,6 +164,14 @@ public:
     connect(comparison, &QPushButton::clicked, this, [this] { showComparison(); });
     auto* trend = new QPushButton(QStringLiteral("时序趋势拟合"), analysisControls);
     analysisLayout->addWidget(trend);
+    auto* projectActions = new QHBoxLayout;
+    analysisLayout->addLayout(projectActions);
+    auto* saveProject = new QPushButton(QStringLiteral("保存工程"), analysisControls);
+    auto* openProject = new QPushButton(QStringLiteral("打开工程"), analysisControls);
+    projectActions->addWidget(saveProject);
+    projectActions->addWidget(openProject);
+    connect(saveProject, &QPushButton::clicked, this, [this] { saveWaveformProject(); });
+    connect(openProject, &QPushButton::clicked, this, [this] { openWaveformProject(); });
     side->addWidget(analysisControls);
     connect(trend, &QPushButton::clicked, this, [this] { showTrend(); });
     connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
@@ -432,6 +440,142 @@ private:
     double threshold;
     bool enabled = true;
   };
+  void saveWaveformProject()
+  {
+    QStringList fields = plottedFields;
+    if (fields.isEmpty())
+      for (int i = 0; i < tags->count(); ++i)
+        if (tags->item(i)->checkState() == Qt::Checked)
+          fields << tags->item(i)->data(Qt::UserRole).toString();
+    if (fields.isEmpty() || fields.size() > 16)
+    {
+      QMessageBox::warning(this, QStringLiteral("保存工程"), QStringLiteral("请选择 1 至 16 个测点。"));
+      return;
+    }
+    const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("保存录波工程"),
+        QStringLiteral("录波工程.json"), QStringLiteral("JSON 文件 (*.json)"));
+    if (path.isEmpty()) return;
+    QJsonArray filters;
+    for (const auto& condition : conditions)
+      filters.append(QJsonObject{{QStringLiteral("channel"), condition.channel}, {QStringLiteral("operation"), condition.operation},
+                                {QStringLiteral("threshold"), condition.threshold}, {QStringLiteral("enabled"), condition.enabled}});
+    const QJsonObject document{
+      {QStringLiteral("format"), QStringLiteral("BladeScopeWaveformProject")}, {QStringLiteral("version"), 1},
+      {QStringLiteral("fields"), QJsonArray::fromStringList(fields)}, {QStringLiteral("view"), view->currentIndex()},
+      {QStringLiteral("style"), style->currentIndex()}, {QStringLiteral("filterEnabled"), filterEnabled},
+      {QStringLiteral("tolerance"), matchTolerance}, {QStringLiteral("conditions"), filters},
+      {QStringLiteral("start"), startEnabled->isChecked() ? start->dateTime().toUTC().toString(Qt::ISODateWithMs) : QString()},
+      {QStringLiteral("end"), endEnabled->isChecked() ? end->dateTime().toUTC().toString(Qt::ISODateWithMs) : QString()}
+    };
+    const auto bytes = QJsonDocument(document).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+      QMessageBox::warning(this, QStringLiteral("保存工程"), file.errorString());
+  }
+
+  void openWaveformProject()
+  {
+    const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("打开录波工程"), {},
+        QStringLiteral("JSON 文件 (*.json)"));
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+      QMessageBox::warning(this, QStringLiteral("打开工程"), file.errorString());
+      return;
+    }
+    const auto document = QJsonDocument::fromJson(file.readAll()).object();
+    const auto fail = [&](const QString& message) {
+      QMessageBox::warning(this, QStringLiteral("打开工程"), message);
+    };
+    if (document.value(QStringLiteral("format")).toString() != QStringLiteral("BladeScopeWaveformProject") ||
+        document.value(QStringLiteral("version")).toInt() != 1 || !document.value(QStringLiteral("fields")).isArray() ||
+        !document.value(QStringLiteral("conditions")).isArray())
+    {
+      fail(QStringLiteral("无法识别该录波工程格式。"));
+      return;
+    }
+    const auto viewIndex = document.value(QStringLiteral("view")).toInt(-1);
+    const auto styleIndex = document.value(QStringLiteral("style")).toInt(-1);
+    const double tolerance = document.value(QStringLiteral("tolerance")).toDouble(-1.0);
+    const bool filtering = document.value(QStringLiteral("filterEnabled")).toBool(true);
+    const auto first = document.value(QStringLiteral("start")).toString();
+    const auto last = document.value(QStringLiteral("end")).toString();
+    const auto firstTime = QDateTime::fromString(first, Qt::ISODateWithMs).toUTC();
+    const auto lastTime = QDateTime::fromString(last, Qt::ISODateWithMs).toUTC();
+    if (viewIndex < 0 || viewIndex >= view->count() || styleIndex < 0 || styleIndex >= style->count() ||
+        !std::isfinite(tolerance) || tolerance < 0.0 ||
+        (!first.isEmpty() && (!firstTime.isValid() || firstTime < start->minimumDateTime() || firstTime > start->maximumDateTime())) ||
+        (!last.isEmpty() && (!lastTime.isValid() || lastTime < end->minimumDateTime() || lastTime > end->maximumDateTime())) ||
+        (firstTime.isValid() && lastTime.isValid() && firstTime > lastTime))
+    {
+      fail(QStringLiteral("工程的显示、时间或筛选参数无效。"));
+      return;
+    }
+    QStringList fields, missing;
+    const auto hasSamples = [&](const QString& name) {
+      const auto it = source.numeric.find(name.toStdString());
+      return it != source.numeric.end() && it->second.size() != 0;
+    };
+    for (const auto item : document.value(QStringLiteral("fields")).toArray())
+    {
+      const auto name = item.toString();
+      if (name.isEmpty() || fields.contains(name))
+      {
+        fail(QStringLiteral("工程含有空测点或重复测点。"));
+        return;
+      }
+      fields << name;
+      if (!hasSamples(name)) missing << name;
+    }
+    QVector<Condition> restored;
+    for (const auto item : document.value(QStringLiteral("conditions")).toArray())
+    {
+      const auto record = item.toObject();
+      const auto name = record.value(QStringLiteral("channel")).toString();
+      const auto op = record.value(QStringLiteral("operation")).toInt(-1);
+      const auto threshold = record.value(QStringLiteral("threshold")).toDouble(std::numeric_limits<double>::quiet_NaN());
+      const bool enabled = record.value(QStringLiteral("enabled")).toBool(true);
+      if (name.isEmpty() || op < 0 || op > 3 || !std::isfinite(threshold))
+      {
+        fail(QStringLiteral("工程含有无效的筛选条件。"));
+        return;
+      }
+      if (enabled && filtering && !hasSamples(name)) missing << name;
+      restored.push_back({name, op, threshold, enabled});
+    }
+    if (fields.isEmpty() || fields.size() > 16)
+    {
+      fail(QStringLiteral("工程应包含 1 至 16 个测点。"));
+      return;
+    }
+    missing.removeDuplicates();
+    if (!missing.isEmpty())
+    {
+      fail(QStringLiteral("请先载入所需录波。缺少测点：%1").arg(missing.join(QStringLiteral("、"))));
+      return;
+    }
+
+    const QSignalBlocker blockView(view), blockStyle(style);
+    view->setCurrentIndex(viewIndex);
+    style->setCurrentIndex(styleIndex);
+    if (firstTime.isValid()) start->setDateTime(firstTime);
+    if (lastTime.isValid()) end->setDateTime(lastTime);
+    startEnabled->setChecked(firstTime.isValid());
+    endEnabled->setChecked(lastTime.isValid());
+    conditions = std::move(restored);
+    matchTolerance = tolerance;
+    filterEnabled = filtering;
+    groups->setCurrentIndex(0);
+    refreshTags();
+    for (int i = 0; i < tags->count(); ++i)
+    {
+      auto* item = tags->item(i);
+      item->setCheckState(fields.contains(item->data(Qt::UserRole).toString()) ? Qt::Checked : Qt::Unchecked);
+    }
+    draw(fields);
+  }
+
   struct Summary
   {
     BladeAnalysis::Statistics source, retained;
