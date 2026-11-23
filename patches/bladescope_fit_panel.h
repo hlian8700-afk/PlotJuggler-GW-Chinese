@@ -1,6 +1,9 @@
 #pragma once
 #include "bladescope_trend.h"
 #include "bladescope_fit_xlsx.h"
+#include <QHelpEvent>
+#include <QToolTip>
+#include "bladescope_time_display.h"
 #include <QSaveFile>
 #include "qwt_plot_picker.h"
 #include "qwt_picker_machine.h"
@@ -194,6 +197,7 @@ class Panel : public QWidget
   AnalysisPlot* plot=nullptr;
   QComboBox *kind,*select,*roseMetric;
   QCheckBox *density;
+  QComboBox* sampleStyle;
   QLabel* status;
   QWidget* canvas;
   QToolButton* poolMenu;
@@ -700,7 +704,9 @@ class Panel : public QWidget
           auto v=r.density.at(tile(a));colors[v<5?0:v<20?1:v<100?2:3].push_back({a.x,a.y});
         }else raw.push_back({a.x,a.y});
       }
-      layer(QStringLiteral("实测散点"),raw,2,QColor("#538cbc"),QwtPlotCurve::Dots);
+      const bool lines = sampleStyle->currentIndex() == 1;
+      layer(lines ? QStringLiteral("实测折线") : QStringLiteral("实测散点"),
+            raw,2,QColor("#538cbc"),lines ? QwtPlotCurve::Lines : QwtPlotCurve::Dots);
       const QColor palette[]={QColor("#6686b8"),QColor("#3ba99b"),QColor("#dc9b3c"),QColor("#d6534a")};
       for(int i=0;i<4;++i)layer(QStringLiteral("密度 %1").arg(i+1),colors[i],2,palette[i],QwtPlotCurve::Dots);
       layer(QStringLiteral("已标注"),marked,2,QColor("#d91d86"),QwtPlotCurve::Dots);
@@ -843,6 +849,35 @@ class Panel : public QWidget
 protected:
   bool eventFilter(QObject* watched,QEvent* event) override
   {
+    if (watched==canvas && event->type()==QEvent::ToolTip)
+    {
+      auto* help=static_cast<QHelpEvent*>(event);
+      const Record* nearest=nullptr;
+      double best=64.0;
+      if (active && !select->currentIndex() && visibleLayers[2] && displayKind!=M02 && displayKind!=M11)
+      {
+        auto* chart=plot->qwtPlot();
+        for (const auto index : active->display)
+        {
+          const auto& point=active->raw[index];
+          const double dx=chart->transform(QwtPlot::xBottom,point.x)-help->pos().x();
+          const double dy=chart->transform(QwtPlot::yLeft,point.y)-help->pos().y();
+          const double distance=dx*dx+dy*dy;
+          if (distance<best) {best=distance;nearest=&point;}
+        }
+      }
+      if (!nearest) QToolTip::hideText();
+      else
+      {
+        const bool calendar=BladeTimeDisplay::isCalendarTime(nearest->t);
+        const auto time=BladeTimeDisplay::format(nearest->t,calendar,calendar,calendar,
+            BladeTimeDisplay::precision()==BladeTimeDisplay::Seconds ? 0 : 3);
+        const auto names=axes(displayKind);
+        QToolTip::showText(help->globalPos(),QStringLiteral("%1：%2\n%3：%4\n时间：%5")
+            .arg(names.value(0), num(nearest->x), names.value(1), num(nearest->y), time),canvas);
+      }
+      return true;
+    }
     if(watched==canvas&&select->currentIndex()&&active &&displayKind!=M02&&displayKind!=M11){
       if(event->type()==QEvent::MouseButtonPress){
         auto* e=static_cast<QMouseEvent*>(event);if(e->button()!=Qt::LeftButton)return false;
@@ -890,7 +925,17 @@ public:
       auto old=std::move(undoStack.back());undoStack.pop_back();current->excluded=std::move(old.first);current->marked=std::move(old.second);current->cache.clear();calculate();});
     for(int i=0;i<4;++i){auto* c=new QCheckBox(QStringList{"参考","分箱","散点","拟合 / 对比"}[i]);c->setChecked(true);tools->addWidget(c);
       connect(c,&QCheckBox::toggled,this,[this,i](bool on){visibleLayers[i]=on;for(auto item:layers)if(item.second==i)item.first->setVisible(on);plot->replot();});}
+    sampleStyle=new QComboBox;
+    sampleStyle->addItems({QStringLiteral("实测散点"),QStringLiteral("实测折线")});
+    tools->addWidget(sampleStyle);
+    connect(sampleStyle,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{if(active) render();});
     density=new QCheckBox("密度着色");tools->addWidget(density);
+    const auto updateSampleStyle=[this]{
+      const auto k=kind->currentIndex();
+      sampleStyle->setEnabled(k!=M02 && k!=M11 && !(k==M12 && density->isChecked()));
+    };
+    connect(kind,qOverload<int>(&QComboBox::currentIndexChanged),this,updateSampleStyle);
+    connect(density,&QCheckBox::toggled,this,updateSampleStyle);
     roseMetric=new QComboBox;roseMetric->addItems({"频率 (%)","平均风速 (m/s)","平均功率 (kW)"});tools->addWidget(roseMetric);
     tools->addStretch();
     auto* out=new QHBoxLayout;layout->addLayout(out);status=new QLabel;status->setObjectName("bladeFitStatus");status->setWordWrap(true);out->addWidget(status,1);

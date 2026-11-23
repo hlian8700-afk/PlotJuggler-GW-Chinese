@@ -2591,3 +2591,71 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
         added_names = mapped_data.getAllNames();
 '@ }
 )
+
+Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
+  @{ Old = '#include "plotwidget.h"'; New = @'
+#include "plotwidget.h"
+#include <QHelpEvent>
+#include <QToolTip>
+'@ }
+  @{ Old = '  menu.addAction(_action_formula);'; New = @'
+  menu.addAction(_action_formula);
+  if (!isXYPlot())
+  {
+    auto* display = menu.addMenu(QStringLiteral("曲线显示"));
+    connect(display->addAction(QStringLiteral("折线")), &QAction::triggered, this, [this] {
+      overrideCurvesStyle(PlotWidgetBase::LINES);
+      replot();
+    });
+    connect(display->addAction(QStringLiteral("散点")), &QAction::triggered, this, [this] {
+      overrideCurvesStyle(PlotWidgetBase::DOTS);
+      replot();
+    });
+  }
+'@ }
+  @{ Old = '  if (PlotWidgetBase::eventFilter(obj, event))'; New = @'
+  if (event->type() == QEvent::ToolTip && !isXYPlot() && obj == qwtPlot()->canvas())
+  {
+    auto* help = static_cast<QHelpEvent*>(event);
+    QString tip;
+    double best = 64.0;
+    for (const auto& entry : curveList())
+    {
+      const auto* curve = entry.curve;
+      if (!curve->isVisible()) continue;
+      const auto xAxis = curve->xAxis();
+      const auto yAxis = curve->yAxis();
+      const double cursor = qwtPlot()->invTransform(xAxis, help->pos().x());
+      size_t lo = 0, hi = curve->dataSize();
+      while (lo < hi)
+      {
+        const size_t mid = lo + (hi - lo) / 2;
+        if (curve->sample(mid).x() < cursor) lo = mid + 1;
+        else hi = mid;
+      }
+      const size_t first = lo > 8 ? lo - 8 : 0;
+      const size_t last = std::min<size_t>(curve->dataSize(), lo + 9);
+      for (size_t i = first; i < last; ++i)
+      {
+        const auto point = curve->sample(i);
+        if (!std::isfinite(point.x()) || !std::isfinite(point.y())) continue;
+        const double dx = qwtPlot()->transform(xAxis, point.x()) - help->pos().x();
+        const double dy = qwtPlot()->transform(yAxis, point.y()) - help->pos().y();
+        const double distance = dx * dx + dy * dy;
+        if (distance >= best) continue;
+        best = distance;
+        const double stamp = point.x() + timeOffset();
+        const bool calendar = BladeTimeDisplay::isCalendarTime(stamp);
+        tip = QStringLiteral("%1\n时间：%2\n数值：%3").arg(curve->title().text(),
+            BladeTimeDisplay::format(stamp, calendar, calendar, calendar,
+                BladeTimeDisplay::precision() == BladeTimeDisplay::Seconds ? 0 : 3),
+            QString::number(point.y(), 'g', 12));
+      }
+    }
+    if (tip.isEmpty()) QToolTip::hideText();
+    else QToolTip::showText(help->globalPos(), tip, qwtPlot()->canvas());
+    return true;
+  }
+  if (PlotWidgetBase::eventFilter(obj, event))
+'@ }
+)
