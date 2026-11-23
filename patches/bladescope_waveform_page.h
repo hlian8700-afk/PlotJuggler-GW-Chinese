@@ -705,7 +705,7 @@ private:
       fitSummary->setText(QStringLiteral("正在拟合…"));
       BladeTrend::background<BladeTrend::Trend>(&dialog, [rows, degree] {
         std::sort(rows->begin(), rows->end(), [](const auto& a, const auto& b) { return a.x < b.x; });
-        return BladeTrend::calculate(*rows, 0, degree, rows->front().x, rows->back().x, QStringLiteral("X"));
+        return BladeTrend::calculate(*rows, 0, degree, 1, rows->front().x, rows->back().x, QStringLiteral("X"));
       }, [&, ticket](BladeTrend::Trend result, const QString& error) {
         if (ticket != revision) return;
         fit->setEnabled(true);
