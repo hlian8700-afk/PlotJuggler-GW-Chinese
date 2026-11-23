@@ -217,7 +217,7 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     const auto imported = payload.toObject();
     QString firstAdded;
     int added = 0;
-    for (auto it = imported.cbegin(); it != imported.cend(); ++it)
+    for (auto it = imported.constBegin(); it != imported.constEnd(); ++it)
     {
       const auto base = it.key().trimmed();
       const auto points = it.value().toArray();
