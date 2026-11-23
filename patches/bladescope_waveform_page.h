@@ -592,31 +592,10 @@ private:
     };
     connect(apply, &QPushButton::clicked, &dialog, redraw);
     connect(difference, &QPushButton::clicked, &dialog, [&] {
-      BladeAnalysis::Statistics summary;
-      std::vector<double> ordered;
-      ordered.reserve(paired.size());
-      for (const auto& point : paired)
-      {
-        const auto delta = point.y - point.x;
-        if (std::isfinite(delta)) { summary.add(delta); ordered.push_back(delta); }
-      }
-      if (ordered.empty()) return;
-      std::sort(ordered.begin(), ordered.end());
-      const auto percentile = [&](double p) {
-        const double rank = p * (ordered.size() - 1);
-        const auto lo = size_t(rank);
-        const double fraction = rank - lo;
-        return BladeAnalysis::number(ordered[lo] * (1 - fraction) +
-            ordered[std::min(lo + 1, ordered.size() - 1)] * fraction);
-      };
-      QMessageBox::information(&dialog, QStringLiteral("Y−X 差值统计"),
-          QStringLiteral("差值要求两测点单位一致。\n有效点 %1\n最小 %2　最大 %3　均值 %4\n标准差 %5　极差 %6\nP05 %7　P25 %8　中位数 %9　P75 %10　P95 %11")
-            .arg(qulonglong(summary.count))
-            .arg(BladeAnalysis::number(summary.low), BladeAnalysis::number(summary.high),
-                 BladeAnalysis::number(summary.mean))
-            .arg(BladeAnalysis::number(std::sqrt(std::max(0.0, summary.m2 / double(summary.count)))),
-                 BladeAnalysis::number(summary.high - summary.low))
-            .arg(percentile(0.05), percentile(0.25), percentile(0.5), percentile(0.75), percentile(0.95)));
+      std::vector<double> values;
+      values.reserve(paired.size());
+      for (const auto& point : paired) values.push_back(point.y - point.x);
+      showDifference(&dialog, std::move(values));
     });
     auto* picker = new QwtPlotPicker(chart->canvas());
     picker->setStateMachine(new QwtPickerTrackerMachine);
@@ -648,6 +627,39 @@ private:
     dialog.exec();
   }
 
+  static void showDifference(QWidget* parent, std::vector<double> values)
+  {
+    values.erase(std::remove_if(values.begin(), values.end(),
+                               [](double value) { return !std::isfinite(value); }), values.end());
+    if (values.empty())
+    {
+      QMessageBox::information(parent, QStringLiteral("差值统计"), QStringLiteral("当前范围内没有可用的配对点。"));
+      return;
+    }
+    BladeAnalysis::Statistics summary;
+    for (const auto value : values) summary.add(value);
+    std::sort(values.begin(), values.end());
+    const auto percentile = [&](double p) {
+      const double rank = p * (values.size() - 1);
+      const auto index = size_t(rank);
+      const double fraction = rank - index;
+      return BladeAnalysis::number(values[index] * (1 - fraction) +
+          values[std::min(index + 1, values.size() - 1)] * fraction);
+    };
+    const auto result = QStringLiteral("有效点 %1\n最小 %2　最大 %3　均值 %4\n标准差 %5　极差 %6\nP05 %7　P25 %8　中位数 %9　P75 %10　P95 %11")
+        .arg(qulonglong(summary.count))
+        .arg(BladeAnalysis::number(summary.low), BladeAnalysis::number(summary.high),
+             BladeAnalysis::number(summary.mean))
+        .arg(BladeAnalysis::number(std::sqrt(std::max(0.0, summary.m2 / double(summary.count)))),
+             BladeAnalysis::number(summary.high - summary.low))
+        .arg(percentile(0.05), percentile(0.25), percentile(0.5), percentile(0.75), percentile(0.95));
+    QMessageBox dialog(QMessageBox::Information, QStringLiteral("Y−X 差值统计"),
+                       QStringLiteral("差值要求两测点单位一致。\n") + result, QMessageBox::Close, parent);
+    auto* copy = dialog.addButton(QStringLiteral("复制统计"), QMessageBox::ActionRole);
+    connect(copy, &QPushButton::clicked, &dialog, [result] { QApplication::clipboard()->setText(result); });
+    dialog.exec();
+  }
+
   void showComparison()
   {
     QStringList fields;
@@ -667,14 +679,14 @@ private:
     root->addLayout(form);
     auto* layoutMode = new QComboBox(&dialog);
     layoutMode->addItems({QStringLiteral("单图双 Y 轴"), QStringLiteral("上下联动图")});
-    auto* left = new QComboBox(&dialog);
-    auto* right = new QComboBox(&dialog);
-    left->addItems(fields);
-    right->addItems(fields);
-    right->setCurrentIndex(1);
+    QStringList left{fields.at(0)}, right{fields.at(1)};
     form->addRow(QStringLiteral("布局"), layoutMode);
-    form->addRow(QStringLiteral("左轴 / 上图"), left);
-    form->addRow(QStringLiteral("右轴 / 下图"), right);
+    auto* configure = new QPushButton(QStringLiteral("配置左右轴测点"), &dialog);
+    auto* difference = new QPushButton(QStringLiteral("差值统计"), &dialog);
+    auto* actions = new QHBoxLayout;
+    actions->addWidget(configure);
+    actions->addWidget(difference);
+    root->addLayout(actions);
 
     auto* upper = new PlotWidget(*shown, &dialog);
     auto* lower = new PlotWidget(*shown, &dialog);
@@ -712,19 +724,20 @@ private:
       upper->removeAllCurves();
       lower->removeAllCurves();
       upperPlot->enableAxis(QwtPlot::yRight, !stacked);
-      upperPlot->setAxisTitle(QwtPlot::yLeft, left->currentText());
-      upperPlot->setAxisTitle(QwtPlot::yRight, right->currentText());
-      lowerPlot->setAxisTitle(QwtPlot::yLeft, right->currentText());
+      upperPlot->setAxisTitle(QwtPlot::yLeft, left.size() == 1 ? left.front() : QStringLiteral("左轴"));
+      upperPlot->setAxisTitle(QwtPlot::yRight, right.size() == 1 ? right.front() : QStringLiteral("右轴"));
+      lowerPlot->setAxisTitle(QwtPlot::yLeft, right.size() == 1 ? right.front() : QStringLiteral("下图"));
       const auto curveStyle = style->currentIndex() ? QwtPlotCurve::Dots : QwtPlotCurve::Lines;
-      if (auto* item = upper->addCurve(left->currentText().toStdString(), QColor(32, 108, 177)))
-        item->curve->setStyle(curveStyle);
-      if (stacked || left->currentIndex() != right->currentIndex())
+      for (int i = 0; i < fields.size(); ++i)
       {
-        auto* target = stacked ? lower : upper;
-        if (auto* item = target->addCurve(right->currentText().toStdString(), QColor(199, 79, 36)))
+        const auto& name = fields.at(i);
+        const bool onRight = right.contains(name);
+        if (!onRight && !left.contains(name)) continue;
+        auto* target = onRight && stacked ? lower : upper;
+        if (auto* item = target->addCurve(name.toStdString(), QColor::fromHsv((210 + i * 137) % 360, 185, 190)))
         {
           item->curve->setStyle(curveStyle);
-          if (!stacked) item->curve->setYAxis(QwtPlot::yRight);
+          if (onRight && !stacked) item->curve->setYAxis(QwtPlot::yRight);
         }
       }
       for (auto* chart : {upperPlot, lowerPlot})
@@ -736,8 +749,83 @@ private:
       }
       syncing = false;
     };
-    for (auto* box : {layoutMode, left, right})
-      connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, redraw);
+    connect(layoutMode, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, redraw);
+    connect(configure, &QPushButton::clicked, &dialog, [&] {
+      QDialog settings(&dialog);
+      settings.setWindowTitle(QStringLiteral("配置左右轴测点"));
+      auto* form = new QFormLayout(&settings);
+      QVector<QComboBox*> assignments;
+      for (const auto& name : fields)
+      {
+        auto* axis = new QComboBox(&settings);
+        axis->addItems({QStringLiteral("不显示"), QStringLiteral("左轴 / 上图"), QStringLiteral("右轴 / 下图")});
+        axis->setCurrentIndex(left.contains(name) ? 1 : right.contains(name) ? 2 : 0);
+        form->addRow(name, axis);
+        assignments.push_back(axis);
+      }
+      auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &settings);
+      form->addRow(buttons);
+      connect(buttons, &QDialogButtonBox::rejected, &settings, &QDialog::reject);
+      connect(buttons, &QDialogButtonBox::accepted, &settings, [&] {
+        QStringList newLeft, newRight;
+        for (int i = 0; i < assignments.size(); ++i)
+        {
+          const auto axis = assignments[i]->currentIndex();
+          if (axis == 1) newLeft << fields.at(i);
+          if (axis == 2) newRight << fields.at(i);
+        }
+        if (newLeft.isEmpty() || newRight.isEmpty())
+        {
+          QMessageBox::warning(&settings, settings.windowTitle(), QStringLiteral("每侧至少选择一个测点。"));
+          return;
+        }
+        left = newLeft;
+        right = newRight;
+        settings.accept();
+      });
+      if (settings.exec() == QDialog::Accepted) redraw();
+    });
+    connect(difference, &QPushButton::clicked, &dialog, [&] {
+      QDialog selection(&dialog);
+      selection.setWindowTitle(QStringLiteral("当前时间窗口差值"));
+      auto* form = new QFormLayout(&selection);
+      auto* x = new QComboBox(&selection);
+      auto* y = new QComboBox(&selection);
+      x->addItems(left);
+      y->addItems(right);
+      auto* tolerance = new QLineEdit(BladeAnalysis::number(matchTolerance), &selection);
+      form->addRow(QStringLiteral("X（左轴 / 上图）"), x);
+      form->addRow(QStringLiteral("Y（右轴 / 下图）"), y);
+      form->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
+      auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &selection);
+      form->addRow(buttons);
+      connect(buttons, &QDialogButtonBox::rejected, &selection, &QDialog::reject);
+      connect(buttons, &QDialogButtonBox::accepted, &selection, [&] {
+        bool valid = false;
+        const double seconds = tolerance->text().toDouble(&valid);
+        if (!valid || !std::isfinite(seconds) || seconds < 0.0)
+        {
+          QMessageBox::warning(&selection, selection.windowTitle(), QStringLiteral("请输入有效的非负时间偏差。"));
+          return;
+        }
+        const auto range = upperPlot->axisScaleDiv(QwtPlot::xBottom);
+        const auto& xs = shown->numeric.at(x->currentText().toStdString());
+        const auto& ys = shown->numeric.at(y->currentText().toStdString());
+        const auto first = BladeAnalysis::boundary(xs, range.lowerBound());
+        const auto last = BladeAnalysis::boundary(xs, range.upperBound(), true);
+        std::vector<double> values;
+        values.reserve(last - first);
+        for (size_t i = first; i < last; ++i)
+        {
+          const auto sample = xs.at(i);
+          double value = 0.0;
+          if (BladeAnalysis::match(ys, sample.x, seconds, false, value)) values.push_back(value - sample.y);
+        }
+        selection.accept();
+        showDifference(&dialog, std::move(values));
+      });
+      selection.exec();
+    });
     redraw();
     dialog.resize(1050, 690);
     dialog.exec();
