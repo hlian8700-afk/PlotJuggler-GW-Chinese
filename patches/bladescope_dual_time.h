@@ -83,9 +83,9 @@ inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const 
   auto* dialog = new QWidget(parent);
   dialog->setWindowTitle(title);
   dialog->resize(1000, 640);
-  QVBoxLayout layout(dialog);
+  auto* layout = new QVBoxLayout(dialog);
   auto* bar = new QHBoxLayout;
-  layout.addLayout(bar);
+  layout->addLayout(bar);
   auto* mode = new QComboBox;
   mode->addItems({QStringLiteral("上下联动图"), QStringLiteral("单画布双 Y 轴")});
   bar->addWidget(mode);
@@ -99,10 +99,10 @@ inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const 
   filterEnabled->setEnabled(bool(filter));
   bar->addWidget(filterEnabled);
   auto* sampleStatus = new QLabel;
-  layout.addWidget(sampleStatus);
+  layout->addWidget(sampleStatus);
   bar->addStretch();
   auto* pages = new QStackedWidget;
-  layout.addWidget(pages, 1);
+  layout->addWidget(pages, 1);
   auto* split = new QSplitter(Qt::Vertical);
   auto* top = new PlotWidget(*snapshot, split);
   auto* bottom = new PlotWidget(*snapshot, split);

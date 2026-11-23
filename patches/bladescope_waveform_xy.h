@@ -41,9 +41,9 @@ inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const 
   auto* dialog = new QWidget(parent);
   dialog->setWindowTitle(title);
   dialog->resize(1050, 670);
-  QVBoxLayout layout(dialog);
+  auto* layout = new QVBoxLayout(dialog);
   auto* parameters = new QFormLayout;
-  layout.addLayout(parameters);
+  layout->addLayout(parameters);
   auto* x = new QComboBox(dialog);
   auto* y = new QComboBox(dialog);
   auto* model = new QComboBox(dialog);
@@ -81,7 +81,7 @@ inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const 
   parameters->addRow(difference);
   auto* plot = new PlotWidget(*plotted, dialog);
   QObject::connect(plot, &QObject::destroyed, [plotted] {});
-  layout.addWidget(plot, 3);
+  layout->addWidget(plot, 3);
   if (!QMetaObject::invokeMethod(plot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true)))
   {
     QMessageBox::warning(parent, title, QStringLiteral("无法启动原版 XY 视图。"));
@@ -90,9 +90,9 @@ inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const 
   }
   auto* report = new QPlainTextEdit(dialog);
   report->setReadOnly(true);
-  layout.addWidget(report, 1);
+  layout->addWidget(report, 1);
   auto* actions = new QHBoxLayout;
-  layout.addLayout(actions);
+  layout->addLayout(actions);
   auto* refresh = new QPushButton(QStringLiteral("生成 XY 与统计"), dialog);
   auto* copy = new QPushButton(QStringLiteral("复制统计"), dialog);
   actions->addWidget(refresh);
