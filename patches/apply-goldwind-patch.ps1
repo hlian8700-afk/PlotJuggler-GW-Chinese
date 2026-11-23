@@ -181,6 +181,10 @@ QHash<QString,QString> goldwindReadNames()
     names.insert(it.key(), row[0].toString());
     if (!row[1].toString().isEmpty()) systems.insert(it.key(), row[1].toString());
   }
+  QVariantMap labelsBySystem;
+  for (auto it = systems.cbegin(); it != systems.cend(); ++it)
+    labelsBySystem.insert(it.key(), it.value());
+  QCoreApplication::instance()->setProperty("bladeScopeTagSystems", labelsBySystem);
   return names;
 }
 
@@ -952,12 +956,12 @@ $curvePanelLayout = @'
   connect(deleteLoadedData, &QPushButton::clicked, this, &MainWindow::on_actionDeleteAllData_triggered);
   connect(bladeLoadData, &QPushButton::clicked, ui->buttonLoadDatafile, &QPushButton::click);
   connect(bladeFilterData, &QPushButton::clicked, this, [this]() {
-    auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
-    if (search) { search->setFocus(); search->selectAll(); }
+    if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
+      static_cast<BladeWaveform::Page*>(waveform)->filterSearch(false);
   });
   connect(bladeClearSearch, &QPushButton::clicked, this, [this]() {
-    auto* search = _curvelist_widget->findChild<QLineEdit*>("lineEditFilter");
-    if (search) { search->clear(); search->setFocus(); }
+    if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
+      static_cast<BladeWaveform::Page*>(waveform)->filterSearch(true);
   });
   // Remove visually redundant headings and utility row marked in the review screenshot.
   signalHeader->hide();
@@ -2127,17 +2131,26 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   auto* analysisMenu = new QMenu(fitEntry);
   analysisMenu->addAction(curveAnalysisAction);
   auto* waveformAction = analysisMenu->addAction(QStringLiteral("录波分析"));
-  connect(waveformAction, &QAction::triggered, this, [this, curveAnalysisAction] {
-    auto* panel = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage");
-    if (!panel)
-    {
-      panel = new BladeWaveform::Page(_mapped_plot_data, curveAnalysisAction, [this] {
-        ui->widgetStack->setCurrentIndex(0);
-      }, ui->widgetStack);
-      ui->widgetStack->addWidget(panel);
-    }
-    static_cast<BladeWaveform::Page*>(panel)->refreshGroups();
-    ui->widgetStack->setCurrentWidget(panel);
+  auto* sharedTags = new QWidget(ui->leftMainWindowFrame);
+  auto* waveform = new BladeWaveform::Page(_mapped_plot_data, curveAnalysisAction, [this] {
+    ui->widgetStack->setCurrentIndex(0);
+  }, sharedTags, [this]() -> PlotWidget* {
+    auto* docker = _main_tabbed_widget->currentTab();
+    return docker && docker->plotCount() ? docker->plotAt(0) : nullptr;
+  }, ui->widgetStack);
+  ui->widgetStack->addWidget(waveform);
+  const int labelIndex = ui->leftLayout->indexOf(_curvelist_widget);
+  ui->leftLayout->removeWidget(_curvelist_widget);
+  _curvelist_widget->hide();
+  ui->leftLayout->insertWidget(labelIndex, sharedTags, 1);
+  waveform->setMode(false, true);
+  connect(ui->widgetStack, &QStackedWidget::currentChanged, waveform, [this, waveform](int index) {
+    waveform->setMode(ui->widgetStack->currentWidget() == waveform,
+                      index == 0 || ui->widgetStack->currentWidget() == waveform);
+  });
+  connect(waveformAction, &QAction::triggered, waveform, [this, waveform] {
+    waveform->refreshGroups();
+    ui->widgetStack->setCurrentWidget(waveform);
   });
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
   if (!fitAcceptanceOutput.isEmpty())
@@ -2178,11 +2191,16 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
     static_cast<BladeFitUI::Panel*>(fit)->invalidate();
   if (curve_updated)
+    if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
+      static_cast<BladeWaveform::Page*>(waveform)->refreshGroups();
+  if (curve_updated)
 '@ }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '  _mapped_plot_data.clear();'; New = @'
   _mapped_plot_data.clear();
+  if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
+    static_cast<BladeWaveform::Page*>(waveform)->clearData();
   if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
     static_cast<BladeFitUI::Panel*>(fit)->invalidate();
 '@ }

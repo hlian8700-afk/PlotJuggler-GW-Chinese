@@ -1,6 +1,7 @@
 #pragma once
 #include "bladescope_analysis.h"
 #include "plotwidget.h"
+#include <QDataStream>
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QHelpEvent>
@@ -18,6 +19,7 @@ class Tags final : public QListWidget
 {
 public:
   using QListWidget::QListWidget;
+  bool waveform = false;
 protected:
   void startDrag(Qt::DropActions) override
   {
@@ -25,7 +27,15 @@ protected:
     for (const auto* item : selectedItems()) fields << item->data(Qt::UserRole).toString();
     if (fields.isEmpty()) return;
     auto* mime = new QMimeData;
-    mime->setData(dragFormat, QJsonDocument(QJsonArray::fromStringList(fields)).toJson(QJsonDocument::Compact));
+    if (waveform)
+      mime->setData(dragFormat, QJsonDocument(QJsonArray::fromStringList(fields)).toJson(QJsonDocument::Compact));
+    else
+    {
+      QByteArray bytes;
+      QDataStream stream(&bytes, QIODevice::WriteOnly);
+      for (const auto& field : fields) stream << field;
+      mime->setData("curveslist/add_curve", bytes);
+    }
     QDrag drag(this);
     drag.setMimeData(mime);
     drag.exec(Qt::CopyAction);
@@ -35,7 +45,8 @@ protected:
 class Page final : public QWidget
 {
 public:
-  Page(const PJ::PlotDataMapRef& source, QAction* curveAnalysis, std::function<void()> back, QWidget* parent)
+  Page(const PJ::PlotDataMapRef& source, QAction* curveAnalysis, std::function<void()> back, QWidget* sidebar,
+       std::function<PlotWidget*()> timePlot, QWidget* parent)
     : QWidget(parent), source(source), shown(std::make_shared<PJ::PlotDataMapRef>())
   {
     setObjectName(QStringLiteral("bladeWaveformPage"));
@@ -57,13 +68,11 @@ public:
     auto* view = new QComboBox(this);
     view->addItem(QStringLiteral("常规时序"));
     header->addWidget(view);
-    status = new QLabel(this);
-    header->addWidget(status, 1);
+    header->addStretch();
 
-    auto* split = new QSplitter(Qt::Horizontal, this);
-    root->addWidget(split, 1);
-    auto* sidebar = new QWidget(split);
     auto* side = new QVBoxLayout(sidebar);
+    status = new QLabel(sidebar);
+    side->setContentsMargins(0, 0, 0, 0);
     groups = new QComboBox(sidebar);
     auto* manage = new QPushButton(QStringLiteral("管理测点组"), sidebar);
     side->addWidget(groups);
@@ -71,10 +80,19 @@ public:
     search = new QLineEdit(sidebar);
     search->setPlaceholderText(QStringLiteral("搜索中文标签或原始字段"));
     side->addWidget(search);
+    labelMode = new QComboBox(sidebar);
+    labelMode->addItems({QStringLiteral("原始标签"), QStringLiteral("中文标签"), QStringLiteral("中英双显")});
+    side->addWidget(labelMode);
+    connect(labelMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { refreshTags(true); });
     tags = new Tags(sidebar);
     tags->setSelectionMode(QAbstractItemView::ExtendedSelection);
     tags->setDragEnabled(true);
+    system = new QComboBox(sidebar);
+    side->addWidget(system);
+    connect(system, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) { filterTags(); });
     side->addWidget(tags, 1);
+    side->addWidget(status);
     startEnabled = new QCheckBox(QStringLiteral("开始时间（UTC）"), sidebar);
     endEnabled = new QCheckBox(QStringLiteral("结束时间（UTC）"), sidebar);
     start = makeTime(sidebar);
@@ -90,14 +108,11 @@ public:
     style = new QComboBox(sidebar);
     style->addItems({QStringLiteral("折线图"), QStringLiteral("散点图")});
     side->addWidget(style);
-    auto* generate = new QPushButton(QStringLiteral("作图"), sidebar);
+    generate = new QPushButton(QStringLiteral("作图"), sidebar);
     side->addWidget(generate);
-    plot = new PlotWidget(*shown, split);
+    plot = new PlotWidget(*shown, this);
     connect(plot, &QObject::destroyed, [hold = shown] {});
-    split->addWidget(sidebar);
-    split->addWidget(plot);
-    split->setStretchFactor(1, 1);
-    split->setSizes({310, 900});
+    root->addWidget(plot, 1);
     canvas = plot->findChild<QwtPlot*>();
     if (canvas)
     {
@@ -107,25 +122,66 @@ public:
     }
     connect(groups, QOverload<int>::of(&QComboBox::activated), this, [this](int) { refreshTags(); });
     connect(search, &QLineEdit::textChanged, this, [this](const QString& value) {
-      for (int i = 0; i < tags->count(); ++i)
-        tags->item(i)->setHidden(!tags->item(i)->text().contains(value.trimmed(), Qt::CaseInsensitive));
+      Q_UNUSED(value);
+      filterTags();
     });
     connect(manage, &QPushButton::clicked, this, [this] {
       BladeAnalysis::openGroupManager(this, this->source);
       refreshGroups();
     });
-    connect(generate, &QPushButton::clicked, this, [this] {
+    connect(generate, &QPushButton::clicked, this, [this, timePlot] {
       QStringList fields;
       for (int i = 0; i < tags->count(); ++i)
         if (tags->item(i)->checkState() == Qt::Checked)
           fields << tags->item(i)->data(Qt::UserRole).toString();
-      draw(fields);
+      if (tags->waveform) { draw(fields); return; }
+      if (fields.isEmpty() || fields.size() > 16)
+      {
+        status->setText(QStringLiteral("请选择 1 至 16 个测点。"));
+        return;
+      }
+      if (auto* target = timePlot())
+      {
+        if (target->isXYPlot()) return;
+        for (const auto& field : fields)
+        {
+          const auto raw = field.toStdString();
+          const auto& curves = target->curveList();
+          if (std::none_of(curves.begin(), curves.end(), [&](const auto& curve) { return curve.src_name == raw; }))
+            target->addCurve(raw);
+        }
+        emit target->curveListChanged();
+        target->zoomOut(false);
+        target->replot();
+      }
     });
     connect(style, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
       applyStyle();
       QToolTip::hideText();
     });
     refreshGroups();
+  }
+
+  void setMode(bool waveform, bool plotting)
+  {
+    tags->waveform = waveform;
+    generate->setVisible(plotting);
+    updateTimeControls();
+  }
+
+  void filterSearch(bool clear)
+  {
+    if (clear) search->clear();
+    search->setFocus();
+    if (!clear) search->selectAll();
+  }
+
+  void clearData()
+  {
+    plot->removeAllCurves();
+    shown->numeric.clear();
+    plot->replot();
+    refreshTags();
   }
 
   void refreshGroups()
@@ -174,6 +230,19 @@ protected:
   }
 
 private:
+  void filterTags()
+  {
+    const auto term = search->text().trimmed();
+    const auto category = system->currentData().toString();
+    for (int i = 0; i < tags->count(); ++i)
+    {
+      auto* item = tags->item(i);
+      const bool matchesSearch = item->data(Qt::UserRole).toString().contains(term, Qt::CaseInsensitive) ||
+                                 item->data(Qt::UserRole + 1).toString().contains(term, Qt::CaseInsensitive);
+      item->setHidden(!matchesSearch || (!category.isEmpty() && item->data(Qt::UserRole + 2).toString() != category));
+    }
+  }
+
   static QDateTimeEdit* makeTime(QWidget* parent)
   {
     auto* edit = new QDateTimeEdit(parent);
@@ -201,6 +270,9 @@ private:
     }
     else for (const auto value : groupsData.value(group).toArray()) names << value.toString();
     const auto aliases = qApp->property("bladeScopeTagAliases").toMap();
+    const auto systems = qApp->property("bladeScopeTagSystems").toMap();
+    const auto selectedSystem = system->currentData().toString();
+    QStringList categories;
     size_t missing = 0;
     double first = std::numeric_limits<double>::infinity(), last = -first;
     for (const auto& name : names)
@@ -211,16 +283,49 @@ private:
       first = std::min(first,series.at(0).x);
       last = std::max(last,series.at(series.size()-1).x);
       const auto label = aliases.value(name).toString();
-      auto* item = new QListWidgetItem(label.isEmpty() ? name : label + QStringLiteral("（") + name + QStringLiteral("）"), tags);
+      const auto title = label.isEmpty() || labelMode->currentIndex() == 0 ? name :
+                         labelMode->currentIndex() == 1 ? label : label + QStringLiteral("（") + name + QStringLiteral("）");
+      auto* item = new QListWidgetItem(title, tags);
       item->setData(Qt::UserRole, name);
       item->setCheckState(checked.contains(name) ? Qt::Checked : Qt::Unchecked);
-      item->setHidden(!item->text().contains(search->text().trimmed(),Qt::CaseInsensitive));
+      item->setData(Qt::UserRole + 1, label);
+      const auto category = systems.value(name, name.section('.', 0, 0)).toString();
+      item->setData(Qt::UserRole + 2, category);
+      categories << category;
     }
+    categories.removeDuplicates();
+    categories.sort(Qt::CaseInsensitive);
+    {
+      const QSignalBlocker block(system);
+      system->clear();
+      system->addItem(QStringLiteral("全部系统"), QString());
+      for (const auto& category : categories) system->addItem(category, category);
+      system->setCurrentIndex(std::max(0, system->findData(selectedSystem)));
+    }
+    filterTags();
     if (std::isfinite(first) && !startEnabled->isChecked())
       start->setDateTime(QDateTime::fromMSecsSinceEpoch(qint64(first*1000),Qt::UTC));
     if (std::isfinite(last) && !endEnabled->isChecked())
       end->setDateTime(QDateTime::fromMSecsSinceEpoch(qint64(last*1000),Qt::UTC));
-    status->setText(QStringLiteral("可选测点 %1，缺失 %2").arg(tags->count()).arg(qulonglong(missing)));
+    updateTimeControls();
+    status->setText(source.numeric.empty() ? QStringLiteral("请先加载录波数据") :
+        QStringLiteral("可选测点 %1，缺失 %2").arg(tags->count()).arg(qulonglong(missing)));
+  }
+
+  void updateTimeControls()
+  {
+    const bool showTime = tags->waveform && tags->count() > 0;
+    if (!showTime && tags->count() == 0)
+    {
+      startEnabled->setChecked(false);
+      endEnabled->setChecked(false);
+    }
+    startEnabled->setVisible(showTime);
+    endEnabled->setVisible(showTime);
+    start->setVisible(showTime);
+    end->setVisible(showTime);
+    style->setVisible(tags->waveform);
+    generate->setEnabled(tags->count() > 0);
   }
 
   bool draw(const QStringList& fields)
@@ -338,6 +443,8 @@ private:
   Tags* tags = nullptr;
   QLineEdit* search = nullptr;
   QCheckBox *startEnabled = nullptr, *endEnabled = nullptr;
+  QComboBox *labelMode = nullptr, *system = nullptr;
+  QPushButton* generate = nullptr;
   QDateTimeEdit *start = nullptr, *end = nullptr;
   QLabel* status = nullptr;
   QJsonObject groupsData;
