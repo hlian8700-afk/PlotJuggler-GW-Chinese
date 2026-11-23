@@ -4,6 +4,8 @@
 #include "bladescope_plot_theme.h"
 #include "bladescope_time_display.h"
 #include "bladescope_waveform_sampling.h"
+#include <qwt_picker_machine.h>
+#include <qwt_plot_picker.h>
 #include <qwt_scale_div.h>
 #include <qwt_scale_widget.h>
 #include <QClipboard>
@@ -153,6 +155,9 @@ public:
     actions->addWidget(statistics);
     auto* comparison = new QPushButton(QStringLiteral("双轴对照"), analysisControls);
     actions->addWidget(comparison);
+    auto* xy = new QPushButton(QStringLiteral("XY 分析"), analysisControls);
+    actions->addWidget(xy);
+    connect(xy, &QPushButton::clicked, this, [this] { showXY(); });
     connect(comparison, &QPushButton::clicked, this, [this] { showComparison(); });
     side->addWidget(analysisControls);
     connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
@@ -504,6 +509,143 @@ private:
     conditions = result;
     matchTolerance = tolerance;
     if (!plottedFields.isEmpty()) draw(plottedFields);
+  }
+
+  void showXY()
+  {
+    QStringList fields;
+    for (const auto& curve : plot->curveList())
+      fields << QString::fromStdString(curve.src_name);
+    if (fields.size() < 2)
+    {
+      QMessageBox::information(this, QStringLiteral("XY 分析"), QStringLiteral("请先绘制至少两个有有效数据的测点。"));
+      return;
+    }
+
+    PJ::PlotDataMapRef xyData;
+    struct Pair { double x, y, timeX, timeY; };
+    std::vector<Pair> paired;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("录波 XY 分析"));
+    auto* root = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    root->addLayout(form);
+    auto* x = new QComboBox(&dialog);
+    auto* y = new QComboBox(&dialog);
+    x->addItems(fields);
+    y->addItems(fields);
+    y->setCurrentIndex(1);
+    auto* tolerance = new QLineEdit(BladeAnalysis::number(matchTolerance), &dialog);
+    form->addRow(QStringLiteral("X 测点"), x);
+    form->addRow(QStringLiteral("Y 测点"), y);
+    form->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
+    auto* apply = new QPushButton(QStringLiteral("绘制 XY"), &dialog);
+    auto* difference = new QPushButton(QStringLiteral("Y−X 差值统计"), &dialog);
+    auto* actions = new QHBoxLayout;
+    actions->addWidget(apply);
+    actions->addWidget(difference);
+    root->addLayout(actions);
+    auto* xyPlot = new PlotWidget(xyData, &dialog);
+    root->addWidget(xyPlot, 1);
+    auto* chart = xyPlot->findChild<QwtPlot*>();
+    if (!chart) return;
+    auto* status = new QLabel(&dialog);
+    root->addWidget(status);
+    const auto redraw = [&] {
+      bool valid = false;
+      const double seconds = tolerance->text().toDouble(&valid);
+      if (!valid || !std::isfinite(seconds) || seconds < 0.0)
+      {
+        QMessageBox::warning(&dialog, QStringLiteral("XY 分析"), QStringLiteral("请输入有效的非负时间偏差。"));
+        return;
+      }
+      const auto& xs = shown->numeric.at(x->currentText().toStdString());
+      const auto& ys = shown->numeric.at(y->currentText().toStdString());
+      paired.clear();
+      xyPlot->removeAllCurves();
+      xyData.scatter_xy.clear();
+      QMetaObject::invokeMethod(xyPlot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true));
+      const auto name = QStringLiteral("%1 × %2").arg(x->currentText(), y->currentText()).toStdString();
+      auto& scatter = xyData.addScatterXY(name)->second;
+      for (size_t i = 0; i < xs.size(); ++i)
+      {
+        const auto a = xs.at(i);
+        const auto end = BladeAnalysis::boundary(ys, a.x, true);
+        auto nearest = end ? end - 1 : ys.size();
+        if (end < ys.size() && (nearest == ys.size() || ys.at(end).x - a.x < a.x - ys.at(nearest).x))
+          nearest = end;
+        if (nearest == ys.size()) continue;
+        const auto b = ys.at(nearest);
+        if (std::abs(b.x - a.x) > seconds || !std::isfinite(a.y) || !std::isfinite(b.y)) continue;
+        paired.push_back({a.y, b.y, a.x, b.x});
+        scatter.pushBack({a.y, b.y});
+      }
+      if (!paired.empty())
+        if (auto* curve = xyPlot->addCurve(name)) curve->curve->setStyle(QwtPlotCurve::Dots);
+      chart->setAxisTitle(QwtPlot::xBottom, x->currentText());
+      chart->setAxisTitle(QwtPlot::yLeft, y->currentText());
+      emit xyPlot->curveListChanged();
+      xyPlot->zoomOut(false);
+      xyPlot->replot();
+      difference->setEnabled(!paired.empty());
+      status->setText(QStringLiteral("配对 %1 / %2 个 X 采样点").arg(qulonglong(paired.size())).arg(qulonglong(xs.size())));
+    };
+    connect(apply, &QPushButton::clicked, &dialog, redraw);
+    connect(difference, &QPushButton::clicked, &dialog, [&] {
+      BladeAnalysis::Statistics summary;
+      std::vector<double> ordered;
+      ordered.reserve(paired.size());
+      for (const auto& point : paired)
+      {
+        const auto delta = point.y - point.x;
+        if (std::isfinite(delta)) { summary.add(delta); ordered.push_back(delta); }
+      }
+      if (ordered.empty()) return;
+      std::sort(ordered.begin(), ordered.end());
+      const auto percentile = [&](double p) {
+        const double rank = p * (ordered.size() - 1);
+        const auto lo = size_t(rank);
+        const double fraction = rank - lo;
+        return BladeAnalysis::number(ordered[lo] * (1 - fraction) +
+            ordered[std::min(lo + 1, ordered.size() - 1)] * fraction);
+      };
+      QMessageBox::information(&dialog, QStringLiteral("Y−X 差值统计"),
+          QStringLiteral("差值要求两测点单位一致。\n有效点 %1\n最小 %2　最大 %3　均值 %4\n标准差 %5　极差 %6\nP05 %7　P25 %8　中位数 %9　P75 %10　P95 %11")
+            .arg(qulonglong(summary.count))
+            .arg(BladeAnalysis::number(summary.low), BladeAnalysis::number(summary.high),
+                 BladeAnalysis::number(summary.mean))
+            .arg(BladeAnalysis::number(std::sqrt(std::max(0.0, summary.m2 / double(summary.count)))),
+                 BladeAnalysis::number(summary.high - summary.low))
+            .arg(percentile(0.05), percentile(0.25), percentile(0.5), percentile(0.75), percentile(0.95)));
+    });
+    auto* picker = new QwtPlotPicker(chart->canvas());
+    picker->setStateMachine(new QwtPickerTrackerMachine);
+    picker->setTrackerMode(QwtPicker::AlwaysOn);
+    chart->canvas()->setMouseTracking(true);
+    connect(picker, QOverload<const QPointF&>::of(&QwtPlotPicker::moved), &dialog, [&](const QPointF& cursor) {
+      const auto px = chart->transform(QwtPlot::xBottom, cursor.x());
+      const auto py = chart->transform(QwtPlot::yLeft, cursor.y());
+      const Pair* best = nullptr;
+      double distance = 64.0;
+      for (const auto& point : paired)
+      {
+        const double dx = chart->transform(QwtPlot::xBottom, point.x) - px;
+        const double dy = chart->transform(QwtPlot::yLeft, point.y) - py;
+        const double squared = dx * dx + dy * dy;
+        if (squared < distance) { best = &point; distance = squared; }
+      }
+      if (!best) { QToolTip::hideText(); return; }
+      const auto time = [](double value) {
+        const bool calendar = BladeTimeDisplay::isCalendarTime(value);
+        return BladeTimeDisplay::format(value, true, calendar, calendar, 3, Qt::UTC);
+      };
+      QToolTip::showText(QCursor::pos(), QStringLiteral("X %1　Y %2\nX 时间 %3\nY 时间 %4")
+          .arg(BladeAnalysis::number(best->x), BladeAnalysis::number(best->y), time(best->timeX), time(best->timeY)),
+          chart->canvas());
+    });
+    redraw();
+    dialog.resize(950, 650);
+    dialog.exec();
   }
 
   void showComparison()
