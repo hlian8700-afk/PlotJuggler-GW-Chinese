@@ -5,6 +5,7 @@
 #include "bladescope_time_display.h"
 #include "bladescope_waveform_sampling.h"
 #include <qwt_scale_div.h>
+#include <QClipboard>
 #include <QDataStream>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -418,6 +419,7 @@ private:
   struct Summary
   {
     BladeAnalysis::Statistics source, retained;
+    size_t sampled = 0;
   };
 
   void editConditions()
@@ -510,26 +512,60 @@ private:
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("当前时间窗口采样统计"));
     auto* layout = new QVBoxLayout(&dialog);
-    auto* table = new QTableWidget(summaries.size(), 8, &dialog);
+    auto* table = new QTableWidget(summaries.size(), 15, &dialog);
     table->setHorizontalHeaderLabels({QStringLiteral("测点"), QStringLiteral("有效原始点"),
-      QStringLiteral("保留点"), QStringLiteral("最小值"), QStringLiteral("最大值"),
-      QStringLiteral("均值"), QStringLiteral("标准差"), QStringLiteral("无匹配")});
+      QStringLiteral("重采样后"), QStringLiteral("保留点"), QStringLiteral("最小值"), QStringLiteral("最大值"),
+      QStringLiteral("均值"), QStringLiteral("标准差"), QStringLiteral("极差"), QStringLiteral("P05"),
+      QStringLiteral("P25"), QStringLiteral("中位数"), QStringLiteral("P75"), QStringLiteral("P95"), QStringLiteral("无匹配")});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     int row = 0;
     for (auto it = summaries.cbegin(); it != summaries.cend(); ++it, ++row)
     {
       const auto& kept = it.value().retained;
       const auto value = [&](double x) { return kept.count ? BladeAnalysis::number(x) : QStringLiteral("—"); };
+      std::vector<double> sorted;
+      const auto curve = shown->numeric.find(it.key().toStdString());
+      if (curve != shown->numeric.end())
+      {
+        sorted.reserve(curve->second.size());
+        for (size_t i = 0; i < curve->second.size(); ++i) sorted.push_back(curve->second.at(i).y);
+        std::sort(sorted.begin(), sorted.end());
+      }
+      const auto percentile = [&](double p) {
+        if (sorted.empty()) return QStringLiteral("—");
+        const double rank = p * (sorted.size() - 1);
+        const auto low = size_t(rank);
+        const auto high = std::min(low + 1, sorted.size() - 1);
+        const double fraction = rank - low;
+        return value(sorted[low] * (1.0 - fraction) + sorted[high] * fraction);
+      };
       const QStringList cells{it.key(), QString::number(qulonglong(it.value().source.count)),
-        QString::number(qulonglong(kept.count)), value(kept.low), value(kept.high), value(kept.mean),
+        QString::number(qulonglong(it.value().sampled)), QString::number(qulonglong(kept.count)), value(kept.low), value(kept.high), value(kept.mean),
         value(kept.count ? std::sqrt(std::max(0.0, kept.m2 / double(kept.count))) : 0.0),
-        QString::number(qulonglong(kept.unmatched))};
+        value(kept.high - kept.low), percentile(0.05), percentile(0.25), percentile(0.5),
+        percentile(0.75), percentile(0.95), QString::number(qulonglong(kept.unmatched))};
       for (int column = 0; column < cells.size(); ++column)
         table->setItem(row, column, new QTableWidgetItem(cells.at(column)));
     }
     table->resizeColumnsToContents();
     layout->addWidget(table);
-    dialog.resize(850, 360);
+    auto* copy = new QPushButton(QStringLiteral("复制统计"), &dialog);
+    layout->addWidget(copy);
+    connect(copy, &QPushButton::clicked, &dialog, [table] {
+      QStringList rows, cells;
+      for (int column = 0; column < table->columnCount(); ++column)
+        cells << table->horizontalHeaderItem(column)->text();
+      rows << cells.join(QLatin1Char('\t'));
+      for (int row = 0; row < table->rowCount(); ++row)
+      {
+        cells.clear();
+        for (int column = 0; column < table->columnCount(); ++column)
+          cells << table->item(row, column)->text();
+        rows << cells.join(QLatin1Char('\t'));
+      }
+      QApplication::clipboard()->setText(rows.join(QLatin1Char('\n')));
+    });
+    dialog.resize(1050, 360);
     dialog.exec();
   }
 
@@ -564,47 +600,40 @@ private:
       if (begin >= stop) continue;
       firstPlottedTime = std::min(firstPlottedTime, series.at(begin).x);
       auto& summary = summaries[name];
-      std::vector<size_t> retained;
       for (size_t i = begin; i < stop; ++i)
-      {
+        if (std::isfinite(series.at(i).y)) ++summary.source.count;
+      std::vector<std::pair<double, double>> retained;
+      forEachDisplayIndex(begin, stop, view->currentIndex() == 1,
+                         [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
         const auto sample = series.at(i);
-        if (!std::isfinite(sample.y)) continue;
-        summary.source.add(sample.y);
-        bool accept = true;
+        if (!std::isfinite(sample.y)) return;
+        ++summary.sampled;
         for (const auto& condition : conditions)
         {
           double value = sample.y;
-          const auto match = source.numeric.find(condition.channel.toStdString());
-          if (condition.channel != name && (match == source.numeric.end() ||
-              !BladeAnalysis::match(match->second, sample.x, matchTolerance, false, value)))
+          if (condition.channel != name)
           {
-            ++summary.retained.unmatched;
-            accept = false;
-            break;
+            const auto match = source.numeric.find(condition.channel.toStdString());
+            if (match == source.numeric.end() ||
+                !BladeAnalysis::match(match->second, sample.x, matchTolerance, false, value))
+            {
+              ++summary.retained.unmatched;
+              return;
+            }
           }
           const double threshold = condition.threshold;
-          accept = condition.operation == 0 ? value >= threshold :
-                   condition.operation == 1 ? value <= threshold :
-                   condition.operation == 2 ? value > threshold : value < threshold;
-          if (!accept) break;
+          const bool accept = condition.operation == 0 ? value >= threshold :
+                              condition.operation == 1 ? value <= threshold :
+                              condition.operation == 2 ? value > threshold : value < threshold;
+          if (!accept) return;
         }
-        if (accept)
-        {
-          summary.retained.add(sample.y);
-          if (!conditions.isEmpty()) retained.push_back(i);
-        }
-      }
-      const bool filtering = !conditions.isEmpty();
-      if (!summary.retained.count) continue;
-      auto& points = shown->addNumeric(key)->second;
-      const auto index = [&](size_t i) { return filtering ? retained[i] : i; };
-      forEachDisplayIndex(filtering ? 0 : begin, filtering ? retained.size() : stop,
-                          view->currentIndex() == 1,
-                          [&](size_t i) { return series.at(index(i)).y; }, [&](size_t i) {
-        const auto sample = series.at(index(i));
-        points.pushBack({sample.x, sample.y});
-        ++count;
+        summary.retained.add(sample.y);
+        retained.emplace_back(sample.x, sample.y);
       });
+      if (retained.empty()) continue;
+      auto& points = shown->addNumeric(key)->second;
+      for (const auto& sample : retained) points.pushBack({sample.first, sample.second});
+      count += retained.size();
       if (auto* curve = plot->addCurve(key))
       {
         const auto alias = aliases.value(name).toString();
