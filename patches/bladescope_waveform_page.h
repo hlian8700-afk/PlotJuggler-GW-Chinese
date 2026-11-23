@@ -108,6 +108,7 @@ public:
       connect(button, &QPushButton::clicked, this, [this, i] {
         if (analysisMode == i) return;
         analysisMode = i;
+        refreshAnalysisParameters();
         if (i == 0)
         {
           resetAnalysisPanel();
@@ -119,6 +120,10 @@ public:
       });
     }
     header->addStretch();
+    parameters = new QWidget(this);
+    root->addWidget(parameters);
+    parameterForm = new QFormLayout(parameters);
+    parameters->hide();
     workspace = new QVBoxLayout;
     root->addLayout(workspace, 1);
 
@@ -212,10 +217,7 @@ public:
       refreshGroups();
     });
     connect(generate, &QPushButton::clicked, this, [this, timePlot] {
-      QStringList fields;
-      for (int i = 0; i < tags->count(); ++i)
-        if (tags->item(i)->checkState() == Qt::Checked)
-          fields << tags->item(i)->data(Qt::UserRole).toString();
+      const auto fields = checkedFields();
       if (tags->waveform) { draw(fields); return; }
       if (fields.isEmpty() || fields.size() > 16)
       {
@@ -241,6 +243,7 @@ public:
       applyStyle();
       QToolTip::hideText();
     });
+    connect(tags, &QListWidget::itemChanged, this, [this] { refreshAnalysisParameters(); });
     refreshGroups();
   }
 
@@ -340,6 +343,7 @@ private:
 
   void refreshTags(bool keepChecks = false)
   {
+    const QSignalBlocker blockTags(tags);
     QSet<QString> checked;
     if (keepChecks)
       for (int i = 0; i < tags->count(); ++i)
@@ -392,6 +396,7 @@ private:
       system->setCurrentIndex(std::max(0, system->findData(selectedSystem)));
     }
     filterTags();
+    refreshAnalysisParameters();
     if (std::isfinite(first) && !startEnabled->isChecked())
       start->setDateTime(QDateTime::fromMSecsSinceEpoch(qint64(first*1000),Qt::UTC));
     if (std::isfinite(last) && !endEnabled->isChecked())
@@ -736,6 +741,105 @@ private:
     if (!plottedFields.isEmpty()) draw(plottedFields);
   }
 
+  QStringList checkedFields() const
+  {
+    QStringList fields;
+    for (int i = 0; i < tags->count(); ++i)
+      if (tags->item(i)->checkState() == Qt::Checked)
+        fields << tags->item(i)->data(Qt::UserRole).toString();
+    return fields;
+  }
+
+  void refreshAnalysisParameters()
+  {
+    parameters->setVisible(analysisMode != 0);
+    while (parameterForm->rowCount()) parameterForm->removeRow(0);
+    if (analysisMode == 0) return;
+    const auto fields = checkedFields();
+    const int minimum = analysisMode == 3 ? 1 : 2;
+    if (fields.size() < minimum || fields.size() > 16)
+    {
+      parameterForm->addRow(new QLabel(QStringLiteral("请勾选 %1 至 16 个测点。").arg(minimum), parameters));
+      return;
+    }
+
+    const auto addChoice = [this](const QString& label, const QStringList& values, int index) {
+      auto* box = new QComboBox(parameters);
+      box->addItems(values);
+      box->setCurrentIndex(index);
+      parameterForm->addRow(label, box);
+      return box;
+    };
+
+    if (analysisMode == 1)
+    {
+      auto* layout = addChoice(QStringLiteral("布局"),
+          {QStringLiteral("单图双 Y 轴"), QStringLiteral("上下联动图")}, comparisonLayout);
+      connect(layout, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+              [this](int index) { comparisonLayout = index; });
+      auto* expand = new QPushButton(QStringLiteral("配置左右轴测点"), parameters);
+      expand->setCheckable(true);
+      auto* assignments = new QWidget(parameters);
+      auto* grid = new QGridLayout(assignments);
+      for (int i = 0; i < fields.size(); ++i)
+      {
+        const auto field = fields.at(i);
+        auto* axis = new QComboBox(assignments);
+        axis->addItems({QStringLiteral("不显示"), QStringLiteral("左轴 / 上图"), QStringLiteral("右轴 / 下图")});
+        axis->setCurrentIndex(comparisonAxes.value(field, i == 0 ? 1 : i == 1 ? 2 : 0));
+        grid->addWidget(new QLabel(field, assignments), i / 2, 2 * (i % 2));
+        grid->addWidget(axis, i / 2, 2 * (i % 2) + 1);
+        connect(axis, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, field](int index) { comparisonAxes.insert(field, index); });
+      }
+      parameterForm->addRow(expand);
+      parameterForm->addRow(assignments);
+      assignments->hide();
+      connect(expand, &QPushButton::toggled, assignments, &QWidget::setVisible);
+      return;
+    }
+
+    if (analysisMode == 2)
+    {
+      const int xIndex = std::max(0, int(fields.indexOf(xyX)));
+      const int yIndex = fields.contains(xyY) ? fields.indexOf(xyY) : (xIndex == 0 ? 1 : 0);
+      auto* x = addChoice(QStringLiteral("X 测点"), fields, xIndex);
+      auto* y = addChoice(QStringLiteral("Y 测点"), fields, yIndex);
+      xyX = x->currentText();
+      xyY = y->currentText();
+      connect(x, &QComboBox::currentTextChanged, this, [this](const QString& value) { xyX = value; });
+      connect(y, &QComboBox::currentTextChanged, this, [this](const QString& value) { xyY = value; });
+      auto* tolerance = new QLineEdit(xyTolerance.isEmpty() ? BladeAnalysis::number(matchTolerance) : xyTolerance, parameters);
+      parameterForm->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
+      connect(tolerance, &QLineEdit::textEdited, this, [this](const QString& value) { xyTolerance = value; });
+      return;
+    }
+
+    auto* field = addChoice(QStringLiteral("拟合测点"), fields, std::max(0, int(fields.indexOf(trendField))));
+    trendField = field->currentText();
+    connect(field, &QComboBox::currentTextChanged, this, [this](const QString& value) { trendField = value; });
+    auto* model = addChoice(QStringLiteral("模型"),
+        {QStringLiteral("多项式"), QStringLiteral("滑动平均")}, trendModel);
+    auto* size = new QSpinBox(parameters);
+    parameterForm->addRow(QStringLiteral("阶数 / 窗口点数"), size);
+    const auto setModel = [this, size](int index) {
+      trendModel = index;
+      const QSignalBlocker block(size);
+      size->setRange(1, index == 0 ? 6 : 10000000);
+      size->setValue(index == 0 ? trendDegree : trendWindow);
+    };
+    setModel(trendModel);
+    connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), this, setModel);
+    connect(size, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+      if (trendModel == 0) trendDegree = value;
+      else trendWindow = value;
+    });
+    auto* range = addChoice(QStringLiteral("拟合范围"),
+        {QStringLiteral("已绘制范围"), QStringLiteral("当前可见时段")}, trendRange);
+    connect(range, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int index) { trendRange = index; });
+  }
+
   void resetAnalysisPanel()
   {
     delete analysisPanel;
@@ -757,29 +861,17 @@ private:
     analysisPanel = controls;
     workspace->insertWidget(0, controls);
     auto* row = new QHBoxLayout(controls);
-    auto* field = new QComboBox(controls);
-    for (const auto& item : plot->curveList()) field->addItem(QString::fromStdString(item.src_name));
-    auto* model = new QComboBox(controls);
-    model->addItems({QStringLiteral("多项式"), QStringLiteral("滑动平均")});
-    auto* degree = new QSpinBox(controls);
-    degree->setRange(1, 6);
-    auto* width = new QSpinBox(controls);
-    width->setRange(1, 10000000);
-    width->setValue(11);
-    width->hide();
-    auto* range = new QComboBox(controls);
-    range->addItems({QStringLiteral("已绘制范围"), QStringLiteral("当前可见时段")});
-    auto* fit = new QPushButton(QStringLiteral("计算拟合"), controls);
-    for (auto* widget : std::array<QWidget*, 6>{field, model, degree, width, range, fit})
-      row->addWidget(widget);
-    connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), controls, [=](int mode) {
-      width->setVisible(mode != 0);
-      degree->setVisible(mode == 0);
-    });
-    connect(fit, &QPushButton::clicked, controls, [=] {
-      const auto name = field->currentText().toStdString();
+    auto* summary = new QLabel(controls);
+    summary->setWordWrap(true);
+    row->addWidget(summary);
+    const auto name = trendField.toStdString();
+    const auto fit = [=] {
       const auto found = shown->numeric.find(name);
-      if (found == shown->numeric.end() || !found->second.size()) return;
+      if (found == shown->numeric.end() || !found->second.size())
+      {
+        summary->setText(QStringLiteral("拟合测点在当前时间段内没有有效数据。"));
+        return;
+      }
       auto data = std::make_shared<BladeFit::Points>();
       const auto& series = found->second;
       for (size_t i = 0; i < series.size(); ++i)
@@ -788,15 +880,14 @@ private:
         data->push_back({point.x, point.y});
       }
       const auto visible = canvas->axisScaleDiv(QwtPlot::xBottom);
-      const double lo = range->currentIndex() ? visible.lowerBound() + plot->timeOffset() : data->front().x;
-      const double hi = range->currentIndex() ? visible.upperBound() + plot->timeOffset() : data->back().x;
-      const int mode = model->currentIndex(), order = degree->value(), window = width->value();
-      fit->setEnabled(false);
+      const double lo = trendRange ? visible.lowerBound() + plot->timeOffset() : data->front().x;
+      const double hi = trendRange ? visible.upperBound() + plot->timeOffset() : data->back().x;
+      const int mode = trendModel, order = trendDegree, window = trendWindow;
+      summary->setText(QStringLiteral("正在拟合…"));
       BladeTrend::background<BladeTrend::Trend>(controls, [=] {
         return BladeTrend::calculate(*data, mode, order, window, lo, hi);
       }, [=](BladeTrend::Trend result, const QString& error) {
-        fit->setEnabled(true);
-        status->setText(error.isEmpty() ? result.summary : error);
+        summary->setText(error.isEmpty() ? result.summary : error);
         if (!error.isEmpty() || result.points.empty()) return;
         const auto base = name + "/Trend";
         auto curveName = base;
@@ -808,7 +899,8 @@ private:
         emit plot->curveListChanged();
         plot->replot();
       });
-    });
+    };
+    fit();
   }
 
   void showXY()
@@ -837,25 +929,19 @@ private:
     auto* panel = makeAnalysisPanel();
     connect(panel, &QObject::destroyed, [state] { state->fitCurve.detach(); });
     auto* root = new QVBoxLayout(panel);
-    auto* form = new QFormLayout;
-    root->addLayout(form);
-    auto* x = new QComboBox(panel);
-    auto* y = new QComboBox(panel);
-    x->addItems(fields);
-    y->addItems(fields);
-    x->setCurrentIndex(std::max(0, x->findText(xyX)));
-    const int prevY = y->findText(xyY);
-    y->setCurrentIndex(prevY >= 0 ? prevY : (x->currentIndex() == 0 ? 1 : 0));
-    auto* tolerance = new QLineEdit(xyTolerance.isEmpty() ? BladeAnalysis::number(matchTolerance) : xyTolerance, panel);
-    form->addRow(QStringLiteral("X 测点"), x);
-    form->addRow(QStringLiteral("Y 测点"), y);
-    form->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
-    auto* apply = new QPushButton(QStringLiteral("绘制 XY"), panel);
+    if ((!xyX.isEmpty() && !fields.contains(xyX)) ||
+        (!xyY.isEmpty() && !fields.contains(xyY)))
+    {
+      status->setText(QStringLiteral("所选 X 或 Y 测点在当前时间段内没有有效数据。"));
+      return;
+    }
+    const auto x = fields.contains(xyX) ? xyX : fields.front();
+    const auto y = fields.contains(xyY) ? xyY : (x == fields.front() ? fields.at(1) : fields.front());
+    const double seconds = xyTolerance.isEmpty() ? matchTolerance : xyTolerance.toDouble();
     auto* difference = new QPushButton(QStringLiteral("Y−X 差值统计"), panel);
     auto* fit = new QPushButton(QStringLiteral("XY 拟合"), panel);
     fit->setEnabled(false);
     auto* actions = new QHBoxLayout;
-    actions->addWidget(apply);
     actions->addWidget(difference);
     actions->addWidget(fit);
     root->addLayout(actions);
@@ -871,18 +957,8 @@ private:
     root->addWidget(fitSummary);
     state->fitCurve.setPen(QPen(QColor(214, 87, 39), 2.0));
     const auto redraw = [=] {
-      bool valid = false;
-      const double seconds = tolerance->text().toDouble(&valid);
-      if (!valid || !std::isfinite(seconds) || seconds < 0.0)
-      {
-        status->setText(QStringLiteral("请输入有效的非负时间偏差。"));
-        return;
-      }
-      xyX = x->currentText();
-      xyY = y->currentText();
-      xyTolerance = tolerance->text();
-      const auto& xs = shown->numeric.at(xyX.toStdString());
-      const auto& ys = shown->numeric.at(xyY.toStdString());
+      const auto& xs = shown->numeric.at(x.toStdString());
+      const auto& ys = shown->numeric.at(y.toStdString());
       ++state->revision;
       state->fitCurve.detach();
       fitSummary->clear();
@@ -890,7 +966,7 @@ private:
       xyPlot->removeAllCurves();
       state->data.scatter_xy.clear();
       QMetaObject::invokeMethod(xyPlot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true));
-      const auto name = QStringLiteral("%1 × %2").arg(x->currentText(), y->currentText()).toStdString();
+      const auto name = QStringLiteral("%1 × %2").arg(x, y).toStdString();
       auto& scatter = state->data.addScatterXY(name)->second;
       for (size_t i = 0; i < xs.size(); ++i)
       {
@@ -907,8 +983,8 @@ private:
       }
       if (!state->paired.empty())
         if (auto* curve = xyPlot->addCurve(name)) curve->curve->setStyle(QwtPlotCurve::Dots);
-      chart->setAxisTitle(QwtPlot::xBottom, x->currentText());
-      chart->setAxisTitle(QwtPlot::yLeft, y->currentText());
+      chart->setAxisTitle(QwtPlot::xBottom, x);
+      chart->setAxisTitle(QwtPlot::yLeft, y);
       emit xyPlot->curveListChanged();
       xyPlot->zoomOut(false);
       xyPlot->replot();
@@ -916,9 +992,8 @@ private:
       fit->setEnabled(state->paired.size() >= 2);
       status->setText(QStringLiteral("配对 %1 / %2 个 X 采样点").arg(qulonglong(state->paired.size())).arg(qulonglong(xs.size())));
     };
-    connect(apply, &QPushButton::clicked, panel, redraw);
     auto* options = new QWidget(panel);
-    root->insertWidget(2, options);
+    root->insertWidget(1, options);
     auto* optionsForm = new QFormLayout(options);
     options->hide();
     connect(fit, &QPushButton::clicked, options, [options] { options->setVisible(!options->isVisible()); });
@@ -1121,33 +1196,9 @@ private:
     auto syncing = std::make_shared<bool>(false);
     auto* panel = makeAnalysisPanel();
     auto* root = new QVBoxLayout(panel);
-    auto* form = new QFormLayout;
-    root->addLayout(form);
-    auto* layoutMode = new QComboBox(panel);
-    layoutMode->addItems({QStringLiteral("单图双 Y 轴"), QStringLiteral("上下联动图")});
-    layoutMode->setCurrentIndex(comparisonLayout);
-    form->addRow(QStringLiteral("布局"), layoutMode);
-    auto* configure = new QPushButton(QStringLiteral("配置左右轴测点"), panel);
+    const bool stacked = comparisonLayout == 1;
     auto* difference = new QPushButton(QStringLiteral("差值统计"), panel);
-    auto* actions = new QHBoxLayout;
-    actions->addWidget(configure);
-    actions->addWidget(difference);
-    root->addLayout(actions);
-    auto* assignmentPanel = new QWidget(panel);
-    auto* grid = new QGridLayout(assignmentPanel);
-    QVector<QComboBox*> assignments;
-    for (int i = 0; i < fields.size(); ++i)
-    {
-      auto* axis = new QComboBox(assignmentPanel);
-      axis->addItems({QStringLiteral("不显示"), QStringLiteral("左轴 / 上图"), QStringLiteral("右轴 / 下图")});
-      axis->setCurrentIndex(comparisonAxes.value(fields.at(i), i == 0 ? 1 : i == 1 ? 2 : 0));
-      grid->addWidget(new QLabel(fields.at(i), assignmentPanel), i / 2, 2 * (i % 2));
-      grid->addWidget(axis, i / 2, 2 * (i % 2) + 1);
-      assignments.push_back(axis);
-    }
-    root->addWidget(assignmentPanel);
-    assignmentPanel->hide();
-    connect(configure, &QPushButton::clicked, panel, [=] { assignmentPanel->setVisible(!assignmentPanel->isVisible()); });
+    root->addWidget(difference, 0, Qt::AlignLeft);
     auto* differencePanel = new QWidget(panel);
     auto* differenceRow = new QHBoxLayout(differencePanel);
     auto* x = new QComboBox(differencePanel);
@@ -1183,7 +1234,7 @@ private:
     const auto link = [&](QwtPlot* from, QwtPlot* to) {
       connect(from->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged, panel,
               [=] {
-        if (*syncing || layoutMode->currentIndex() != 1) return;
+        if (*syncing || !stacked) return;
         const auto scale = from->axisScaleDiv(QwtPlot::xBottom);
         if (scale == to->axisScaleDiv(QwtPlot::xBottom)) return;
         *syncing = true;
@@ -1197,19 +1248,20 @@ private:
 
     const auto initialScale = canvas->axisScaleDiv(QwtPlot::xBottom);
     const auto redraw = [=] {
-      comparisonLayout = layoutMode->currentIndex();
       QStringList left, right;
-      for (int i = 0; i < assignments.size(); ++i)
+      for (int i = 0; i < fields.size(); ++i)
       {
-        comparisonAxes.insert(fields.at(i), assignments.at(i)->currentIndex());
-        if (assignments.at(i)->currentIndex() == 1) left << fields.at(i);
-        if (assignments.at(i)->currentIndex() == 2) right << fields.at(i);
+        const auto& field = fields.at(i);
+        const int axis = comparisonAxes.value(field, i == 0 ? 1 : i == 1 ? 2 : 0);
+        if (axis == 1) left << field;
+        if (axis == 2) right << field;
       }
       x->clear(); x->addItems(left);
       y->clear(); y->addItems(right);
       calculate->setEnabled(!left.isEmpty() && !right.isEmpty());
+      if (left.isEmpty() || right.isEmpty())
+        status->setText(QStringLiteral("请给左右轴各分配至少一个有有效数据的测点。"));
       *syncing = true;
-      const bool stacked = layoutMode->currentIndex() == 1;
       lower->setVisible(stacked);
       upper->removeAllCurves();
       lower->removeAllCurves();
@@ -1239,9 +1291,6 @@ private:
       }
       *syncing = false;
     };
-    connect(layoutMode, QOverload<int>::of(&QComboBox::currentIndexChanged), panel, redraw);
-    for (auto* axis : assignments)
-      connect(axis, QOverload<int>::of(&QComboBox::currentIndexChanged), panel, redraw);
     connect(calculate, &QPushButton::clicked, panel, [=] {
       bool valid = false;
       const double seconds = tolerance->text().toDouble(&valid);
@@ -1368,6 +1417,16 @@ private:
     {
       status->setText(QStringLiteral("请选择 1 至 16 个测点。"));
       return false;
+    }
+    if (analysisMode == 2 && !xyTolerance.isEmpty())
+    {
+      bool valid = false;
+      const double seconds = xyTolerance.toDouble(&valid);
+      if (!valid || !std::isfinite(seconds) || seconds < 0.0)
+      {
+        status->setText(QStringLiteral("请输入有效的非负时间偏差。"));
+        return false;
+      }
     }
     const double infinity = std::numeric_limits<double>::infinity();
     const double lo = startEnabled->isChecked() ? start->dateTime().toMSecsSinceEpoch()/1000. : -infinity;
@@ -1534,10 +1593,13 @@ private:
   QwtPlot* canvas = nullptr;
   QVBoxLayout* workspace = nullptr;
   QWidget* analysisPanel = nullptr;
+  QWidget* parameters = nullptr;
+  QFormLayout* parameterForm = nullptr;
   int analysisMode = 0;
   int comparisonLayout = 0;
   QMap<QString, int> comparisonAxes;
-  QString xyX, xyY, xyTolerance;
+  QString xyX, xyY, xyTolerance, trendField;
+  int trendModel = 0, trendDegree = 1, trendWindow = 11, trendRange = 0;
   QStringList plottedFields;
   QComboBox* view = nullptr;
   QComboBox *groups = nullptr, *style = nullptr;
