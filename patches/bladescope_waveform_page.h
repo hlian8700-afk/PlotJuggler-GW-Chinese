@@ -5,6 +5,7 @@
 #include "bladescope_time_display.h"
 #include "bladescope_waveform_sampling.h"
 #include <qwt_scale_div.h>
+#include <qwt_scale_widget.h>
 #include <QClipboard>
 #include <QDataStream>
 #include <QDrag>
@@ -150,6 +151,9 @@ public:
     auto* statistics = new QPushButton(QStringLiteral("采样统计"), analysisControls);
     actions->addWidget(filter);
     actions->addWidget(statistics);
+    auto* comparison = new QPushButton(QStringLiteral("双轴对照"), analysisControls);
+    actions->addWidget(comparison);
+    connect(comparison, &QPushButton::clicked, this, [this] { showComparison(); });
     side->addWidget(analysisControls);
     connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
     connect(statistics, &QPushButton::clicked, this, [this] { showStatistics(); });
@@ -500,6 +504,101 @@ private:
     conditions = result;
     matchTolerance = tolerance;
     if (!plottedFields.isEmpty()) draw(plottedFields);
+  }
+
+  void showComparison()
+  {
+    QStringList fields;
+    for (const auto& curve : plot->curveList())
+      fields << QString::fromStdString(curve.src_name);
+    if (fields.size() < 2)
+    {
+      QMessageBox::information(this, QStringLiteral("双轴对照"), QStringLiteral("请先绘制至少两个有有效数据的测点。"));
+      return;
+    }
+
+    bool syncing = false;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("录波双轴对照"));
+    auto* root = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    root->addLayout(form);
+    auto* layoutMode = new QComboBox(&dialog);
+    layoutMode->addItems({QStringLiteral("单图双 Y 轴"), QStringLiteral("上下联动图")});
+    auto* left = new QComboBox(&dialog);
+    auto* right = new QComboBox(&dialog);
+    left->addItems(fields);
+    right->addItems(fields);
+    right->setCurrentIndex(1);
+    form->addRow(QStringLiteral("布局"), layoutMode);
+    form->addRow(QStringLiteral("左轴 / 上图"), left);
+    form->addRow(QStringLiteral("右轴 / 下图"), right);
+
+    auto* upper = new PlotWidget(*shown, &dialog);
+    auto* lower = new PlotWidget(*shown, &dialog);
+    root->addWidget(upper, 1);
+    root->addWidget(lower, 1);
+    auto* upperPlot = upper->findChild<QwtPlot*>();
+    auto* lowerPlot = lower->findChild<QwtPlot*>();
+    if (!upperPlot || !lowerPlot) return;
+    for (auto* chart : {upperPlot, lowerPlot})
+    {
+      chart->setAxisScaleDraw(QwtPlot::xBottom, new UtcScaleDraw);
+      chart->setAxisTitle(QwtPlot::xBottom, canvas->axisTitle(QwtPlot::xBottom));
+    }
+
+    const auto link = [&](QwtPlot* from, QwtPlot* to) {
+      connect(from->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged, &dialog,
+              [&, from, to] {
+        if (syncing || layoutMode->currentIndex() != 1) return;
+        const auto scale = from->axisScaleDiv(QwtPlot::xBottom);
+        if (scale == to->axisScaleDiv(QwtPlot::xBottom)) return;
+        syncing = true;
+        to->setAxisScaleDiv(QwtPlot::xBottom, scale);
+        to->replot();
+        syncing = false;
+      });
+    };
+    link(upperPlot, lowerPlot);
+    link(lowerPlot, upperPlot);
+
+    const auto initialScale = canvas->axisScaleDiv(QwtPlot::xBottom);
+    const auto redraw = [&] {
+      syncing = true;
+      const bool stacked = layoutMode->currentIndex() == 1;
+      lower->setVisible(stacked);
+      upper->removeAllCurves();
+      lower->removeAllCurves();
+      upperPlot->enableAxis(QwtPlot::yRight, !stacked);
+      upperPlot->setAxisTitle(QwtPlot::yLeft, left->currentText());
+      upperPlot->setAxisTitle(QwtPlot::yRight, right->currentText());
+      lowerPlot->setAxisTitle(QwtPlot::yLeft, right->currentText());
+      const auto curveStyle = style->currentIndex() ? QwtPlotCurve::Dots : QwtPlotCurve::Lines;
+      if (auto* item = upper->addCurve(left->currentText().toStdString(), QColor(32, 108, 177)))
+        item->curve->setStyle(curveStyle);
+      if (stacked || left->currentIndex() != right->currentIndex())
+      {
+        auto* target = stacked ? lower : upper;
+        if (auto* item = target->addCurve(right->currentText().toStdString(), QColor(199, 79, 36)))
+        {
+          item->curve->setStyle(curveStyle);
+          if (!stacked) item->curve->setYAxis(QwtPlot::yRight);
+        }
+      }
+      for (auto* chart : {upperPlot, lowerPlot})
+      {
+        chart->setAxisAutoScale(QwtPlot::yLeft);
+        chart->setAxisAutoScale(QwtPlot::yRight);
+        chart->setAxisScaleDiv(QwtPlot::xBottom, initialScale);
+        chart->replot();
+      }
+      syncing = false;
+    };
+    for (auto* box : {layoutMode, left, right})
+      connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, redraw);
+    redraw();
+    dialog.resize(1050, 690);
+    dialog.exec();
   }
 
   void showStatistics()
