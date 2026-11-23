@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QClipboard>
 #include <vector>
+#include <memory>
 #include "bladescope_fit_xlsx.h"
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -456,16 +457,15 @@ inline bool conditionPasses(const Condition& rule, double value)
   return false;
 }
 
-inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
+inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringList& initial,
                  double start, double end,
                  const std::function<void(const QStringList&, bool, double, double, bool, const SampleFilter&, const QJsonObject&)>& plot,
                  const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& dual,
                  const std::function<void(const QStringList&, double, double, bool, const SampleFilter&, const QJsonObject&)>& xy)
 {
-  QDialog dialog(parent);
-  dialog.setWindowTitle(QString::fromUtf8("录波分析"));
-  dialog.resize(760, 650);
-  auto* layout = new QVBoxLayout(&dialog);
+  auto* dialog = new QWidget(parent);
+  dialog->setWindowTitle(QStringLiteral("录波分析"));
+  auto* layout = new QVBoxLayout(dialog);
   auto* channels = new QListWidget;
   channels->setSelectionMode(QAbstractItemView::ExtendedSelection);
   auto* search = new QLineEdit;
@@ -478,7 +478,11 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   reference->addItem(QString::fromUtf8("不计算差值"), QString());
   QStringList names;
   for (const auto& entry : data.numeric)
-    names << QString::fromStdString(entry.first);
+  {
+    const auto raw = QString::fromStdString(entry.first);
+    if (!raw.contains(QStringLiteral("/TS Detail")) && !raw.contains(QStringLiteral("/TS Overview")))
+      names << raw;
+  }
   names.sort(Qt::CaseInsensitive);
   const QVariantMap aliases = qApp->property("bladeScopeTagAliases").toMap();
   for (const auto& name : names)
@@ -491,7 +495,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     condition->addItem(display, name);
     reference->addItem(display, name);
   }
-  QObject::connect(search, &QLineEdit::textChanged, &dialog, [=](const QString& text) {
+  QObject::connect(search, &QLineEdit::textChanged, dialog, [=](const QString& text) {
     for (int i = 0; i < channels->count(); ++i)
       channels->item(i)->setHidden(!channels->item(i)->text().contains(text, Qt::CaseInsensitive));
   });
@@ -502,87 +506,93 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
         list << channels->item(i)->data(Qt::UserRole).toString();
     return list;
   };
-  const auto warn = [&](const QString& message) {
-    QMessageBox::warning(&dialog, dialog.windowTitle(), message);
+  const auto warn = [=, &data](const QString& message) {
+    QMessageBox::warning(dialog, dialog->windowTitle(), message);
   };
   auto* groups = new QComboBox;
   groups->setEditable(true);
   groups->setInsertPolicy(QComboBox::NoInsert);
   groups->lineEdit()->setPlaceholderText(QString::fromUtf8("选择或输入测点组名称"));
   const QString key = measurementGroupsKey;
-  QSettings settings;
-  QJsonObject saved = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
-  groups->addItems(saved.keys());
+  struct Configuration
+  {
+    QSettings settings;
+    QJsonObject saved, templates;
+    QString activeGroup;
+    QVector<Condition> conditions;
+  };
+  auto state = std::make_shared<Configuration>();
+  state->saved = QJsonDocument::fromJson(state->settings.value(key).toByteArray()).object();
+  groups->addItems(state->saved.keys());
   groups->setCurrentIndex(-1);
-  auto* groupRow = new QHBoxLayout;
+  auto* groupRow = new QVBoxLayout;
   groupRow->addWidget(groups, 1);
-  auto addButton = [&dialog](QHBoxLayout* row, const char* name, auto action) {
+  auto addButton = [dialog](QBoxLayout* row, const char* name, auto action) {
     auto* button = new QPushButton(QString::fromUtf8(name));
     row->addWidget(button);
-    QObject::connect(button, &QPushButton::clicked, &dialog, action);
+    QObject::connect(button, &QPushButton::clicked, dialog, action);
   };
-  QString activeGroup;
-  const auto graphAliases = [&] { return storedGroupAliases(settings).value(activeGroup).toObject(); };
-  const auto saveGroup = [&](const QString& name, const QStringList& list) {
+  const auto graphAliases = [=, &data] { return storedGroupAliases(state->settings).value(state->activeGroup).toObject(); };
+  const auto saveGroup = [=, &data](const QString& name, const QStringList& list) {
     if (name.isEmpty() || list.isEmpty())
       return warn(QString::fromUtf8("请输入组名并勾选测点。"));
     if (list.size() > 16) return warn(QStringLiteral("每组最多保存 16 个测点。"));
-    if (saved.contains(name) &&
-        QMessageBox::question(&dialog, dialog.windowTitle(), QString::fromUtf8("覆盖同名测点组？"))
+    if (state->saved.contains(name) &&
+        QMessageBox::question(dialog, dialog->windowTitle(), QString::fromUtf8("覆盖同名测点组？"))
             != QMessageBox::Yes)
       return;
-    if (!saved.contains(name))
+    if (!state->saved.contains(name))
       groups->addItem(name);
-    saved.insert(name, QJsonArray::fromStringList(list));
-    settings.setValue(key, QJsonDocument(saved).toJson(QJsonDocument::Compact));
+    state->saved.insert(name, QJsonArray::fromStringList(list));
+    state->settings.setValue(key, QJsonDocument(state->saved).toJson(QJsonDocument::Compact));
     groups->setCurrentText(name);
-    auto allAliases = storedGroupAliases(settings);
+    auto allAliases = storedGroupAliases(state->settings);
     const auto previous = allAliases.value(name).toObject();
     QJsonObject retained;
     for (const auto& field : list)
       if (previous.contains(field)) retained.insert(field, previous.value(field));
     allAliases.insert(name, retained);
-    settings.setValue(measurementAliasesKey, QJsonDocument(allAliases).toJson(QJsonDocument::Compact));
-    activeGroup = name;
+    state->settings.setValue(measurementAliasesKey, QJsonDocument(allAliases).toJson(QJsonDocument::Compact));
+    state->activeGroup = name;
     for (int i = 0; i < channels->count(); ++i)
     {
       auto* item = channels->item(i);
       item->setCheckState(list.contains(item->data(Qt::UserRole).toString()) ? Qt::Checked : Qt::Unchecked);
     }
   };
-  addButton(groupRow, "保存测点组", [&] { saveGroup(groups->currentText().trimmed(), selected()); });
+  addButton(groupRow, "保存测点组", [=, &data] { saveGroup(groups->currentText().trimmed(), selected()); });
   channels->setContextMenuPolicy(Qt::CustomContextMenu);
-  QObject::connect(channels, &QListWidget::customContextMenuRequested, &dialog, [&](QPoint position) {
+  QObject::connect(channels, &QListWidget::customContextMenuRequested, dialog, [=, &data](QPoint position) {
     const auto items = channels->selectedItems();
     if (items.isEmpty()) return;
     QMenu menu;
     auto* create = menu.addAction(QStringLiteral("保存选中测点为新组"));
     if (menu.exec(channels->viewport()->mapToGlobal(position)) != create) return;
     bool ok = false;
-    const auto name = QInputDialog::getText(&dialog, dialog.windowTitle(),
+    const auto name = QInputDialog::getText(dialog, dialog->windowTitle(),
         QStringLiteral("组名"), QLineEdit::Normal, {}, &ok).trimmed();
     if (!ok || name.isEmpty()) return;
-    if (saved.contains(name)) return warn(QStringLiteral("组名已经存在。"));
+    if (state->saved.contains(name)) return warn(QStringLiteral("组名已经存在。"));
     QStringList fields;
     for (const auto* item : items) fields << item->data(Qt::UserRole).toString();
     saveGroup(name, fields);
   });
-  addButton(groupRow, "管理测点组", [&] {
+  addButton(groupRow, "管理测点组", [=, &data] {
     const QString selectedGroup = groups->currentText();
-    manageGroups(&dialog, names, saved, [&](const QJsonObject& value) {
-      settings.setValue(key, QJsonDocument(value).toJson(QJsonDocument::Compact));
+    manageGroups(dialog, names, state->saved, [=, &data](const QJsonObject& value) {
+      state->settings.setValue(key, QJsonDocument(value).toJson(QJsonDocument::Compact));
     });
-    if (!saved.contains(activeGroup)) activeGroup.clear();
+    if (!state->saved.contains(state->activeGroup)) state->activeGroup.clear();
     groups->clear();
-    groups->addItems(saved.keys());
-    if (saved.contains(selectedGroup))
+    groups->addItems(state->saved.keys());
+    if (state->saved.contains(selectedGroup))
       groups->setCurrentText(selectedGroup);
   });
-  const auto loadGroup = [&] {
-    const auto group = saved.value(groups->currentText().trimmed()).toArray();
-    if (!saved.contains(groups->currentText().trimmed()))
+  const auto loadGroup = [=, &data] {
+    const auto group = state->saved.value(groups->currentText().trimmed()).toArray();
+    if (!state->saved.contains(groups->currentText().trimmed()))
       return warn(QString::fromUtf8("请选择已保存的测点组。"));
-    activeGroup = groups->currentText().trimmed();
+    state->activeGroup = groups->currentText().trimmed();
     QStringList missing;
     for (const auto value : group)
       if (!names.contains(value.toString()))
@@ -610,7 +620,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       warn(QString::fromUtf8("录波中缺失：") + missing.join(", "));
   };
   addButton(groupRow, "载入测点组", loadGroup);
-  QObject::connect(groups, QOverload<int>::of(&QComboBox::activated), &dialog, loadGroup);
+  QObject::connect(groups, QOverload<int>::of(&QComboBox::activated), dialog, loadGroup);
   layout->addLayout(groupRow);
 
   auto* fields = new QFormLayout;
@@ -626,7 +636,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   auto* units = new QCheckBox(QString::fromUtf8("确认差值测点单位一致"));
   fields->addRow(QString::fromUtf8("起始时间（原始秒）"), from);
   fields->addRow(QString::fromUtf8("结束时间（原始秒）"), to);
-  const auto addSearchableChannel = [&](const QString& field, QComboBox* combo) {
+  const auto addSearchableChannel = [=, &data](const QString& field, QComboBox* combo) {
     using Entry = QPair<QString, QVariant>;
     QVector<Entry> entries;
     entries.reserve(combo->count());
@@ -644,7 +654,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     row->addWidget(combo, 3);
     fields->addRow(field, row);
 
-    QObject::connect(query, &QLineEdit::textChanged, &dialog, [combo, entries](const QString& text) {
+    QObject::connect(query, &QLineEdit::textChanged, dialog, [combo, entries](const QString& text) {
       const QVariant previous = combo->currentData();
       const QString needle = text.trimmed();
       const QSignalBlocker blocker(combo);
@@ -670,19 +680,18 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   fields->addRow(units);
   layout->addLayout(fields);
 
-  QVector<Condition> conditions;
   auto* filtering = new QCheckBox(QStringLiteral("启用筛选"));
   filtering->setChecked(true);
   layout->addWidget(filtering);
   auto* conditionsList = new QListWidget;
   conditionsList->setMaximumHeight(100);
   layout->addWidget(conditionsList);
-  auto* filters = new QHBoxLayout;
+  auto* filters = new QVBoxLayout;
   layout->addLayout(filters);
-  const auto refresh = [&] {
+  const auto refresh = [=, &data] {
     const QSignalBlocker block(conditionsList);
     conditionsList->clear();
-    for (const auto& rule : conditions)
+    for (const auto& rule : state->conditions)
     {
       auto* item = new QListWidgetItem(QStringLiteral("%1 %2 %3 %4").arg(rule.field,
           op->itemText(rule.op), number(rule.lower), rule.op == 6 ? number(rule.upper) : QString()),
@@ -690,10 +699,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       item->setCheckState(rule.enabled ? Qt::Checked : Qt::Unchecked);
     }
   };
-  QObject::connect(conditionsList, &QListWidget::itemChanged, &dialog, [&](QListWidgetItem* item) {
-    conditions[conditionsList->row(item)].enabled = item->checkState() == Qt::Checked;
+  QObject::connect(conditionsList, &QListWidget::itemChanged, dialog, [=, &data](QListWidgetItem* item) {
+    state->conditions[conditionsList->row(item)].enabled = item->checkState() == Qt::Checked;
   });
-  addButton(filters, "添加 AND 条件", [&] {
+  addButton(filters, "添加 AND 条件", [=, &data] {
     bool lowerOK = false, upperOK = false;
     const auto field = condition->currentData().toString();
     const auto lower = threshold->text().toDouble(&lowerOK);
@@ -702,41 +711,41 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (field.isEmpty() || !lowerOK || !std::isfinite(lower) ||
         (operation == 6 && (!upperOK || !std::isfinite(high) || high < lower)))
       return warn(QStringLiteral("请选择条件测点并填写有效阈值。"));
-    conditions.push_back({field, operation, lower, operation == 6 ? high : 0., true});
+    state->conditions.push_back({field, operation, lower, operation == 6 ? high : 0., true});
     refresh();
   });
-  addButton(filters, "删除条件", [&] {
+  addButton(filters, "删除条件", [=, &data] {
     if (conditionsList->currentRow() < 0) return;
-    conditions.removeAt(conditionsList->currentRow());
+    state->conditions.removeAt(conditionsList->currentRow());
     refresh();
   });
-  addButton(filters, "清空条件", [&] { conditions.clear(); refresh(); });
+  addButton(filters, "清空条件", [=, &data] { state->conditions.clear(); refresh(); });
 
   const auto templateKey = QStringLiteral("BladeScope/waveformFilterTemplates");
-  auto templates = QJsonDocument::fromJson(settings.value(templateKey).toByteArray()).object();
+  state->templates = QJsonDocument::fromJson(state->settings.value(templateKey).toByteArray()).object();
   auto* presets = new QComboBox;
-  presets->addItems(templates.keys());
+  presets->addItems(state->templates.keys());
   filters->addWidget(presets, 1);
-  addButton(filters, "保存模板", [&] {
-    if (conditions.isEmpty()) return warn(QStringLiteral("请先添加条件。"));
+  addButton(filters, "保存模板", [=, &data] {
+    if (state->conditions.isEmpty()) return warn(QStringLiteral("请先添加条件。"));
     bool ok = false;
-    const auto name = QInputDialog::getText(&dialog, QStringLiteral("筛选模板"),
+    const auto name = QInputDialog::getText(dialog, QStringLiteral("筛选模板"),
         QStringLiteral("模板名称"), QLineEdit::Normal, {}, &ok).trimmed();
     if (!ok || name.isEmpty()) return;
-    if (templates.contains(name) && QMessageBox::question(&dialog, dialog.windowTitle(),
+    if (state->templates.contains(name) && QMessageBox::question(dialog, dialog->windowTitle(),
         QStringLiteral("覆盖同名筛选模板？"), QMessageBox::Yes | QMessageBox::No,
         QMessageBox::No) != QMessageBox::Yes) return;
     QJsonArray rows;
-    for (const auto& rule : conditions)
+    for (const auto& rule : state->conditions)
       rows.append(QJsonObject{{"field",rule.field},{"op",rule.op},{"lower",rule.lower},
                               {"upper",rule.upper},{"enabled",rule.enabled}});
-    if (!templates.contains(name)) presets->addItem(name);
-    templates.insert(name, rows);
+    if (!state->templates.contains(name)) presets->addItem(name);
+    state->templates.insert(name, rows);
     presets->setCurrentText(name);
-    settings.setValue(templateKey, QJsonDocument(templates).toJson(QJsonDocument::Compact));
+    state->settings.setValue(templateKey, QJsonDocument(state->templates).toJson(QJsonDocument::Compact));
   });
-  addButton(filters, "载入模板", [&] {
-    const auto rows = templates.value(presets->currentText()).toArray();
+  addButton(filters, "载入模板", [=, &data] {
+    const auto rows = state->templates.value(presets->currentText()).toArray();
     if (rows.isEmpty()) return;
     QVector<Condition> loaded;
     for (const auto value : rows)
@@ -749,14 +758,14 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
       loaded.push_back({field, operation, row.value("lower").toDouble(),
                         row.value("upper").toDouble(), row.value("enabled").toBool(true)});
     }
-    conditions = std::move(loaded);
+    state->conditions = std::move(loaded);
     refresh();
   });
 
-  const auto makeFilter = [&](SampleFilter& result) {
+  const auto makeFilter = [=, &data](SampleFilter& result) {
     if (!filtering->isChecked()) return true;
     QVector<QPair<const PJ::PlotData*, Condition>> inputs;
-    for (const auto& rule : conditions)
+    for (const auto& rule : state->conditions)
     {
       if (!rule.enabled) continue;
       const auto entry = data.numeric.find(rule.field.toStdString());
@@ -787,7 +796,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     };
     return true;
   };
-  const auto plotOverview = [&](bool newTab) {
+  const auto plotOverview = [=, &data](bool newTab) {
     bool a = false, b = false;
     const auto first = from->text().toDouble(&a), last = to->text().toDouble(&b);
     if (!a || !b || !std::isfinite(first) || !std::isfinite(last) || first > last)
@@ -797,26 +806,22 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
   };
   auto* plotRow = new QHBoxLayout;
   layout->addLayout(plotRow);
-  addButton(plotRow, "常规视图（每条最多 5 万点）", [&] {
+  addButton(plotRow, "常规视图（每条最多 5 万点）", [=, &data] {
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
     plotOverview(true);
   });
-  addButton(plotRow, "追加到当前图页", [&] {
-    if (selected().isEmpty())
-      return warn(QString::fromUtf8("请勾选测点。"));
-    plotOverview(false);
-  });
+
   auto* results = new QPlainTextEdit;
   results->setReadOnly(true);
   layout->addWidget(results, 1);
-  auto* actions = new QHBoxLayout;
+  auto* actions = new QVBoxLayout;
   const QStringList viewModes{QStringLiteral("常规视图（每条最多 5 万点）"),
                               QStringLiteral("细化 TS 明细（全原始点）")};
   auto* statisticsMode = new QComboBox;
   statisticsMode->addItems(viewModes);
   actions->addWidget(statisticsMode);
-  auto run = [&](bool exportSamples) {
+  auto run = [=, &data](bool exportSamples) {
     const QStringList targets = selected();
     bool fromOK = false, toOK = false, toleranceOK = false;
     const double first = from->text().toDouble(&fromOK);
@@ -837,7 +842,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     QString path;
     if (exportSamples)
     {
-      path = QFileDialog::getSaveFileName(&dialog, QString::fromUtf8("导出筛选采样"), {}, "CSV (*.csv)");
+      path = QFileDialog::getSaveFileName(dialog, QString::fromUtf8("导出筛选采样"), {}, "CSV (*.csv)");
       if (path.isEmpty())
         return;
       if (!path.endsWith(".csv", Qt::CaseInsensitive))
@@ -919,19 +924,19 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     }
     results->setPlainText(rows.join('\n'));
   };
-  addButton(actions, "双轴对照", [&] {
+  addButton(actions, "双轴对照", [=, &data] {
     bool firstOK = false, lastOK = false;
     const double first = from->text().toDouble(&firstOK), last = to->text().toDouble(&lastOK);
     if (!firstOK || !lastOK || !std::isfinite(first) || !std::isfinite(last) || first >= last)
       return warn(QStringLiteral("请输入有效的起止时间。"));
     bool accepted = false;
 
-    const auto choice = QInputDialog::getItem(&dialog, QStringLiteral("双轴对照"),
+    const auto choice = QInputDialog::getItem(dialog, QStringLiteral("双轴对照"),
         QStringLiteral("数据视图"), viewModes, statisticsMode->currentIndex(), false, &accepted);
     SampleFilter filter;
     if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter, graphAliases());
   });
-  addButton(actions, "XY 分析", [&] {
+  addButton(actions, "XY 分析", [=, &data] {
     bool firstOK = false, lastOK = false;
     const double first = from->text().toDouble(&firstOK), last = to->text().toDouble(&lastOK);
     if (!firstOK || !lastOK || !std::isfinite(first) || !std::isfinite(last) || first > last)
@@ -940,7 +945,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     if (makeFilter(filter)) xy(selected(), first, last, statisticsMode->currentIndex() == 1,
                                filter, graphAliases());
   });
-  addButton(actions, "细化 TS 明细（全原始点）", [&] {
+  addButton(actions, "细化 TS 明细（全原始点）", [=, &data] {
     bool startOK = false, endOK = false;
     const auto first = from->text().toDouble(&startOK);
     const auto last = to->text().toDouble(&endOK);
@@ -950,11 +955,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& data, const QStringL
     SampleFilter filter;
     if (makeFilter(filter)) plot(selected(), true, first, last, true, filter, graphAliases());
   });
-  addButton(actions, "预览筛选与统计", [&] { run(false); });
-  addButton(actions, "导出筛选采样 CSV", [&] { run(true); });
-  addButton(actions, "复制统计", [&] { QApplication::clipboard()->setText(results->toPlainText()); });
-  addButton(actions, "关闭", [&] { dialog.reject(); });
+  addButton(actions, "预览筛选与统计", [=, &data] { run(false); });
+  addButton(actions, "导出筛选采样 CSV", [=, &data] { run(true); });
+  addButton(actions, "复制统计", [=, &data] { QApplication::clipboard()->setText(results->toPlainText()); });
   layout->addLayout(actions);
-  dialog.exec();
+  return dialog;
 }
 }
