@@ -37,3 +37,18 @@ python3 -m venv .venv
 运行 `.venv/bin/python auth/server.py --data /var/lib/bladescope-auth public-key` 获取公开的 RSA `modulus` 和 `exponent`。在打包环境设置 `BLADESCOPE_AUTH_URL`（HTTPS 域名，末尾无斜杠）、`BLADESCOPE_AUTH_RSA_N`（modulus）、`BLADESCOPE_AUTH_RSA_E`（exponent）。也可以通过 GitHub Actions 同名仓库变量传入。设置这三项后构建授权版。三项都为空时构建普通版。安装包中只包含 URL 和公钥。授权 HTTPS 使用 Windows WinHTTP，沿用系统证书验证。授权缓存在 Windows 当前用户下由 DPAPI 保护，并在使用时检查签名、设备和到期时间。离线期限依赖设备时间，适合常规账号授权管理。
 
 正式分发前请在一台新 Windows 电脑使用实际的验证域名和发件服务，验收收码、在线激活、断网重启、到期续验和停用。独立授权服务的开发测试可用 `python -m unittest discover -s auth -v` 执行，采用模拟发件。
+
+## Railway 单账号试运行
+
+创建 Web 服务时选择本仓库的 `feature/email-authorization` 分支，Root Directory 填 `/auth`，Railway 配置路径填 `/auth/railway.toml`。挂载持久卷到 `/data`，保持一个实例，并生成服务自带的 HTTPS 域名。填入以下服务变量后部署：
+
+| 变量 | 值 |
+|---|---|
+| `PORT` | `8080` |
+| `BLADESCOPE_INITIAL_EMAIL` | 本次批准开通的第一个个人邮箱 |
+| `BLADESCOPE_RESEND_API_KEY` | Resend 的发送专用密钥，存入 Railway 私密变量 |
+| `BLADESCOPE_RESEND_FROM` | 可省略，试运行默认使用 `onboarding@resend.dev` |
+
+使用 Resend 测试发件地址时，只能向该 Resend 账号自己的邮箱发信。首个账号应与 Resend 注册邮箱一致。以后开放给其他收件人时，先在 Resend 验证发件域名，再设置发件地址。
+
+部署后检查 `GET /healthz`。首次启动把指定邮箱加到账号库。已停用的账号保持停用，重新部署时也不会恢复。后续通过 `railway ssh` 进入服务容器，在容器里使用 `python /app/server.py --data /data list`、`enable` 或 `disable` 管理账号。用同一入口执行 `public-key`，把返回的公钥和当前的 Railway HTTPS 域名配置到 Windows 授权版构建变量。私钥和账号库随持久卷保留。

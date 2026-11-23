@@ -1,11 +1,15 @@
 import concurrent.futures
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
-from server import Authorization, OFFLINE_SECONDS, init, public_config, set_account
+from server import Authorization, OFFLINE_SECONDS, init, public_config, send_mail, set_account
 
 
 class AuthorizationTests(unittest.TestCase):
@@ -91,3 +95,31 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(self.post("code")[0], 202)
         self.assertEqual(self.post("code")[0], 429)
         self.assertEqual(len(self.mail), 1)
+
+
+    def test_bootstrap_does_not_restore_disabled_account(self):
+        script = Path(__file__).with_name("server.py")
+        command = [sys.executable, str(script), "--data", str(self.directory)]
+        env = dict(os.environ, BLADESCOPE_INITIAL_EMAIL=self.email)
+        subprocess.run([*command, "bootstrap"], env=env, check=True, capture_output=True)
+        set_account(self.directory, self.email, False)
+        subprocess.run([*command, "bootstrap"], env=env, check=True, capture_output=True)
+        listing = subprocess.check_output([*command, "list"], text=True)
+        self.assertEqual(listing.strip(), f"disabled\t{self.email}")
+
+    def test_resend_mail_transport(self):
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.status = 200
+        config = {
+            "BLADESCOPE_MAIL_TRANSPORT": "resend",
+            "BLADESCOPE_RESEND_FROM": "BladeScope <onboarding@resend.dev>",
+            "BLADESCOPE_RESEND_API_KEY": "test-placeholder",
+        }
+        with patch.dict(os.environ, config), patch("server.build_opener", return_value=opener):
+            send_mail(self.email, "012345")
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.resend.com/emails")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Authorization"), "Bearer test-placeholder")
+        self.assertEqual(json.loads(request.data)["to"], [self.email])
+        self.assertIn("012345", json.loads(request.data)["text"])

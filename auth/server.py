@@ -14,6 +14,7 @@ import sqlite3
 import ssl
 import time
 from email.message import EmailMessage
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -106,12 +107,35 @@ def set_account(directory, email, enabled):
         db.commit()
 
 
+class RejectMailRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def send_mail(address, code):
+    subject = "BladeScope 授权验证码"
+    body = f"BladeScope 验证码：{code}\n验证码在 10 分钟内有效，仅可使用一次。"
+    if os.getenv("BLADESCOPE_MAIL_TRANSPORT", "smtp") == "resend":
+        request = Request(
+            "https://api.resend.com/emails",
+            data=json.dumps({
+                "from": os.environ["BLADESCOPE_RESEND_FROM"], "to": [address],
+                "subject": subject, "text": body,
+            }).encode(),
+            headers={"Authorization": "Bearer " + os.environ["BLADESCOPE_RESEND_API_KEY"],
+                     "Content-Type": "application/json", "User-Agent": "BladeScope-Authorization/1.0"},
+            method="POST",
+        )
+        with build_opener(RejectMailRedirects()).open(request, timeout=8) as response:
+            if response.status not in (200, 201, 202):
+                raise OSError("Mail API rejected the request")
+        return
+
     message = EmailMessage()
-    message["Subject"] = "BladeScope 授权验证码"
+    message["Subject"] = subject
     message["From"] = os.environ["BLADESCOPE_SMTP_FROM"]
     message["To"] = address
-    message.set_content(f"BladeScope 验证码：{code}\n验证码在 10 分钟内有效，仅可使用一次。")
+    message.set_content(body)
     with smtplib.SMTP_SSL(os.environ["BLADESCOPE_SMTP_HOST"],
                          int(os.getenv("BLADESCOPE_SMTP_PORT", "465")),
                          timeout=10, context=ssl.create_default_context()) as smtp:
@@ -226,7 +250,11 @@ class Authorization:
 
     def __call__(self, environ, respond):
         route = environ["PATH_INFO"]
-        if route not in ("/v1/code", "/v1/verify", "/v1/refresh"):
+        if route == "/healthz" and environ["REQUEST_METHOD"] == "GET":
+            with closing(connect(self.directory)) as db:
+                db.execute("SELECT 1 FROM account LIMIT 1").fetchone()
+            status, result = 200, {"status": "ok"}
+        elif route not in ("/v1/code", "/v1/verify", "/v1/refresh"):
             status, result = 404, {"error": "not_found"}
         elif environ["REQUEST_METHOD"] != "POST":
             status, result = 405, {"error": "method_not_allowed"}
@@ -260,7 +288,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True, type=Path)
     commands = parser.add_subparsers(dest="action", required=True)
-    for action in ("init", "public-key", "list", "serve"):
+    for action in ("init", "bootstrap", "public-key", "list", "serve"):
         commands.add_parser(action)
     for action in ("enable", "disable"):
         commands.add_parser(action).add_argument("email")
@@ -268,6 +296,15 @@ def main():
     os.umask(0o077)
     if args.action == "init":
         init(args.data)
+    elif args.action == "bootstrap":
+        initial_email = os.getenv("BLADESCOPE_INITIAL_EMAIL")
+        if initial_email:
+            try:
+                address = email_address(initial_email)
+            except ValueError:
+                raise SystemExit("BLADESCOPE_INITIAL_EMAIL is invalid") from None
+            with closing(connect(args.data)) as db:
+                db.execute("INSERT OR IGNORE INTO account VALUES (?, 1, 1)", (address,))
     elif args.action == "public-key":
         print(json.dumps(public_config(args.data)))
     elif args.action in ("enable", "disable"):
@@ -279,7 +316,8 @@ def main():
     else:
         app = Authorization(args.data)
         from waitress import serve
-        serve(app, host="127.0.0.1", port=int(os.getenv("BLADESCOPE_PORT", "8765")),
+        serve(app, host=os.getenv("BLADESCOPE_BIND", "127.0.0.1"),
+              port=int(os.getenv("PORT") or os.getenv("BLADESCOPE_PORT", "8765")),
               max_request_body_size=4096, channel_timeout=30)
 
 
