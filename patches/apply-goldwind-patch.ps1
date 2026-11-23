@@ -2566,3 +2566,28 @@ void MainWindow::deleteAllData()
   _curvelist_widget->setUpdatesEnabled(previousUpdates);
 '@ }
 )
+
+Copy-Item (Join-Path $PSScriptRoot "bladescope_csv_recording.h") "plotjuggler_app/bladescope_csv_recording.h" -Force
+Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = @'
+#include "mainwindow.h"
+#include "bladescope_csv_recording.h"
+'@ }
+  @{ Old = '      if (dataloader->readDataFromFile(&new_info, mapped_data))'; New = @'
+      QVariantMap fileAliases;
+      const bool plcCsv = extension == QStringLiteral("csv") &&
+                          BladeCsvRecording::read(info.filename, mapped_data, fileAliases);
+      if (plcCsv || dataloader->readDataFromFile(&new_info, mapped_data))
+'@ }
+  @{ Old = '        added_names = mapped_data.getAllNames();'; New = @'
+        auto recordingAliases = qApp->property("bladeScopeRecordingAliases").toMap();
+        if (!merge_files) recordingAliases.clear();
+        for (const auto& entry : mapped_data.numeric)
+          recordingAliases.remove(QString::fromStdString(entry.first));
+        for (auto it = fileAliases.cbegin(); it != fileAliases.cend(); ++it)
+          recordingAliases.insert(info.prefix + it.key(), it.value());
+        qApp->setProperty("bladeScopeRecordingAliases", recordingAliases);
+
+        added_names = mapped_data.getAllNames();
+'@ }
+)

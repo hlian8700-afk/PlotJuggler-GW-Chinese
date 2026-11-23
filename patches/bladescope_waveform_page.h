@@ -302,7 +302,10 @@ private:
       names.sort(Qt::CaseInsensitive);
     }
     else for (const auto value : groupsData.value(group).toArray()) names << value.toString();
-    const auto aliases = qApp->property("bladeScopeTagAliases").toMap();
+    auto aliases = qApp->property("bladeScopeTagAliases").toMap();
+    const auto recordingAliases = qApp->property("bladeScopeRecordingAliases").toMap();
+    for (auto it = recordingAliases.cbegin(); it != recordingAliases.cend(); ++it)
+      aliases.insert(it.key(), it.value());
     const auto systems = qApp->property("bladeScopeTagSystems").toMap();
     const auto selectedSystem = system->currentData().toString();
     QStringList categories;
@@ -405,7 +408,10 @@ private:
     if (lo > hi) { status->setText(QStringLiteral("开始时间不能晚于结束时间。")); return false; }
     plot->removeAllCurves();
     shown->numeric.clear();
-    const auto aliases = qApp->property("bladeScopeTagAliases").toMap();
+    auto aliases = qApp->property("bladeScopeTagAliases").toMap();
+    const auto recordingAliases = qApp->property("bladeScopeRecordingAliases").toMap();
+    for (auto it = recordingAliases.cbegin(); it != recordingAliases.cend(); ++it)
+      aliases.insert(it.key(), it.value());
     size_t count = 0;
     double firstPlottedTime = std::numeric_limits<double>::infinity();
     for (const auto& name : fields)
