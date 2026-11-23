@@ -3,6 +3,7 @@
 #include "plotwidget.h"
 #include "bladescope_plot_theme.h"
 #include "bladescope_time_display.h"
+#include "bladescope_waveform_sampling.h"
 #include <qwt_scale_div.h>
 #include <QDataStream>
 #include <QDrag>
@@ -82,8 +83,12 @@ public:
     menu->addAction(QStringLiteral("录波分析"))->setEnabled(false);
     analysis->setMenu(menu);
     header->addWidget(analysis);
-    auto* view = new QComboBox(this);
-    view->addItem(QStringLiteral("常规时序"));
+    view = new QComboBox(this);
+    view->addItem(QStringLiteral("常规时序（每条最多 5 万点）"));
+    view->addItem(QStringLiteral("细化 TS（全部采样点）"));
+    connect(view, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+      if (!plottedFields.isEmpty()) draw(plottedFields);
+    });
     header->addWidget(view);
     header->addStretch();
 
@@ -195,6 +200,7 @@ public:
 
   void clearData()
   {
+    plottedFields.clear();
     plot->removeAllCurves();
     shown->numeric.clear();
     plot->replot();
@@ -372,12 +378,12 @@ private:
       if (begin >= stop) continue;
       firstPlottedTime = std::min(firstPlottedTime, series.at(begin).x);
       auto& points = shown->addNumeric(key)->second;
-      for (size_t i = begin; i < stop; ++i)
-      {
+      forEachDisplayIndex(begin, stop, view->currentIndex() == 1,
+                          [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
         const auto sample = series.at(i);
         points.pushBack({sample.x, sample.y});
         ++count;
-      }
+      });
       if (auto* curve = plot->addCurve(key))
       {
         const auto alias = aliases.value(name).toString();
@@ -396,6 +402,7 @@ private:
     status->setText(QStringLiteral("%1 条曲线，%2 个取样点")
         .arg(qulonglong(plot->curveList().size())).arg(qulonglong(count)));
     QToolTip::hideText();
+    if (count != 0) plottedFields = fields;
     return count != 0;
   }
 
@@ -467,6 +474,8 @@ private:
   std::shared_ptr<PJ::PlotDataMapRef> shown;
   PlotWidget* plot = nullptr;
   QwtPlot* canvas = nullptr;
+  QStringList plottedFields;
+  QComboBox* view = nullptr;
   QComboBox *groups = nullptr, *style = nullptr;
   Tags* tags = nullptr;
   QLineEdit* search = nullptr;
