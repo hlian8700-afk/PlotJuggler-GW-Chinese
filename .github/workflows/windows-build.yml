@@ -2,7 +2,7 @@ name: Windows x64 build (PlotJuggler 3.17.0)
 
 on:
   push:
-    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1 ]
+    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/email-authorization ]
     paths:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
@@ -49,6 +49,10 @@ jobs:
           path: upstream
 
       - name: Apply Goldwind display-name patch
+        env:
+          BLADESCOPE_AUTH_URL: ${{ vars.BLADESCOPE_AUTH_URL }}
+          BLADESCOPE_AUTH_RSA_N: ${{ vars.BLADESCOPE_AUTH_RSA_N }}
+          BLADESCOPE_AUTH_RSA_E: ${{ vars.BLADESCOPE_AUTH_RSA_E }}
         shell: pwsh
         run: |
           Copy-Item ../customization/data/gw_tag_mapping.csv plotjuggler_app/gw_tag_mapping.csv

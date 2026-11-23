@@ -2088,12 +2088,32 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h", "bladescope_authorization.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
+$authUrl = $env:BLADESCOPE_AUTH_URL
+$authModulus = $env:BLADESCOPE_AUTH_RSA_N
+$authExponent = $env:BLADESCOPE_AUTH_RSA_E
+if ($authUrl -or $authModulus -or $authExponent) {
+  if ($authUrl -notmatch '^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$' -or
+      $authModulus -cnotmatch '^[A-Za-z0-9_-]{512}$' -or $authExponent -cnotmatch '^[A-Za-z0-9_-]{1,12}$') {
+    throw "Configure the BladeScope authorization HTTPS origin and both RSA public-key fields."
+  }
+  @(
+    "#define BLADESCOPE_AUTH_URL `"$authUrl`""
+    "#define BLADESCOPE_AUTH_RSA_N `"$authModulus`""
+    "#define BLADESCOPE_AUTH_RSA_E `"$authExponent`""
+  ) | Set-Content "plotjuggler_app/bladescope_authorization_config.h" -Encoding ASCII
+} else {
+  Remove-Item "plotjuggler_app/bladescope_authorization_config.h" -ErrorAction SilentlyContinue
+}
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'if(WIN32)' -Encoding UTF8
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value '  find_package(Qt5 REQUIRED COMPONENTS Network)' -Encoding UTF8
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value '  target_link_libraries(plotjuggler PRIVATE Qt5::Network bcrypt crypt32)' -Encoding UTF8
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'endif()' -Encoding UTF8
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"`n#include `"bladescope_authorization.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2148,7 +2168,19 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     waveform->setMode(ui->widgetStack->currentWidget() == waveform,
                       index == 0 || ui->widgetStack->currentWidget() == waveform);
   });
-  connect(waveformAction, &QAction::triggered, waveform, [this, waveform] {
+#ifdef BLADESCOPE_AUTH_ENABLED
+  auto* authorization = new BladeAuthorization::Controller(this);
+  auto* manageAuthorization = analysisMenu->addAction(QStringLiteral("授权管理"));
+  connect(manageAuthorization, &QAction::triggered, authorization, [authorization] { authorization->manage(); });
+#endif
+  connect(waveformAction, &QAction::triggered, waveform, [this, waveform
+#ifdef BLADESCOPE_AUTH_ENABLED
+      , authorization
+#endif
+  ] {
+#ifdef BLADESCOPE_AUTH_ENABLED
+    if (!authorization->enter()) return;
+#endif
     waveform->refreshGroups();
     ui->widgetStack->setCurrentWidget(waveform);
   });
