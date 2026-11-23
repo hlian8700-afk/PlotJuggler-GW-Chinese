@@ -24,7 +24,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
-#include <windows.h>
+#include <qt_windows.h>
 #include <bcrypt.h>
 #include <wincrypt.h>
 #include <winhttp.h>
