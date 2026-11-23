@@ -2084,12 +2084,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h")) {
+foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2122,14 +2122,37 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     if (scroll) ui->widgetStack->setCurrentWidget(scroll);
     static_cast<BladeFitUI::Panel*>(panel)->enter();
   };
-  connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
-  connect(ui->menuTools->addAction(QStringLiteral("曲线分析")), &QAction::triggered, this, showFitPanel);
+  auto* curveAnalysisAction = ui->menuTools->addAction(QStringLiteral("曲线分析"));
+  connect(curveAnalysisAction, &QAction::triggered, this, showFitPanel);
+  auto* analysisMenu = new QMenu(fitEntry);
+  analysisMenu->addAction(curveAnalysisAction);
+  auto* waveformAction = analysisMenu->addAction(QStringLiteral("录波分析"));
+  connect(waveformAction, &QAction::triggered, this, [this, curveAnalysisAction] {
+    auto* panel = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage");
+    if (!panel)
+    {
+      panel = new BladeWaveform::Page(_mapped_plot_data, curveAnalysisAction, [this] {
+        ui->widgetStack->setCurrentIndex(0);
+      }, ui->widgetStack);
+      ui->widgetStack->addWidget(panel);
+    }
+    static_cast<BladeWaveform::Page*>(panel)->refreshGroups();
+    ui->widgetStack->setCurrentWidget(panel);
+  });
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
   if (!fitAcceptanceOutput.isEmpty())
   {
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     BladeFitUI::verifyM01(this, _mapped_plot_data, fitEntry, ui->widgetStack, fitAcceptanceOutput);
   }
+  if (fitAcceptanceOutput.isEmpty())
+  {
+    fitEntry->setText(QStringLiteral("分析"));
+    fitEntry->setMenu(analysisMenu);
+    fitEntry->setPopupMode(QToolButton::InstantPopup);
+  }
+  else
+    connect(fitEntry, &QToolButton::clicked, this, showFitPanel);
   int headerButtonIndex = 1;
 '@ }
 )
