@@ -142,6 +142,16 @@ public:
     side->addWidget(style);
     generate = new QPushButton(QStringLiteral("作图"), sidebar);
     side->addWidget(generate);
+    analysisControls = new QWidget(sidebar);
+    auto* actions = new QHBoxLayout(analysisControls);
+    actions->setContentsMargins(0, 0, 0, 0);
+    auto* filter = new QPushButton(QStringLiteral("条件筛选"), analysisControls);
+    auto* statistics = new QPushButton(QStringLiteral("采样统计"), analysisControls);
+    actions->addWidget(filter);
+    actions->addWidget(statistics);
+    side->addWidget(analysisControls);
+    connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
+    connect(statistics, &QPushButton::clicked, this, [this] { showStatistics(); });
     plot = new PlotWidget(*shown, this);
     connect(plot, &QObject::destroyed, [hold = shown] {});
     root->addWidget(plot, 1);
@@ -211,6 +221,8 @@ public:
   void clearData()
   {
     plottedFields.clear();
+    conditions.clear();
+    summaries.clear();
     plot->removeAllCurves();
     shown->numeric.clear();
     plot->replot();
@@ -361,6 +373,8 @@ private:
     start->setVisible(showTime);
     end->setVisible(showTime);
     rollControls->setVisible(showTime);
+    analysisControls->setVisible(tags->waveform);
+    analysisControls->setEnabled(tags->count() > 0);
     previous->setEnabled(!plottedFields.isEmpty());
     next->setEnabled(!plottedFields.isEmpty());
     style->setVisible(tags->waveform);
@@ -395,6 +409,130 @@ private:
     draw(plottedFields);
   }
 
+  struct Condition
+  {
+    QString channel;
+    int operation;
+    double threshold;
+  };
+  struct Summary
+  {
+    BladeAnalysis::Statistics source, retained;
+  };
+
+  void editConditions()
+  {
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("录波条件筛选"));
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(QStringLiteral("全部条件须同时满足。不同测点按最近时间匹配。"), &dialog));
+    auto* table = new QTableWidget(0, 3, &dialog);
+    table->setHorizontalHeaderLabels({QStringLiteral("条件测点"), QStringLiteral("比较"), QStringLiteral("阈值")});
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    layout->addWidget(table);
+    QStringList names;
+    for (const auto& entry : source.numeric)
+      if (entry.second.size()) names << QString::fromStdString(entry.first);
+    names.sort(Qt::CaseInsensitive);
+    const auto add = [&](const Condition& condition) {
+      const int row = table->rowCount();
+      table->insertRow(row);
+      auto* channel = new QComboBox(table);
+      channel->addItems(names);
+      if (!condition.channel.isEmpty() && channel->findText(condition.channel) < 0)
+        channel->addItem(condition.channel);
+      if (!condition.channel.isEmpty()) channel->setCurrentText(condition.channel);
+      auto* comparison = new QComboBox(table);
+      comparison->addItems({QStringLiteral("≥"), QStringLiteral("≤"), QStringLiteral(">"), QStringLiteral("<")});
+      comparison->setCurrentIndex(condition.operation);
+      table->setCellWidget(row, 0, channel);
+      table->setCellWidget(row, 1, comparison);
+      table->setItem(row, 2, new QTableWidgetItem(BladeAnalysis::number(condition.threshold)));
+    };
+    for (const auto& condition : conditions) add(condition);
+    auto* addRow = new QPushButton(QStringLiteral("添加条件"), &dialog);
+    auto* removeRow = new QPushButton(QStringLiteral("移除选中条件"), &dialog);
+    auto* rowActions = new QHBoxLayout;
+    rowActions->addWidget(addRow);
+    rowActions->addWidget(removeRow);
+    layout->addLayout(rowActions);
+    connect(addRow, &QPushButton::clicked, &dialog, [&] { add({{}, 0, 0.0}); });
+    connect(removeRow, &QPushButton::clicked, &dialog, [&] {
+      if (table->currentRow() >= 0) table->removeRow(table->currentRow());
+    });
+    auto* toleranceBox = new QLineEdit(BladeAnalysis::number(matchTolerance), &dialog);
+    auto* form = new QFormLayout;
+    form->addRow(QStringLiteral("最大时间偏差（秒）"), toleranceBox);
+    layout->addLayout(form);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    QVector<Condition> result;
+    double tolerance = 0.0;
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+      bool valid = false;
+      tolerance = toleranceBox->text().toDouble(&valid);
+      if (!valid || !std::isfinite(tolerance) || tolerance < 0.0)
+      {
+        QMessageBox::warning(&dialog, QStringLiteral("条件筛选"), QStringLiteral("请输入有效的非负时间偏差。"));
+        return;
+      }
+      result.clear();
+      for (int row = 0; row < table->rowCount(); ++row)
+      {
+        const auto channel = static_cast<QComboBox*>(table->cellWidget(row, 0))->currentText();
+        const auto op = static_cast<QComboBox*>(table->cellWidget(row, 1))->currentIndex();
+        const double threshold = table->item(row, 2)->text().toDouble(&valid);
+        if (!valid || !std::isfinite(threshold) || !source.numeric.count(channel.toStdString()))
+        {
+          QMessageBox::warning(&dialog, QStringLiteral("条件筛选"),
+                               QStringLiteral("请检查第 %1 行的测点与阈值。").arg(row + 1));
+          return;
+        }
+        result.push_back({channel, op, threshold});
+      }
+      dialog.accept();
+    });
+    dialog.resize(620, 340);
+    if (dialog.exec() != QDialog::Accepted) return;
+    conditions = result;
+    matchTolerance = tolerance;
+    if (!plottedFields.isEmpty()) draw(plottedFields);
+  }
+
+  void showStatistics()
+  {
+    if (summaries.isEmpty())
+    {
+      QMessageBox::information(this, QStringLiteral("采样统计"), QStringLiteral("请先作图。"));
+      return;
+    }
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("当前时间窗口采样统计"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* table = new QTableWidget(summaries.size(), 8, &dialog);
+    table->setHorizontalHeaderLabels({QStringLiteral("测点"), QStringLiteral("有效原始点"),
+      QStringLiteral("保留点"), QStringLiteral("最小值"), QStringLiteral("最大值"),
+      QStringLiteral("均值"), QStringLiteral("标准差"), QStringLiteral("无匹配")});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    int row = 0;
+    for (auto it = summaries.cbegin(); it != summaries.cend(); ++it, ++row)
+    {
+      const auto& kept = it.value().retained;
+      const auto value = [&](double x) { return kept.count ? BladeAnalysis::number(x) : QStringLiteral("—"); };
+      const QStringList cells{it.key(), QString::number(qulonglong(it.value().source.count)),
+        QString::number(qulonglong(kept.count)), value(kept.low), value(kept.high), value(kept.mean),
+        value(kept.count ? std::sqrt(std::max(0.0, kept.m2 / double(kept.count))) : 0.0),
+        QString::number(qulonglong(kept.unmatched))};
+      for (int column = 0; column < cells.size(); ++column)
+        table->setItem(row, column, new QTableWidgetItem(cells.at(column)));
+    }
+    table->resizeColumnsToContents();
+    layout->addWidget(table);
+    dialog.resize(850, 360);
+    dialog.exec();
+  }
+
   bool draw(const QStringList& fields)
   {
     if (fields.isEmpty() || fields.size() > 16)
@@ -412,6 +550,7 @@ private:
     const auto recordingAliases = qApp->property("bladeScopeRecordingAliases").toMap();
     for (auto it = recordingAliases.cbegin(); it != recordingAliases.cend(); ++it)
       aliases.insert(it.key(), it.value());
+    summaries.clear();
     size_t count = 0;
     double firstPlottedTime = std::numeric_limits<double>::infinity();
     for (const auto& name : fields)
@@ -424,10 +563,45 @@ private:
       const auto begin = BladeAnalysis::boundary(series, lo);
       if (begin >= stop) continue;
       firstPlottedTime = std::min(firstPlottedTime, series.at(begin).x);
-      auto& points = shown->addNumeric(key)->second;
-      forEachDisplayIndex(begin, stop, view->currentIndex() == 1,
-                          [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
+      auto& summary = summaries[name];
+      std::vector<size_t> retained;
+      for (size_t i = begin; i < stop; ++i)
+      {
         const auto sample = series.at(i);
+        if (!std::isfinite(sample.y)) continue;
+        summary.source.add(sample.y);
+        bool accept = true;
+        for (const auto& condition : conditions)
+        {
+          double value = sample.y;
+          const auto match = source.numeric.find(condition.channel.toStdString());
+          if (condition.channel != name && (match == source.numeric.end() ||
+              !BladeAnalysis::match(match->second, sample.x, matchTolerance, false, value)))
+          {
+            ++summary.retained.unmatched;
+            accept = false;
+            break;
+          }
+          const double threshold = condition.threshold;
+          accept = condition.operation == 0 ? value >= threshold :
+                   condition.operation == 1 ? value <= threshold :
+                   condition.operation == 2 ? value > threshold : value < threshold;
+          if (!accept) break;
+        }
+        if (accept)
+        {
+          summary.retained.add(sample.y);
+          if (!conditions.isEmpty()) retained.push_back(i);
+        }
+      }
+      const bool filtering = !conditions.isEmpty();
+      if (!summary.retained.count) continue;
+      auto& points = shown->addNumeric(key)->second;
+      const auto index = [&](size_t i) { return filtering ? retained[i] : i; };
+      forEachDisplayIndex(filtering ? 0 : begin, filtering ? retained.size() : stop,
+                          view->currentIndex() == 1,
+                          [&](size_t i) { return series.at(index(i)).y; }, [&](size_t i) {
+        const auto sample = series.at(index(i));
         points.pushBack({sample.x, sample.y});
         ++count;
       });
@@ -451,7 +625,7 @@ private:
     status->setText(QStringLiteral("%1 条曲线，%2 个取样点")
         .arg(qulonglong(plot->curveList().size())).arg(qulonglong(count)));
     QToolTip::hideText();
-    if (count != 0) plottedFields = fields;
+    plottedFields = fields;
     updateTimeControls();
     return count != 0;
   }
@@ -531,6 +705,10 @@ private:
   QLineEdit* search = nullptr;
   QCheckBox *startEnabled = nullptr, *endEnabled = nullptr;
   QComboBox *labelMode = nullptr, *system = nullptr;
+  QVector<Condition> conditions;
+  QMap<QString, Summary> summaries;
+  double matchTolerance = 0.0;
+  QWidget* analysisControls = nullptr;
   QWidget* rollControls = nullptr;
   QPushButton *generate = nullptr, *previous = nullptr, *next = nullptr;
   QDateTimeEdit *start = nullptr, *end = nullptr;
