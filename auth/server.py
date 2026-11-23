@@ -254,6 +254,8 @@ class Authorization:
             with closing(connect(self.directory)) as db:
                 db.execute("SELECT 1 FROM account LIMIT 1").fetchone()
             status, result = 200, {"status": "ok"}
+        elif route == "/v1/public-key" and environ["REQUEST_METHOD"] == "GET":
+            status, result = 200, public_config(self.directory, key=self.key)
         elif route not in ("/v1/code", "/v1/verify", "/v1/refresh"):
             status, result = 404, {"error": "not_found"}
         elif environ["REQUEST_METHOD"] != "POST":
@@ -277,8 +279,10 @@ class Authorization:
         return [payload]
 
 
-def public_config(directory):
-    numbers = signing_key(directory).public_key().public_numbers()
+def public_config(directory, *, key=None):
+    if key is None:
+        key = signing_key(directory)
+    numbers = key.public_key().public_numbers()
     def encode(n):
         return b64(n.to_bytes((n.bit_length() + 7) // 8, "big"))
     return {"modulus": encode(numbers.n), "exponent": encode(numbers.e)}

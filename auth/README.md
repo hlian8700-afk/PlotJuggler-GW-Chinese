@@ -40,7 +40,7 @@ python3 -m venv .venv
 
 ## Railway 单账号试运行
 
-创建 Web 服务时选择本仓库的 `feature/email-authorization` 分支，Root Directory 填 `/auth`，Railway 配置路径填 `/auth/railway.toml`。挂载持久卷到 `/data`，保持一个实例，并生成服务自带的 HTTPS 域名。填入以下服务变量后部署：
+创建 Web 服务时选择本仓库的 `feature/email-authorization` 分支，Root Directory 填 `/auth`，将健康检查路径设为 `/healthz`。挂载持久卷到 `/data`，保持一个实例，并生成服务自带的 HTTPS 域名。配置以下服务变量。可以先部署和检查服务，再加发信密钥启用验证码。
 
 | 变量 | 值 |
 |---|---|
@@ -51,4 +51,4 @@ python3 -m venv .venv
 
 使用 Resend 测试发件地址时，只能向该 Resend 账号自己的邮箱发信。首个账号应与 Resend 注册邮箱一致。以后开放给其他收件人时，先在 Resend 验证发件域名，再设置发件地址。
 
-部署后检查 `GET /healthz`。首次启动把指定邮箱加到账号库。已停用的账号保持停用，重新部署时也不会恢复。后续通过 `railway ssh` 进入服务容器，在容器里使用 `python /app/server.py --data /data list`、`enable` 或 `disable` 管理账号。用同一入口执行 `public-key`，把返回的公钥和当前的 Railway HTTPS 域名配置到 Windows 授权版构建变量。私钥和账号库随持久卷保留。
+部署后检查 `GET /healthz`。首次启动把指定邮箱加到账号库。已停用的账号保持停用，重新部署时也不会恢复。后续通过 `railway ssh` 进入服务容器，在容器里使用 `python /app/server.py --data /data list`、`enable` 或 `disable` 管理账号。通过 HTTPS 访问 `/v1/public-key`，把返回的公钥和当前的 Railway HTTPS 域名配置到 Windows 授权版构建变量。私钥和账号库随持久卷保留。

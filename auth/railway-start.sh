@@ -12,7 +12,6 @@ fi
 export BLADESCOPE_BIND=0.0.0.0
 export BLADESCOPE_MAIL_TRANSPORT=resend
 : "${PORT:?Set the Railway service port to 8080.}"
-: "${BLADESCOPE_RESEND_API_KEY:?Set the Resend sending key in Railway variables.}"
 export BLADESCOPE_RESEND_FROM="${BLADESCOPE_RESEND_FROM:-BladeScope <onboarding@resend.dev>}"
 
 python /app/server.py --data "$state_dir" init

@@ -123,3 +123,13 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer test-placeholder")
         self.assertEqual(json.loads(request.data)["to"], [self.email])
         self.assertIn("012345", json.loads(request.data)["text"])
+
+    def test_public_key_endpoint_exposes_only_the_verification_key(self):
+        status = []
+        response = self.app({
+            "PATH_INFO": "/v1/public-key", "REQUEST_METHOD": "GET",
+        }, lambda line, headers: status.append(int(line[:3])))
+        self.assertEqual(status, [200])
+        data = json.loads(b"".join(response))
+        self.assertEqual(data, public_config(self.directory))
+        self.assertEqual(set(data), {"modulus", "exponent"})
