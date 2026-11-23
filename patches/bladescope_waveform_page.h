@@ -35,8 +35,7 @@ protected:
 class Page final : public QWidget
 {
 public:
-  Page(const PJ::PlotDataMapRef& source, QAction* curveAnalysis, std::function<void()> back,
-       std::function<void()> loadData, QWidget* parent)
+  Page(const PJ::PlotDataMapRef& source, QAction* curveAnalysis, std::function<void()> back, QWidget* parent)
     : QWidget(parent), source(source), shown(std::make_shared<PJ::PlotDataMapRef>())
   {
     setObjectName(QStringLiteral("bladeWaveformPage"));
@@ -67,9 +66,6 @@ public:
     auto* side = new QVBoxLayout(sidebar);
     groups = new QComboBox(sidebar);
     auto* manage = new QPushButton(QStringLiteral("管理测点组"), sidebar);
-    auto* load = new QPushButton(QStringLiteral("加载数据"), sidebar);
-    connect(load, &QPushButton::clicked, this, std::move(loadData));
-    side->addWidget(load);
     side->addWidget(groups);
     side->addWidget(manage);
     search = new QLineEdit(sidebar);
@@ -94,14 +90,14 @@ public:
     style = new QComboBox(sidebar);
     style->addItems({QStringLiteral("折线图"), QStringLiteral("散点图")});
     side->addWidget(style);
-    generate = new QPushButton(QStringLiteral("作图"), sidebar);
+    auto* generate = new QPushButton(QStringLiteral("作图"), sidebar);
     side->addWidget(generate);
     plot = new PlotWidget(*shown, split);
     connect(plot, &QObject::destroyed, [hold = shown] {});
     split->addWidget(sidebar);
     split->addWidget(plot);
     split->setStretchFactor(1, 1);
-    split->setSizes({270, 1100});
+    split->setSizes({310, 900});
     canvas = plot->findChild<QwtPlot*>();
     if (canvas)
     {
@@ -130,15 +126,6 @@ public:
       QToolTip::hideText();
     });
     refreshGroups();
-  }
-
-  void clearData()
-  {
-    plot->removeAllCurves();
-    shown->numeric.clear();
-    plot->replot();
-    QToolTip::hideText();
-    refreshTags();
   }
 
   void refreshGroups()
@@ -229,22 +216,11 @@ private:
       item->setCheckState(checked.contains(name) ? Qt::Checked : Qt::Unchecked);
       item->setHidden(!item->text().contains(search->text().trimmed(),Qt::CaseInsensitive));
     }
-    const bool hasData = tags->count() != 0;
-    for (auto* control : {static_cast<QWidget*>(startEnabled), static_cast<QWidget*>(endEnabled),
-                          static_cast<QWidget*>(start), static_cast<QWidget*>(end)})
-      control->setVisible(hasData);
-    generate->setEnabled(hasData);
-    if (!hasData)
-    {
-      startEnabled->setChecked(false);
-      endEnabled->setChecked(false);
-    }
     if (std::isfinite(first) && !startEnabled->isChecked())
       start->setDateTime(QDateTime::fromMSecsSinceEpoch(qint64(first*1000),Qt::UTC));
     if (std::isfinite(last) && !endEnabled->isChecked())
       end->setDateTime(QDateTime::fromMSecsSinceEpoch(qint64(last*1000),Qt::UTC));
-    status->setText(source.numeric.empty() ? QStringLiteral("请先加载录波数据")
-        : QStringLiteral("可选测点 %1，缺失 %2").arg(tags->count()).arg(qulonglong(missing)));
+    status->setText(QStringLiteral("可选测点 %1，缺失 %2").arg(tags->count()).arg(qulonglong(missing)));
   }
 
   bool draw(const QStringList& fields)
@@ -362,7 +338,6 @@ private:
   Tags* tags = nullptr;
   QLineEdit* search = nullptr;
   QCheckBox *startEnabled = nullptr, *endEnabled = nullptr;
-  QPushButton* generate = nullptr;
   QDateTimeEdit *start = nullptr, *end = nullptr;
   QLabel* status = nullptr;
   QJsonObject groupsData;

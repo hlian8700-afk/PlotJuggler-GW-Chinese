@@ -2133,22 +2133,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     {
       panel = new BladeWaveform::Page(_mapped_plot_data, curveAnalysisAction, [this] {
         ui->widgetStack->setCurrentIndex(0);
-      }, [this] { ui->buttonLoadDatafile->click(); }, ui->widgetStack);
+      }, ui->widgetStack);
       ui->widgetStack->addWidget(panel);
     }
     static_cast<BladeWaveform::Page*>(panel)->refreshGroups();
     ui->widgetStack->setCurrentWidget(panel);
   });
-  auto* originalSidebar = ui->mainSplitter->widget(0);
-  if (originalSidebar && originalSidebar->isAncestorOf(_curvelist_widget) &&
-      !originalSidebar->isAncestorOf(ui->widgetStack))
-  {
-    connect(ui->widgetStack, &QStackedWidget::currentChanged, originalSidebar,
-            [this, originalSidebar](int) {
-      const auto* page = ui->widgetStack->currentWidget();
-      originalSidebar->setVisible(!page || page->objectName() != QStringLiteral("bladeWaveformPage"));
-    });
-  }
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
   if (!fitAcceptanceOutput.isEmpty())
   {
@@ -2188,16 +2178,11 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
     static_cast<BladeFitUI::Panel*>(fit)->invalidate();
   if (curve_updated)
-    if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
-      static_cast<BladeWaveform::Page*>(waveform)->refreshGroups();
-  if (curve_updated)
 '@ }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '  _mapped_plot_data.clear();'; New = @'
   _mapped_plot_data.clear();
-  if (auto* waveform = ui->widgetStack->findChild<QWidget*>("bladeWaveformPage"))
-    static_cast<BladeWaveform::Page*>(waveform)->clearData();
   if (auto* fit = ui->widgetStack->findChild<QWidget*>("bladeFitPanel"))
     static_cast<BladeFitUI::Panel*>(fit)->invalidate();
 '@ }
@@ -2561,13 +2546,5 @@ void MainWindow::deleteAllData()
     _curvelist_widget->addCurve(added_curve);
   }
   _curvelist_widget->setUpdatesEnabled(previousUpdates);
-'@ }
-)
-
-Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '  settings.setValue("MainWindow.splitterWidth", ui->mainSplitter->sizes()[0]);'; New = @'
-  const int sidebarWidth = ui->mainSplitter->sizes().value(0);
-  if (sidebarWidth > 0)
-    settings.setValue("MainWindow.splitterWidth", sidebarWidth);
 '@ }
 )
