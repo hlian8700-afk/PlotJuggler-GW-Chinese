@@ -1,6 +1,9 @@
 #pragma once
 #include "bladescope_analysis.h"
 #include "plotwidget.h"
+#include "bladescope_plot_theme.h"
+#include "bladescope_time_display.h"
+#include <qwt_scale_div.h>
 #include <QDataStream>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -14,6 +17,21 @@
 namespace BladeWaveform
 {
 inline constexpr auto dragFormat = "application/x-bladescope-waveform-tags";
+
+class UtcScaleDraw final : public BladePlotTheme::ScaleDraw
+{
+public:
+  QwtText label(double value) const override
+  {
+    const auto ticks = scaleDiv().ticks(QwtScaleDiv::MajorTick);
+    const double step = ticks.size() > 1 ? ticks.at(1) - ticks.at(0) : value;
+    const bool calendar = BladeTimeDisplay::isCalendarTime(value);
+    const int digits = BladeTimeDisplay::decimals(BladeTimeDisplay::precision(), step);
+    auto label = BladeTimeDisplay::format(value, true, calendar, calendar, digits, Qt::UTC);
+    if (calendar) label.replace(QLatin1Char(' '), QLatin1Char('\n'));
+    return label;
+  }
+};
 
 class Tags final : public QListWidget
 {
@@ -57,9 +75,8 @@ public:
     auto* returnButton = new QPushButton(QStringLiteral("时序图"), this);
     connect(returnButton, &QPushButton::clicked, this, std::move(back));
     header->addWidget(returnButton);
-    auto* analysis = new QToolButton(this);
-    analysis->setText(QStringLiteral("分析"));
-    analysis->setPopupMode(QToolButton::InstantPopup);
+    auto* analysis = new QPushButton(QStringLiteral("分析"), this);
+    analysis->setMinimumWidth(76);
     auto* menu = new QMenu(analysis);
     menu->addAction(curveAnalysis);
     menu->addAction(QStringLiteral("录波分析"))->setEnabled(false);
@@ -343,6 +360,7 @@ private:
     shown->numeric.clear();
     const auto aliases = qApp->property("bladeScopeTagAliases").toMap();
     size_t count = 0;
+    double firstPlottedTime = std::numeric_limits<double>::infinity();
     for (const auto& name : fields)
     {
       const auto key = name.toStdString();
@@ -352,6 +370,7 @@ private:
       const auto stop = BladeAnalysis::boundary(series, hi, true);
       const auto begin = BladeAnalysis::boundary(series, lo);
       if (begin >= stop) continue;
+      firstPlottedTime = std::min(firstPlottedTime, series.at(begin).x);
       auto& points = shown->addNumeric(key)->second;
       for (size_t i = begin; i < stop; ++i)
       {
@@ -364,6 +383,12 @@ private:
         const auto alias = aliases.value(name).toString();
         if (!alias.isEmpty()) curve->curve->setTitle(alias);
       }
+    }
+    if (canvas)
+    {
+      canvas->setAxisScaleDraw(QwtPlot::xBottom, new UtcScaleDraw);
+      canvas->setAxisTitle(QwtPlot::xBottom, BladeTimeDisplay::isCalendarTime(firstPlottedTime)
+          ? QStringLiteral("时间（UTC）") : QStringLiteral("时间（秒）"));
     }
     emit plot->curveListChanged();
     plot->zoomOut(false);
@@ -425,9 +450,12 @@ private:
         }
         if (!(distance < best)) continue;
         best = distance;
-        result = QStringLiteral("%1\n时间：%2 UTC\n数值：%3")
+        const bool calendar = BladeTimeDisplay::isCalendarTime(sample.x);
+        const int digits = BladeTimeDisplay::precision() == BladeTimeDisplay::Seconds ? 0 : 3;
+        const QString time = BladeTimeDisplay::format(sample.x, true, calendar, calendar, digits, Qt::UTC);
+        result = QStringLiteral("%1\n时间：%2%3\n数值：%4")
             .arg(layer.curve->title().text(),
-                 QDateTime::fromMSecsSinceEpoch(qint64(sample.x*1000),Qt::UTC).toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")),
+                 time, calendar ? QStringLiteral(" UTC") : QString(),
                  BladeAnalysis::number(sample.y));
       }
     }

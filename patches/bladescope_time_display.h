@@ -40,13 +40,14 @@ inline int decimals(Precision mode, double scaleStep)
   return std::abs(scaleStep - std::round(scaleStep)) > 1e-6 ? 3 : 0;
 }
 
-inline QString format(double seconds, bool clock, bool calendar, bool showDate, int digits)
+inline QString format(double seconds, bool clock, bool calendar, bool showDate, int digits,
+                      Qt::TimeSpec calendarZone = Qt::LocalTime)
 {
   if (!std::isfinite(seconds)) return {};
   if (!clock || (!calendar && (seconds < 0.0 || seconds >= 86400.0)))
     return QString::number(seconds, 'f', digits);
   const auto dt = QDateTime::fromMSecsSinceEpoch(qRound64(seconds * 1000.0),
-                                              calendar ? Qt::LocalTime : Qt::UTC);
+                                              calendar ? calendarZone : Qt::UTC);
   const bool date = calendar && showDate;
   return dt.toString(digits ? (date ? "yyyy-MM-dd HH:mm:ss.zzz" : "HH:mm:ss.zzz")
                             : (date ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss"));
