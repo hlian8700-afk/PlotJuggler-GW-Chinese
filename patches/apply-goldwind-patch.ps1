@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.32"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.33"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.32") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.33") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2031,6 +2031,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             QMessageBox::warning(this, QStringLiteral("录波分析"), QStringLiteral("分析视图最多显示 16 条曲线。"));
             return;
           }
+          struct AnalysisPoint { double time, value; bool passes; };
+          auto cached = std::make_shared<QMap<QString, std::vector<AnalysisPoint>>>();
           QStringList derived;
           QMap<QString, QString> titles;
           for (const auto& name : names)
@@ -2046,17 +2048,18 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             auto key = prefix;
             for (int suffix = 2; _mapped_plot_data.numeric.count(key); ++suffix)
               key = prefix + " [" + std::to_string(suffix) + "]";
+            const auto derivedName = QString::fromStdString(key);
             auto& output = _mapped_plot_data.addNumeric(key)->second;
             BladeTimeView::select(begin, end, detail,
                 [&](size_t i) { return series.at(i).y; },
-                [&](size_t i) { const auto value = series.at(i); if (!filter || filter(series,value.x,value.y)) output.pushBack({value.x,value.y}); });
-            if (output.size())
-            {
-              const auto derivedName = QString::fromStdString(key);
-              derived << derivedName;
-              titles.insert(derivedName, aliases.value(name).toString());
-            }
-            else _mapped_plot_data.numeric.erase(key);
+                [&](size_t i) {
+                  const auto value = series.at(i);
+                  const bool passes = !filter || filter(series,value.x,value.y);
+                  if (filter) (*cached)[derivedName].push_back({value.x,value.y,passes});
+                  if (passes) output.pushBack({value.x,value.y});
+                });
+            derived << derivedName;
+            titles.insert(derivedName, aliases.value(name).toString());
           }
           if (derived.isEmpty())
           {
@@ -2064,7 +2067,11 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
             return;
           }
           auto* target = createTab ? _main_tabbed_widget->addTab({})->plotAt(0) : plot;
-          if (!target) return;
+          if (!target)
+          {
+            for (const auto& name : derived) _mapped_plot_data.numeric.erase(name.toStdString());
+            return;
+          }
           for (const auto& name : derived)
           {
             if (auto* layer = target->addCurve(name.toStdString()))
@@ -2072,7 +2079,51 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
               const auto title = titles.value(name);
               if (!title.isEmpty()) layer->curve->setTitle(title);
             }
-            else _mapped_plot_data.numeric.erase(name.toStdString());
+            else
+            {
+              cached->remove(name);
+              _mapped_plot_data.numeric.erase(name.toStdString());
+            }
+          }
+          if (!cached->isEmpty())
+          {
+            auto* toggle = new QAction(QStringLiteral("应用录波条件筛选（%1）").arg(cached->firstKey()), target);
+            toggle->setObjectName(QStringLiteral("bladeWaveformFilterToggle"));
+            toggle->setCheckable(true);
+            toggle->setChecked(true);
+            const auto containsCurve = [target](const std::string& key) {
+              const auto& curves = target->curveList();
+              return std::any_of(curves.begin(), curves.end(),
+                                 [&](const auto& layer) { return layer.src_name == key; });
+            };
+            connect(toggle, &QAction::toggled, target, [this, target, cached, containsCurve](bool enabled) {
+              const auto viewport = target->currentBoundingRect();
+              for (auto entry = cached->cbegin(); entry != cached->cend(); ++entry)
+              {
+                const auto key = entry.key().toStdString();
+                if (!containsCurve(key)) continue;
+                const auto data = _mapped_plot_data.numeric.find(key);
+                if (data == _mapped_plot_data.numeric.end()) continue;
+                auto& points = data->second;
+                points.clear();
+                for (const auto& point : entry.value())
+                  if (!enabled || point.passes) points.pushBack({point.time,point.value});
+              }
+              target->updateCurves(true);
+              if (viewport.width() > 0 && viewport.height() != 0)
+                target->setZoomRectangle(viewport, false);
+              target->replot();
+            });
+            connect(target, &PlotWidget::curveListChanged, toggle, [toggle, cached, containsCurve] {
+              for (auto entry = cached->begin(); entry != cached->end();)
+                if (!containsCurve(entry.key().toStdString())) entry = cached->erase(entry);
+                else ++entry;
+              if (cached->isEmpty())
+              {
+                toggle->setEnabled(false);
+                toggle->deleteLater();
+              }
+            });
           }
           emit target->curveListChanged();
           _curvelist_widget->updateFilter();
@@ -2185,6 +2236,9 @@ Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = '#include "statistics_dialog.h"'; New = "#include `"statistics_dialog.h`"`n#include `"bladescope_trend.h`"" }
   @{ Old = '  menu.addAction(_action_formula);'; New = @'
   menu.addAction(_action_formula);
+  if (!isXYPlot())
+    for (auto* toggle : findChildren<QAction*>(QStringLiteral("bladeWaveformFilterToggle"), Qt::FindDirectChildrenOnly))
+      if (toggle->isEnabled()) menu.addAction(toggle);
   if (!isXYPlot() && !curveList().empty())
   {
     auto* trends = menu.addMenu(QStringLiteral("添加趋势线"));
