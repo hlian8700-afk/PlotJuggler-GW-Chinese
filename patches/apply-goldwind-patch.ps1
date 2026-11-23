@@ -1832,10 +1832,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.34"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.35"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.34") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.35") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2050,6 +2050,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     filterToggle->setEnabled(false);
     header->addWidget(back);
     header->addWidget(navigation);
+    auto* views = new QToolButton(page);
+    views->setText(QStringLiteral("视图"));
+    views->setPopupMode(QToolButton::InstantPopup);
+    auto* viewMenu = new QMenu(views);
+    views->setMenu(viewMenu);
+    header->addWidget(views);
     header->addWidget(configuration);
     header->addWidget(filterToggle);
     auto* plotStatus = new QLabel(page);
@@ -2069,10 +2075,23 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       double first = 0, last = 0;
     };
     auto waveform = std::make_shared<WaveformView>();
-    auto* target = new PlotWidget(waveform->data, splitter);
+    auto* results = new QStackedWidget(splitter);
+    auto* target = new PlotWidget(waveform->data, results);
+    results->addWidget(target);
+    const auto showResult = [results, target](QWidget* view) {
+      if (!view) return;
+      auto* previous = results->currentWidget();
+      if (view != target) results->addWidget(view);
+      results->setCurrentWidget(view);
+      if (previous && previous != target && previous != view)
+      {
+        results->removeWidget(previous);
+        previous->deleteLater();
+      }
+    };
     connect(target, &QObject::destroyed, [waveform] {});
     splitter->addWidget(settings);
-    splitter->addWidget(target);
+    splitter->addWidget(results);
     splitter->setStretchFactor(1, 1);
     splitter->setSizes({390, 960});
     connect(configuration, &QPushButton::toggled, settings, &QWidget::setVisible);
@@ -2112,8 +2131,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       plotStatus->setText(QStringLiteral("当前取点 %1").arg(qulonglong(count)));
     };
     connect(filterToggle, &QCheckBox::toggled, page, [redraw](bool enabled) { redraw(enabled, true); });
-    settings->setWidget(BladeAnalysis::createPanel(settings, _mapped_plot_data, selected, start, end,
-        [this, waveform, filterToggle, plotStatus, redraw](const QStringList& names, bool, double first, double last,
+    auto* controls = BladeAnalysis::createPanel(settings, _mapped_plot_data, selected, start, end,
+        [this, waveform, filterToggle, plotStatus, redraw, showResult, target](const QStringList& names, bool, double first, double last,
                     bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
           if (names.size() > 16)
           {
@@ -2142,13 +2161,37 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
           filterToggle->setEnabled(bool(filter));
           filterToggle->setChecked(bool(filter));
           redraw(bool(filter), false);
-        }, [this](const QStringList& names, double first, double last, bool detail,
+          showResult(target);
+          filterToggle->show();
+        }, [this, results, showResult, filterToggle, plotStatus](const QStringList& names, double first, double last, bool detail,
                   const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
-          BladeDualTime::open(this, _mapped_plot_data, names, first, last, detail, filter, aliases);
-        }, [this](const QStringList& names, double first, double last, bool detail,
+          if (auto* view = BladeDualTime::create(results, _mapped_plot_data, names, first, last, detail, filter, aliases))
+          {
+            showResult(view);
+            filterToggle->hide();
+            plotStatus->clear();
+          }
+        }, [this, results, showResult, filterToggle, plotStatus](const QStringList& names, double first, double last, bool detail,
                   const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases) {
-          BladeWaveformXY::open(this, _mapped_plot_data, names, first, last, detail, filter, aliases);
-        }));
+          if (auto* view = BladeWaveformXY::create(results, _mapped_plot_data, names, first, last, detail, filter, aliases))
+          {
+            showResult(view);
+            filterToggle->hide();
+            plotStatus->clear();
+          }
+        });
+    settings->setWidget(controls);
+    const auto addView = [controls, viewMenu](const QString& label, const QString& key) {
+      if (auto* button = controls->findChild<QPushButton*>(key))
+      {
+        QObject::connect(viewMenu->addAction(label), &QAction::triggered, button, &QPushButton::click);
+        button->hide();
+      }
+    };
+    addView(QStringLiteral("常规时序"), QStringLiteral("bladeView_overview"));
+    addView(QStringLiteral("细化 TS"), QStringLiteral("bladeView_detail"));
+    addView(QStringLiteral("双轴对照（上下联动／双 Y 轴）"), QStringLiteral("bladeView_dual"));
+    addView(QStringLiteral("XY 分析"), QStringLiteral("bladeView_xy"));
     ui->widgetStack->addWidget(page);
     ui->widgetStack->setCurrentWidget(page);
   });
@@ -2235,9 +2278,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   auto* analysisMenu = new QMenu(fitEntry);
   analysisMenu->addAction(fitAction);
   analysisMenu->addAction(bladeAnalysis);
-  fitEntry->setMenu(analysisMenu);
-  fitEntry->setPopupMode(QToolButton::InstantPopup);
   const auto fitAcceptanceOutput = qEnvironmentVariable("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT");
+  if (fitAcceptanceOutput.isEmpty())
+  {
+    fitEntry->setMenu(analysisMenu);
+    fitEntry->setPopupMode(QToolButton::InstantPopup);
+  }
   if (!fitAcceptanceOutput.isEmpty())
   {
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);

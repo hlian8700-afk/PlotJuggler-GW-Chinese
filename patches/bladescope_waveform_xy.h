@@ -6,7 +6,7 @@
 
 namespace BladeWaveformXY
 {
-inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
+inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
                  double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter,
                  const QJsonObject& aliases)
 {
@@ -14,7 +14,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   if (channels.size() < 2 || channels.size() > 16)
   {
     QMessageBox::information(parent, title, QStringLiteral("请选择 2 至 16 个测点。"));
-    return;
+    return nullptr;
   }
   using BladeFit::Point;
   using BladeFit::Points;
@@ -37,75 +37,80 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     });
   }
 
-  PJ::PlotDataMapRef plotted;
-  QDialog dialog(parent);
-  dialog.setWindowTitle(title);
-  dialog.resize(1050, 670);
-  QVBoxLayout layout(&dialog);
-  QFormLayout parameters;
-  layout.addLayout(&parameters);
-  QComboBox x, y, model;
+  auto plotted = std::make_shared<PJ::PlotDataMapRef>();
+  auto* dialog = new QWidget(parent);
+  dialog->setWindowTitle(title);
+  dialog->resize(1050, 670);
+  QVBoxLayout layout(dialog);
+  auto* parameters = new QFormLayout;
+  layout.addLayout(parameters);
+  auto* x = new QComboBox(dialog);
+  auto* y = new QComboBox(dialog);
+  auto* model = new QComboBox(dialog);
   for (const auto& name : channels)
   {
     const auto alias = aliases.value(name).toString();
     const auto display = alias.isEmpty() ? name : alias + QStringLiteral("（") + name + QStringLiteral("）");
-    x.addItem(display, name);
-    y.addItem(display, name);
+    x->addItem(display, name);
+    y->addItem(display, name);
   }
-  y.setCurrentIndex(1);
-  model.addItem(QStringLiteral("散点"), 0);
+  y->setCurrentIndex(1);
+  model->addItem(QStringLiteral("散点"), 0);
   for (int degree = 1; degree <= 6; ++degree)
-    model.addItem(QStringLiteral("%1 阶多项式").arg(degree), degree);
-  model.addItem(QStringLiteral("移动最小二乘"), -1);
-  QSpinBox neighbors;
-  neighbors.setRange(3, 5000);
-  neighbors.setValue(41);
-  neighbors.setEnabled(false);
-  QObject::connect(&model, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog,
-                   [&](int) { neighbors.setEnabled(model.currentData().toInt() < 0); });
-  QDoubleSpinBox tolerance;
-  tolerance.setRange(0., 3600.);
-  tolerance.setDecimals(6);
-  QCheckBox filterEnabled(QStringLiteral("应用录波条件筛选"));
-  filterEnabled.setChecked(bool(filter));
-  filterEnabled.setEnabled(bool(filter));
-  parameters.addRow(&filterEnabled);
-  QCheckBox difference(QStringLiteral("确认两测点单位一致，输出 Y−X"));
-  parameters.addRow(QStringLiteral("X 测点"), &x);
-  parameters.addRow(QStringLiteral("Y 测点"), &y);
-  parameters.addRow(QStringLiteral("配对容差（秒）"), &tolerance);
-  parameters.addRow(QStringLiteral("拟合模型"), &model);
-  parameters.addRow(QStringLiteral("局部邻点数"), &neighbors);
-  parameters.addRow(&difference);
-  auto* plot = new PlotWidget(plotted, &dialog);
+    model->addItem(QStringLiteral("%1 阶多项式").arg(degree), degree);
+  model->addItem(QStringLiteral("移动最小二乘"), -1);
+  auto* neighbors = new QSpinBox(dialog);
+  neighbors->setRange(3, 5000);
+  neighbors->setValue(41);
+  neighbors->setEnabled(false);
+  QObject::connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog,
+                   [=](int) { neighbors->setEnabled(model->currentData().toInt() < 0); });
+  auto* tolerance = new QDoubleSpinBox(dialog);
+  tolerance->setRange(0., 3600.);
+  tolerance->setDecimals(6);
+  auto* filterEnabled = new QCheckBox(QStringLiteral("应用录波条件筛选"), dialog);
+  filterEnabled->setChecked(bool(filter));
+  filterEnabled->setEnabled(bool(filter));
+  parameters->addRow(filterEnabled);
+  auto* difference = new QCheckBox(QStringLiteral("确认两测点单位一致，输出 Y−X"), dialog);
+  parameters->addRow(QStringLiteral("X 测点"), x);
+  parameters->addRow(QStringLiteral("Y 测点"), y);
+  parameters->addRow(QStringLiteral("配对容差（秒）"), tolerance);
+  parameters->addRow(QStringLiteral("拟合模型"), model);
+  parameters->addRow(QStringLiteral("局部邻点数"), neighbors);
+  parameters->addRow(difference);
+  auto* plot = new PlotWidget(*plotted, dialog);
+  QObject::connect(plot, &QObject::destroyed, [plotted] {});
   layout.addWidget(plot, 3);
   if (!QMetaObject::invokeMethod(plot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true)))
   {
     QMessageBox::warning(parent, title, QStringLiteral("无法启动原版 XY 视图。"));
-    return;
+    delete dialog;
+    return nullptr;
   }
-  QPlainTextEdit report;
-  report.setReadOnly(true);
-  layout.addWidget(&report, 1);
-  QHBoxLayout actions;
-  layout.addLayout(&actions);
-  QPushButton refresh(QStringLiteral("生成 XY 与统计")), copy(QStringLiteral("复制统计"));
-  actions.addWidget(&refresh);
-  actions.addWidget(&copy);
-  QObject::connect(&copy, &QPushButton::clicked, &dialog, [&] {
-    QApplication::clipboard()->setText(report.toPlainText());
+  auto* report = new QPlainTextEdit(dialog);
+  report->setReadOnly(true);
+  layout.addWidget(report, 1);
+  auto* actions = new QHBoxLayout;
+  layout.addLayout(actions);
+  auto* refresh = new QPushButton(QStringLiteral("生成 XY 与统计"), dialog);
+  auto* copy = new QPushButton(QStringLiteral("复制统计"), dialog);
+  actions->addWidget(refresh);
+  actions->addWidget(copy);
+  QObject::connect(copy, &QPushButton::clicked, dialog, [=] {
+    QApplication::clipboard()->setText(report->toPlainText());
   });
-  QString renderedX, renderedY;
-  const auto generate = [&](bool preserveViewport) {
-    const auto xName = x.currentData().toString(), yName = y.currentData().toString();
-    const bool enabled = filterEnabled.isChecked();
+  auto rendered = std::make_shared<QPair<QString,QString>>();
+  auto generate = [=, unfiltered = std::move(unfiltered), filtered = std::move(filtered)](bool preserveViewport) {
+    const auto xName = x->currentData().toString(), yName = y->currentData().toString();
+    const bool enabled = filterEnabled->isChecked();
     const auto& prepared = enabled ? filtered : unfiltered;
     const Points empty;
     const auto xSeries = prepared.constFind(xName), ySeries = prepared.constFind(yName);
     const auto& xs = xSeries == prepared.cend() ? empty : xSeries.value();
     const auto& ys = ySeries == prepared.cend() ? empty : ySeries.value();
-    const auto dt = tolerance.value();
-    const int degree = model.currentData().toInt();
+    const auto dt = tolerance->value();
+    const int degree = model->currentData().toInt();
     Points pairs, fitted;
     pairs.reserve(ys.size());
     size_t cursor = 0;
@@ -124,7 +129,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       yStats.add(yv);
       xValues.push_back(xv);
       yValues.push_back(yv);
-      if (difference.isChecked())
+      if (difference->isChecked())
       {
         const double delta = yv-xv;
         if (std::isfinite(delta)) { differenceStats.add(delta); differenceValues.push_back(delta); }
@@ -138,18 +143,18 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
                      QStringLiteral("筛选%1；目标候选 %2，成功配对 %3，未配对 %4")
                       .arg(enabled ? QStringLiteral("已启用") : QStringLiteral("未启用"))
                       .arg(qulonglong(ys.size())).arg(qulonglong(pairs.size())).arg(qulonglong(ys.size()-pairs.size()))};
-    BladeAnalysis::appendStatistics(rows, x.currentText(), xStats, &xValues);
-    BladeAnalysis::appendStatistics(rows, y.currentText(), yStats, &yValues);
-    if (difference.isChecked())
+    BladeAnalysis::appendStatistics(rows, x->currentText(), xStats, &xValues);
+    BladeAnalysis::appendStatistics(rows, y->currentText(), yStats, &yValues);
+    if (difference->isChecked())
       BladeAnalysis::appendStatistics(rows, QStringLiteral("Y−X"), differenceStats, &differenceValues);
 
     if (degree < 0 && !pairs.empty())
     {
       try
       {
-        fitted = BladeFit::movingLeastSquares(pairs, size_t(neighbors.value()));
+        fitted = BladeFit::movingLeastSquares(pairs, size_t(neighbors->value()));
         rows << QStringLiteral("移动最小二乘：每个位置最多 %1 个邻点，生成 %2 个拟合点")
-                    .arg(neighbors.value()).arg(qulonglong(fitted.size()));
+                    .arg(neighbors->value()).arg(qulonglong(fitted.size()));
       }
       catch (const std::exception& error)
       {
@@ -184,15 +189,15 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     }
 
     const auto viewport = plot->currentBoundingRect();
-    const bool restore = preserveViewport && renderedX == xName && renderedY == yName &&
+    const bool restore = preserveViewport && rendered->first == xName && rendered->second == yName &&
                          !plot->curveList().empty() && !pairs.empty();
     plot->removeAllCurves();
-    plotted.scatter_xy.clear();
+    plotted->scatter_xy.clear();
     QMetaObject::invokeMethod(plot, "setModeXY", Qt::DirectConnection, Q_ARG(bool, true));
     const auto add = [&](const QString& name, const Points& points, bool scatter) {
       if (points.empty()) return;
       const auto key = name.toStdString();
-      auto& curve = plotted.addScatterXY(key)->second;
+      auto& curve = plotted->addScatterXY(key)->second;
       for (const auto point : points) curve.pushBack({point.x,point.y});
       if (auto* item = plot->addCurve(key))
       {
@@ -207,14 +212,15 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     add(name + QStringLiteral(" · 拟合"), fitted, false);
     plot->zoomOut(false);
     if (restore) plot->setZoomRectangle(viewport, false);
-    renderedX = xName;
-    renderedY = yName;
+    rendered->first = xName;
+    rendered->second = yName;
     plot->replot();
-    report.setPlainText(rows.join(QLatin1Char('\n')));
+    report->setPlainText(rows.join(QLatin1Char('\n')));
   };
-  QObject::connect(&refresh, &QPushButton::clicked, &dialog, [&] { generate(false); });
-  QObject::connect(&filterEnabled, &QCheckBox::toggled, &dialog, [&] { generate(true); });
-  generate(false);
-  dialog.exec();
+  auto update = std::make_shared<decltype(generate)>(std::move(generate));
+  QObject::connect(refresh, &QPushButton::clicked, dialog, [update] { (*update)(false); });
+  QObject::connect(filterEnabled, &QCheckBox::toggled, dialog, [update] { (*update)(true); });
+  (*update)(false);
+  return dialog;
 }
 }

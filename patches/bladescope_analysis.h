@@ -531,6 +531,7 @@ inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, con
     auto* button = new QPushButton(QString::fromUtf8(name));
     row->addWidget(button);
     QObject::connect(button, &QPushButton::clicked, dialog, action);
+    return button;
   };
   const auto graphAliases = [=, &data] { return storedGroupAliases(state->settings).value(state->activeGroup).toObject(); };
   const auto saveGroup = [=, &data](const QString& name, const QStringList& list) {
@@ -810,7 +811,7 @@ inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, con
     if (selected().isEmpty())
       return warn(QString::fromUtf8("请勾选测点。"));
     plotOverview(true);
-  });
+  })->setObjectName(QStringLiteral("bladeView_overview"));
 
   auto* results = new QPlainTextEdit;
   results->setReadOnly(true);
@@ -935,7 +936,7 @@ inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, con
         QStringLiteral("数据视图"), viewModes, statisticsMode->currentIndex(), false, &accepted);
     SampleFilter filter;
     if (accepted && makeFilter(filter)) dual(selected(), first, last, choice == viewModes.back(), filter, graphAliases());
-  });
+  })->setObjectName(QStringLiteral("bladeView_dual"));
   addButton(actions, "XY 分析", [=, &data] {
     bool firstOK = false, lastOK = false;
     const double first = from->text().toDouble(&firstOK), last = to->text().toDouble(&lastOK);
@@ -944,7 +945,7 @@ inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, con
     SampleFilter filter;
     if (makeFilter(filter)) xy(selected(), first, last, statisticsMode->currentIndex() == 1,
                                filter, graphAliases());
-  });
+  })->setObjectName(QStringLiteral("bladeView_xy"));
   addButton(actions, "细化 TS 明细（全原始点）", [=, &data] {
     bool startOK = false, endOK = false;
     const auto first = from->text().toDouble(&startOK);
@@ -954,7 +955,7 @@ inline QWidget* createPanel(QWidget* parent, const PJ::PlotDataMapRef& data, con
       return warn(QString::fromUtf8("请选择测点并输入有效的起止时间。"));
     SampleFilter filter;
     if (makeFilter(filter)) plot(selected(), true, first, last, true, filter, graphAliases());
-  });
+  })->setObjectName(QStringLiteral("bladeView_detail"));
   addButton(actions, "预览筛选与统计", [=, &data] { run(false); });
   addButton(actions, "导出筛选采样 CSV", [=, &data] { run(true); });
   addButton(actions, "复制统计", [=, &data] { QApplication::clipboard()->setText(results->toPlainText()); });

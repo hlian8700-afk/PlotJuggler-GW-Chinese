@@ -8,14 +8,14 @@
 
 namespace BladeDualTime
 {
-inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
+inline QWidget* create(QWidget* parent, const PJ::PlotDataMapRef& source, const QStringList& channels,
                  double first, double last, bool detail, const BladeAnalysis::SampleFilter& filter, const QJsonObject& aliases)
 {
   const auto title = QStringLiteral("时序双轴对照");
   if (channels.size() < 2 || channels.size() > 16)
   {
     QMessageBox::information(parent, title, QStringLiteral("请选择 2 至 16 个测点。"));
-    return;
+    return nullptr;
   }
   QDialog assignment(parent);
   assignment.setWindowTitle(title);
@@ -44,9 +44,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     }
     assignment.accept();
   });
-  if (assignment.exec() != QDialog::Accepted) return;
+  if (assignment.exec() != QDialog::Accepted) return nullptr;
 
-  PJ::PlotDataMapRef snapshot;
+  auto snapshot = std::make_shared<PJ::PlotDataMapRef>();
   struct Bounds
   {
     double low = std::numeric_limits<double>::infinity(), high = -low;
@@ -80,10 +80,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
         });
   }
 
-  QDialog dialog(parent);
-  dialog.setWindowTitle(title);
-  dialog.resize(1000, 640);
-  QVBoxLayout layout(&dialog);
+  auto* dialog = new QWidget(parent);
+  dialog->setWindowTitle(title);
+  dialog->resize(1000, 640);
+  QVBoxLayout layout(dialog);
   auto* bar = new QHBoxLayout;
   layout.addLayout(bar);
   auto* mode = new QComboBox;
@@ -104,21 +104,23 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
   auto* pages = new QStackedWidget;
   layout.addWidget(pages, 1);
   auto* split = new QSplitter(Qt::Vertical);
-  auto* top = new PlotWidget(snapshot, split);
-  auto* bottom = new PlotWidget(snapshot, split);
+  auto* top = new PlotWidget(*snapshot, split);
+  auto* bottom = new PlotWidget(*snapshot, split);
   split->addWidget(top);
   split->addWidget(bottom);
-  auto* single = new PlotWidget(snapshot, pages);
+  auto* single = new PlotWidget(*snapshot, pages);
   pages->addWidget(split);
   pages->addWidget(single);
+  for (auto* plot : {top, bottom, single}) QObject::connect(plot, &QObject::destroyed, [snapshot] {});
   auto* canvas = single->findChild<QwtPlot*>();
   if (!canvas)
   {
     QMessageBox::warning(parent, title, QStringLiteral("无法取得原版绘图画布。"));
-    return;
+    delete dialog;
+    return nullptr;
   }
 
-  const auto append = [&aliases](PlotWidget* plot, const QStringList& names, bool rightAxis) {
+  const auto append = [aliases](PlotWidget* plot, const QStringList& names, bool rightAxis) {
     for (const auto& name : names)
       if (auto* layer = plot->addCurve(name.toStdString()))
       {
@@ -127,10 +129,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
         if (!title.isEmpty()) layer->curve->setTitle(title);
       }
   };
-  bool syncing = false;
-  auto synchronize = [&](PlotWidget* sender, const QRectF& rectangle) {
-    if (syncing || !(rectangle.width() > 0)) return;
-    const QScopedValueRollback<bool> lock(syncing, true);
+  auto syncing = std::make_shared<bool>(false);
+  auto synchronize = [=](PlotWidget* sender, const QRectF& rectangle) {
+    if (*syncing || !(rectangle.width() > 0)) return;
+    const QScopedValueRollback<bool> lock(*syncing, true);
     for (auto* target : {top, bottom, single})
     {
       if (target == sender) continue;
@@ -143,7 +145,7 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
       target->replot();
     }
   };
-  const auto rebuild = [&](bool preserveTime) {
+  const auto rebuild = [=, cached = std::move(cached)](bool preserveTime) {
     auto* active = pages->currentIndex() == 0 ? top : single;
     const auto visible = active->currentBoundingRect();
     Bounds leftBounds, rightBounds;
@@ -151,10 +153,10 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     {
       const QScopedValueRollback<bool> lock(syncing, true);
       for (auto* plot : {top, bottom, single}) plot->removeAllCurves();
-      snapshot.numeric.clear();
+      snapshot->numeric.clear();
       for (auto it = cached.cbegin(); it != cached.cend(); ++it)
       {
-        auto& points = snapshot.addNumeric(it.key().toStdString())->second;
+        auto& points = snapshot->addNumeric(it.key().toStdString())->second;
         auto& bounds = right.contains(it.key()) ? rightBounds : leftBounds;
         for (const auto& point : it.value())
         {
@@ -189,12 +191,12 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     auto* anchor = preserveTime ? active : single;
     synchronize(anchor, anchor->currentBoundingRect());
   };
-  QObject::connect(filterEnabled, &QCheckBox::toggled, &dialog, [&] { rebuild(true); });
+  QObject::connect(filterEnabled, &QCheckBox::toggled, dialog, [rebuild] { rebuild(true); });
   for (auto* plot : {top, bottom, single})
     if (auto* surface = plot->findChild<QwtPlot*>())
       QObject::connect(surface->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged,
-                       &dialog, [&, plot, surface] {
-        if (dialog.isHidden() || (!pages->currentWidget()->isAncestorOf(plot) &&
+                       dialog, [=] {
+        if (dialog->isHidden() || (!pages->currentWidget()->isAncestorOf(plot) &&
                                  pages->currentWidget() != plot)) return;
         const auto time = surface->axisScaleDiv(QwtPlot::xBottom);
         auto bounds = plot->currentBoundingRect();
@@ -203,14 +205,14 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
         synchronize(plot, bounds);
       });
 
-  QObject::connect(mode, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&](int index) {
+  QObject::connect(mode, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog, [=](int index) {
     auto* previous = pages->currentIndex() == 0 ? top : single;
     synchronize(previous, previous->currentBoundingRect());
     pages->setCurrentIndex(index);
     rightRange->setEnabled(index == 1);
   });
-  QObject::connect(rightRange, &QPushButton::clicked, &dialog, [&] {
-    QDialog editor(&dialog);
+  QObject::connect(rightRange, &QPushButton::clicked, dialog, [=] {
+    QDialog editor(dialog);
     editor.setWindowTitle(QStringLiteral("设置右轴范围"));
     QFormLayout entries(&editor);
     const auto range = canvas->axisScaleDiv(QwtPlot::yRight);
@@ -234,8 +236,8 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     });
     editor.exec();
   });
-  QObject::connect(statistics, &QPushButton::clicked, &dialog, [&] {
-    QDialog report(&dialog);
+  QObject::connect(statistics, &QPushButton::clicked, dialog, [=] {
+    QDialog report(dialog);
     report.setWindowTitle(QStringLiteral("双轴统计与差值"));
     report.resize(720, 430);
     QVBoxLayout layout(&report);
@@ -273,8 +275,8 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
                        filterEnabled->isChecked() ? QStringLiteral("已应用条件筛选") : QStringLiteral("未启用条件筛选")};
       for (const auto& name : left + right)
       {
-        const auto it = snapshot.numeric.find(name.toStdString());
-        if (it == snapshot.numeric.end()) continue;
+        const auto it = snapshot->numeric.find(name.toStdString());
+        if (it == snapshot->numeric.end()) continue;
         const auto& series = it->second;
         BladeAnalysis::Statistics stats;
         std::vector<double> values;
@@ -292,9 +294,9 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
 
       if (difference.isChecked())
       {
-        const auto reference = snapshot.numeric.find(x.currentText().toStdString());
-        const auto target = snapshot.numeric.find(y.currentText().toStdString());
-        if (reference != snapshot.numeric.end() && target != snapshot.numeric.end())
+        const auto reference = snapshot->numeric.find(x.currentText().toStdString());
+        const auto target = snapshot->numeric.find(y.currentText().toStdString());
+        if (reference != snapshot->numeric.end() && target != snapshot->numeric.end())
         {
           const auto& series = target->second;
           const auto& source = reference->second;
@@ -340,6 +342,6 @@ inline void open(QWidget* parent, const PJ::PlotDataMapRef& source, const QStrin
     report.exec();
   });
   rebuild(false);
-  dialog.exec();
+  return dialog;
 }
 }
