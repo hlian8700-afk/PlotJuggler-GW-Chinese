@@ -182,6 +182,67 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
       commit({});
     }
   });
+  button(memberRow, "导出测点组", [&] {
+    const auto path = QFileDialog::getSaveFileName(&dialog, QStringLiteral("导出测点组"),
+        QStringLiteral("BladeScope-测点组.json"), QStringLiteral("JSON 文件 (*.json)"));
+    if (path.isEmpty()) return;
+    const QJsonObject document{{QStringLiteral("format"), QStringLiteral("BladeScopeMeasurementGroups")},
+                               {QStringLiteral("version"), 1}, {QStringLiteral("groups"), groups}};
+    const auto bytes = QJsonDocument(document).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+      QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("导出失败：%1").arg(file.errorString()));
+  });
+  button(memberRow, "导入测点组", [&] {
+    const auto path = QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入测点组"), {},
+        QStringLiteral("JSON 文件 (*.json)"));
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("读取失败：%1").arg(file.errorString()));
+      return;
+    }
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &error).object();
+    const auto payload = document.value(QStringLiteral("groups"));
+    if (error.error != QJsonParseError::NoError ||
+        document.value(QStringLiteral("format")).toString() != QStringLiteral("BladeScopeMeasurementGroups") ||
+        document.value(QStringLiteral("version")).toInt() != 1 || !payload.isObject())
+    {
+      QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("无法识别测点组文件格式。"));
+      return;
+    }
+    auto merged = groups;
+    const auto imported = payload.toObject();
+    QString firstAdded;
+    int added = 0;
+    for (auto it = imported.cbegin(); it != imported.cend(); ++it)
+    {
+      const auto base = it.key().trimmed();
+      const auto points = it.value().toArray();
+      bool valid = !base.isEmpty() && it.value().isArray();
+      for (const auto point : points) valid = valid && point.isString() && !point.toString().trimmed().isEmpty();
+      if (!valid)
+      {
+        QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("测点组「%1」含有无效数据。").arg(it.key()));
+        return;
+      }
+      auto name = base;
+      for (int suffix = 2; merged.contains(name) && merged.value(name) != it.value(); ++suffix)
+        name = QStringLiteral("%1 (%2)").arg(base).arg(suffix);
+      if (merged.contains(name)) continue;
+      merged.insert(name, points);
+      if (firstAdded.isEmpty()) firstAdded = name;
+      ++added;
+    }
+    if (added)
+    {
+      groups = merged;
+      commit(firstAdded);
+    }
+    QMessageBox::information(&dialog, dialog.windowTitle(), QStringLiteral("新增 %1 个测点组。").arg(added));
+  });
   button(memberRow, "添加测点", [&] {
     const auto name = current();
     if (name.isEmpty())

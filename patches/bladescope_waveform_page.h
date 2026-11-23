@@ -858,6 +858,16 @@ private:
                        QStringLiteral("差值要求两测点单位一致。\n") + result, QMessageBox::Close, parent);
     auto* copy = dialog.addButton(QStringLiteral("复制统计"), QMessageBox::ActionRole);
     connect(copy, &QPushButton::clicked, &dialog, [result] { QApplication::clipboard()->setText(result); });
+    auto* exportText = dialog.addButton(QStringLiteral("导出文本"), QMessageBox::ActionRole);
+    connect(exportText, &QPushButton::clicked, &dialog, [&dialog, result] {
+      const auto path = QFileDialog::getSaveFileName(&dialog, QStringLiteral("导出差值统计"),
+          QStringLiteral("录波差值统计.txt"), QStringLiteral("文本文件 (*.txt)"));
+      if (path.isEmpty()) return;
+      const auto bytes = result.toUtf8() + "\n";
+      QSaveFile file(path);
+      if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+        QMessageBox::warning(&dialog, QStringLiteral("导出差值统计"), file.errorString());
+    });
     dialog.exec();
   }
 
@@ -1097,6 +1107,28 @@ private:
         rows << cells.join(QLatin1Char('\t'));
       }
       QApplication::clipboard()->setText(rows.join(QLatin1Char('\n')));
+    });
+    auto* exportCsv = new QPushButton(QStringLiteral("导出 CSV"), &dialog);
+    layout->addWidget(exportCsv);
+    connect(exportCsv, &QPushButton::clicked, &dialog, [&dialog, table] {
+      const auto path = QFileDialog::getSaveFileName(&dialog, QStringLiteral("导出采样统计"),
+          QStringLiteral("录波采样统计.csv"), QStringLiteral("CSV 文件 (*.csv)"));
+      if (path.isEmpty()) return;
+      QStringList rows;
+      for (int row = -1; row < table->rowCount(); ++row)
+      {
+        QStringList cells;
+        for (int column = 0; column < table->columnCount(); ++column)
+        {
+          const auto* cell = row < 0 ? table->horizontalHeaderItem(column) : table->item(row, column);
+          cells << BladeAnalysis::csvCell(cell->text());
+        }
+        rows << cells.join(QLatin1Char(','));
+      }
+      const QByteArray bytes = QByteArray::fromHex("efbbbf") + rows.join(QStringLiteral("\r\n")).toUtf8() + "\r\n";
+      QSaveFile file(path);
+      if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+        QMessageBox::warning(&dialog, QStringLiteral("导出采样统计"), file.errorString());
     });
     dialog.resize(1050, 360);
     dialog.exec();
