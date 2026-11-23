@@ -94,7 +94,6 @@ public:
     connect(view, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
       if (!plottedFields.isEmpty()) draw(plottedFields);
     });
-    header->addWidget(view);
     auto* modes = new QButtonGroup(this);
     const QStringList labels{QStringLiteral("录波时序"), QStringLiteral("双轴对照"),
                              QStringLiteral("XY 分析"), QStringLiteral("时序趋势拟合")};
@@ -105,10 +104,18 @@ public:
       modes->addButton(button, i);
       button->setChecked(i == 0);
       header->addWidget(button);
+      if (i == 0) header->addWidget(view);
       connect(button, &QPushButton::clicked, this, [this, i] {
+        if (analysisMode == i) return;
         analysisMode = i;
-        resetAnalysisPanel();
-        if (i != 0) status->setText(QStringLiteral("请在左栏勾选测点，再点击「作图」。"));
+        if (i == 0)
+        {
+          resetAnalysisPanel();
+          if (!plottedFields.isEmpty()) draw(plottedFields);
+          else status->setText(QStringLiteral("请在左栏勾选测点，再点击「作图」。"));
+          return;
+        }
+        status->setText(QStringLiteral("请在左栏勾选测点，再点击「作图」。"));
       });
     }
     header->addStretch();
