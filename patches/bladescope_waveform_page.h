@@ -627,7 +627,7 @@ private:
     form->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
     auto* apply = new QPushButton(QStringLiteral("绘制 XY"), &dialog);
     auto* difference = new QPushButton(QStringLiteral("Y−X 差值统计"), &dialog);
-    auto* fit = new QPushButton(QStringLiteral("多项式拟合"), &dialog);
+    auto* fit = new QPushButton(QStringLiteral("XY 拟合"), &dialog);
     fit->setEnabled(false);
     auto* actions = new QHBoxLayout;
     actions->addWidget(apply);
@@ -691,10 +691,78 @@ private:
     };
     connect(apply, &QPushButton::clicked, &dialog, redraw);
     connect(fit, &QPushButton::clicked, &dialog, [&] {
-      bool confirmed = false;
-      const int degree = QInputDialog::getInt(&dialog, QStringLiteral("多项式拟合"),
-          QStringLiteral("阶数"), 1, 1, 6, 1, &confirmed);
-      if (!confirmed) return;
+      QDialog options(&dialog);
+      options.setWindowTitle(QStringLiteral("XY 拟合模型"));
+      QFormLayout form(&options);
+      auto* model = new QComboBox(&options);
+      model->addItems({QStringLiteral("通用多项式"), QStringLiteral("风速–功率（M01）"),
+                       QStringLiteral("风速–转速（M21）"), QStringLiteral("风速–桨距角（M22）"),
+                       QStringLiteral("叶尖速比–功率系数（M03）")});
+      form.addRow(QStringLiteral("模型"), model);
+      auto* degreeBox = new QSpinBox(&options);
+      degreeBox->setRange(1, 6);
+      form.addRow(QStringLiteral("多项式阶数"), degreeBox);
+      const auto makeValue = [&](const QString& label, const QString& value) {
+        auto* field = new QLineEdit(value, &options);
+        form.addRow(label, field);
+        return field;
+      };
+      auto* cutIn = makeValue(QStringLiteral("切入风速（m/s）"), QStringLiteral("3"));
+      auto* ratedWind = makeValue(QStringLiteral("额定风速（m/s）"), {});
+      auto* cutOut = makeValue(QStringLiteral("切出风速（m/s）"), QStringLiteral("25"));
+      auto* rated = makeValue(QStringLiteral("额定功率（kW）"), {});
+      auto* rpm = makeValue(QStringLiteral("额定转速（r/min，与 Y 同轴）"), {});
+      auto* width = makeValue(QStringLiteral("X 分箱宽度"), QStringLiteral("0.5"));
+      auto* note = new QLabel(&options);
+      note->setWordWrap(true);
+      form.addRow(note);
+      const auto updateFields = [&] {
+        const int mode = model->currentIndex();
+        const auto show = [&](QWidget* field, bool visible) {
+          field->setVisible(visible);
+          if (auto* label = form.labelForField(field)) label->setVisible(visible);
+        };
+        show(degreeBox, mode == 0);
+        for (auto* field : {cutIn, ratedWind, cutOut}) show(field, mode >= 1 && mode <= 3);
+        show(rated, mode == 1);
+        show(rpm, mode == 2);
+        show(width, mode != 0);
+        note->setText(mode == 4 ? QStringLiteral("X 请选择已计算的叶尖速比，Y 请选择已计算的功率系数。")
+                                : mode == 0 ? QString() : QStringLiteral("X 请选择风速，Y 请选择与模型匹配的测点和单位。"));
+      };
+      connect(model, QOverload<int>::of(&QComboBox::currentIndexChanged), &options, updateFields);
+      updateFields();
+      auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &options);
+      form.addRow(buttons);
+      connect(buttons, &QDialogButtonBox::rejected, &options, &QDialog::reject);
+      BladeFit::Params params;
+      connect(buttons, &QDialogButtonBox::accepted, &options, [&] {
+        bool valid = true;
+        const auto read = [&](QLineEdit* field) {
+          bool ok = false;
+          const double value = field->text().trimmed().toDouble(&ok);
+          valid = valid && ok && std::isfinite(value);
+          return value;
+        };
+        const int mode = model->currentIndex();
+        if (mode != 0) params.width = read(width);
+        if (mode >= 1 && mode <= 3)
+        {
+          params.cutIn = read(cutIn);
+          params.ratedWind = read(ratedWind);
+          params.cutOut = read(cutOut);
+          valid = valid && params.cutIn >= 0.0 && params.cutIn < params.ratedWind && params.ratedWind < params.cutOut;
+        }
+        if (mode == 1) { params.rated = read(rated); valid = valid && params.rated > 0.0; }
+        if (mode == 2) { params.rpm = read(rpm); valid = valid && params.rpm > 0.0; }
+        if (valid && params.width > 0.0) options.accept();
+        else QMessageBox::warning(&options, options.windowTitle(), QStringLiteral("请核对额定参数、风速区间和分箱宽度。"));
+      });
+      if (options.exec() != QDialog::Accepted) return;
+      const int degree = degreeBox->value();
+      const int kinds[]{-1, BladeFit::M01, BladeFit::M21, BladeFit::M22, BladeFit::M03};
+      const int kind = kinds[model->currentIndex()];
+      const auto modelName = model->currentText();
       auto rows = std::make_shared<BladeFit::Points>();
       rows->reserve(paired.size());
       for (const auto& point : paired) rows->push_back({point.x, point.y});
@@ -703,7 +771,13 @@ private:
       fitCurve.detach();
       chart->replot();
       fitSummary->setText(QStringLiteral("正在拟合…"));
-      BladeTrend::background<BladeTrend::Trend>(&dialog, [rows, degree] {
+      BladeTrend::background<BladeTrend::Trend>(&dialog, [rows, degree, kind, params, modelName] {
+        if (kind >= 0)
+        {
+          auto result = BladeFit::fitPairedTurbineCurve(kind, *rows, params);
+          return BladeTrend::Trend{std::move(result.fit),
+              QStringLiteral("%1 · 有效分箱 %2").arg(modelName).arg(qulonglong(result.bins.size()))};
+        }
         std::sort(rows->begin(), rows->end(), [](const auto& a, const auto& b) { return a.x < b.x; });
         return BladeTrend::calculate(*rows, 0, degree, 1, rows->front().x, rows->back().x, QStringLiteral("X"));
       }, [&, ticket](BladeTrend::Trend result, const QString& error) {

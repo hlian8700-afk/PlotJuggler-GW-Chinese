@@ -309,6 +309,32 @@ inline void curves(int kind,const Params& p,Result& r)
   }
 }
 
+inline Result fitPairedTurbineCurve(int kind, const Points& paired, const Params& p)
+{
+  if (kind != M01 && kind != M21 && kind != M22 && kind != M03)
+    throw std::runtime_error("不支持的风机拟合模型");
+  if (!(p.width > 0.0) || !std::isfinite(p.width))
+    throw std::runtime_error("分箱宽度必须为正数");
+  if (kind != M03 && !(0.0 <= p.cutIn && p.cutIn < p.ratedWind && p.ratedWind < p.cutOut))
+    throw std::runtime_error("请核对切入、额定和切出风速");
+  if ((kind == M01 && !(p.rated > 0.0)) || (kind == M21 && !(p.rpm > 0.0)))
+    throw std::runtime_error("请填写额定功率或额定转速");
+  Result result;
+  for (const auto& point : paired)
+  {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || point.x < 0.0) continue;
+    if (kind != M03 && (point.x < p.cutIn || point.x > p.cutOut)) continue;
+    if (kind != M22 && point.y < 0.0) continue;
+    const double bin = std::floor(point.x / p.width);
+    if (!std::isfinite(bin) || bin >= double(std::numeric_limits<long long>::max())) continue;
+    result.bins[static_cast<long long>(bin)].add(point.x, point.y);
+  }
+  if (result.bins.size() < 2)
+    throw std::runtime_error("有效分箱不足，请检查数据范围或调整分箱宽度");
+  curves(kind, p, result);
+  return result;
+}
+
 using Masks=std::set<SampleId>;
 template<class Month> Result analyze(int kind,const Channels& channels,const Params& p,const Masks& exclude,Month month,const std::atomic_bool* stop=nullptr)
 {
