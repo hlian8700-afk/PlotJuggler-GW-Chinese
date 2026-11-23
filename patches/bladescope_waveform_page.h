@@ -123,6 +123,16 @@ public:
     side->addWidget(start);
     side->addWidget(endEnabled);
     side->addWidget(end);
+    rollControls = new QWidget(sidebar);
+    auto* roll = new QHBoxLayout(rollControls);
+    roll->setContentsMargins(0, 0, 0, 0);
+    previous = new QPushButton(QStringLiteral("← 上一窗口"), rollControls);
+    next = new QPushButton(QStringLiteral("下一窗口 →"), rollControls);
+    roll->addWidget(previous);
+    roll->addWidget(next);
+    side->addWidget(rollControls);
+    connect(previous, &QPushButton::clicked, this, [this] { rollWindow(-1); });
+    connect(next, &QPushButton::clicked, this, [this] { rollWindow(1); });
     start->setEnabled(false);
     end->setEnabled(false);
     connect(startEnabled, &QCheckBox::toggled, start, &QWidget::setEnabled);
@@ -347,8 +357,39 @@ private:
     endEnabled->setVisible(showTime);
     start->setVisible(showTime);
     end->setVisible(showTime);
+    rollControls->setVisible(showTime);
+    previous->setEnabled(!plottedFields.isEmpty());
+    next->setEnabled(!plottedFields.isEmpty());
     style->setVisible(tags->waveform);
     generate->setEnabled(tags->count() > 0);
+  }
+
+  void rollWindow(int direction)
+  {
+    if (plottedFields.isEmpty() || !canvas) return;
+    const auto scale = canvas->axisScaleDiv(QwtPlot::xBottom);
+    double first = scale.lowerBound();
+    double last = scale.upperBound();
+    double minimum = std::numeric_limits<double>::infinity();
+    double maximum = -minimum;
+    for (const auto& field : plottedFields)
+    {
+      const auto entry = source.numeric.find(field.toStdString());
+      if (entry == source.numeric.end() || !entry->second.size()) continue;
+      const auto& series = entry->second;
+      minimum = std::min(minimum, series.at(0).x);
+      maximum = std::max(maximum, series.at(series.size() - 1).x);
+    }
+    if (!shiftWindow(first, last, minimum, maximum, direction))
+    {
+      status->setText(QStringLiteral("已到录波边界，可先缩小时间窗口。"));
+      return;
+    }
+    start->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(first * 1000), Qt::UTC));
+    end->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(last * 1000), Qt::UTC));
+    startEnabled->setChecked(true);
+    endEnabled->setChecked(true);
+    draw(plottedFields);
   }
 
   bool draw(const QStringList& fields)
@@ -398,11 +439,14 @@ private:
     }
     emit plot->curveListChanged();
     plot->zoomOut(false);
+    if (canvas && lo < hi && std::isfinite(lo) && std::isfinite(hi))
+      canvas->setAxisScale(QwtPlot::xBottom, lo, hi);
     applyStyle();
     status->setText(QStringLiteral("%1 条曲线，%2 个取样点")
         .arg(qulonglong(plot->curveList().size())).arg(qulonglong(count)));
     QToolTip::hideText();
     if (count != 0) plottedFields = fields;
+    updateTimeControls();
     return count != 0;
   }
 
@@ -481,7 +525,8 @@ private:
   QLineEdit* search = nullptr;
   QCheckBox *startEnabled = nullptr, *endEnabled = nullptr;
   QComboBox *labelMode = nullptr, *system = nullptr;
-  QPushButton* generate = nullptr;
+  QWidget* rollControls = nullptr;
+  QPushButton *generate = nullptr, *previous = nullptr, *next = nullptr;
   QDateTimeEdit *start = nullptr, *end = nullptr;
   QLabel* status = nullptr;
   QJsonObject groupsData;

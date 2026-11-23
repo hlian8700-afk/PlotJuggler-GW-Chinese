@@ -8,6 +8,22 @@ namespace BladeWaveform
 {
 constexpr std::size_t overviewPointLimit = 50000;
 
+// Move a fixed-width visible interval, stopping at the recording boundaries.
+inline bool shiftWindow(double& first, double& last, double minimum, double maximum,
+                        int direction)
+{
+  const double width = last - first;
+  if (!std::isfinite(width) || !std::isfinite(maximum - minimum) ||
+      width <= 0.0 || width >= maximum - minimum || direction == 0)
+    return false;
+  const double next = std::clamp(first + (direction < 0 ? -width : width),
+                                 minimum, maximum - width);
+  if (next == first) return false;
+  first = next;
+  last = next + width;
+  return true;
+}
+
 // Keep the endpoints and each bucket's extrema in their original sample order.
 template <typename ValueAt, typename Emit>
 void forEachDisplayIndex(std::size_t first, std::size_t end, bool detail,
