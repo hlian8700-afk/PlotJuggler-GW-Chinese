@@ -424,6 +424,7 @@ private:
     QString channel;
     int operation;
     double threshold;
+    bool enabled = true;
   };
   struct Summary
   {
@@ -437,8 +438,11 @@ private:
     dialog.setWindowTitle(QStringLiteral("录波条件筛选"));
     auto* layout = new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel(QStringLiteral("全部条件须同时满足。不同测点按最近时间匹配。"), &dialog));
-    auto* table = new QTableWidget(0, 3, &dialog);
-    table->setHorizontalHeaderLabels({QStringLiteral("条件测点"), QStringLiteral("比较"), QStringLiteral("阈值")});
+    auto* global = new QCheckBox(QStringLiteral("启用条件筛选"), &dialog);
+    global->setChecked(filterEnabled);
+    layout->addWidget(global);
+    auto* table = new QTableWidget(0, 4, &dialog);
+    table->setHorizontalHeaderLabels({QStringLiteral("条件测点"), QStringLiteral("比较"), QStringLiteral("阈值"), QStringLiteral("启用")});
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     layout->addWidget(table);
     QStringList names;
@@ -459,6 +463,10 @@ private:
       table->setCellWidget(row, 0, channel);
       table->setCellWidget(row, 1, comparison);
       table->setItem(row, 2, new QTableWidgetItem(BladeAnalysis::number(condition.threshold)));
+      auto* enabled = new QTableWidgetItem;
+      enabled->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
+      enabled->setCheckState(condition.enabled ? Qt::Checked : Qt::Unchecked);
+      table->setItem(row, 3, enabled);
     };
     for (const auto& condition : conditions) add(condition);
     auto* addRow = new QPushButton(QStringLiteral("添加条件"), &dialog);
@@ -480,13 +488,13 @@ private:
     QVector<Condition> result;
     double tolerance = 0.0;
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+    const auto collect = [&](bool applying) {
       bool valid = false;
       tolerance = toleranceBox->text().toDouble(&valid);
       if (!valid || !std::isfinite(tolerance) || tolerance < 0.0)
       {
         QMessageBox::warning(&dialog, QStringLiteral("条件筛选"), QStringLiteral("请输入有效的非负时间偏差。"));
-        return;
+        return false;
       }
       result.clear();
       for (int row = 0; row < table->rowCount(); ++row)
@@ -494,20 +502,70 @@ private:
         const auto channel = static_cast<QComboBox*>(table->cellWidget(row, 0))->currentText();
         const auto op = static_cast<QComboBox*>(table->cellWidget(row, 1))->currentIndex();
         const double threshold = table->item(row, 2)->text().toDouble(&valid);
-        if (!valid || !std::isfinite(threshold) || !source.numeric.count(channel.toStdString()))
+        const bool enabled = table->item(row, 3)->checkState() == Qt::Checked;
+        if (!valid || !std::isfinite(threshold) || channel.isEmpty() ||
+            (applying && global->isChecked() && enabled && !source.numeric.count(channel.toStdString())))
         {
           QMessageBox::warning(&dialog, QStringLiteral("条件筛选"),
                                QStringLiteral("请检查第 %1 行的测点与阈值。").arg(row + 1));
-          return;
+          return false;
         }
-        result.push_back({channel, op, threshold});
+        result.push_back({channel, op, threshold, enabled});
       }
-      dialog.accept();
+      return true;
+    };
+
+    QSettings settings;
+    const QString key = QStringLiteral("BladeScope/waveformFilterTemplates");
+    auto templates = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
+    auto* templateNames = new QComboBox(&dialog);
+    templateNames->addItems(templates.keys());
+    auto* load = new QPushButton(QStringLiteral("载入模板"), &dialog);
+    auto* save = new QPushButton(QStringLiteral("保存模板"), &dialog);
+    rowActions->addWidget(templateNames, 1);
+    rowActions->addWidget(load);
+    rowActions->addWidget(save);
+    connect(load, &QPushButton::clicked, &dialog, [&] {
+      const auto name = templateNames->currentText();
+      if (!templates.contains(name)) return;
+      const auto entry = templates.value(name).toObject();
+      table->setRowCount(0);
+      global->setChecked(entry.value(QStringLiteral("enabled")).toBool(true));
+      toleranceBox->setText(BladeAnalysis::number(entry.value(QStringLiteral("tolerance")).toDouble()));
+      for (const auto& item : entry.value(QStringLiteral("conditions")).toArray())
+      {
+        const auto row = item.toObject();
+        add({row.value(QStringLiteral("channel")).toString(), row.value(QStringLiteral("operation")).toInt(),
+             row.value(QStringLiteral("threshold")).toDouble(), row.value(QStringLiteral("enabled")).toBool(true)});
+      }
+    });
+    connect(save, &QPushButton::clicked, &dialog, [&] {
+      if (!collect(false)) return;
+      bool confirmed = false;
+      const auto name = QInputDialog::getText(&dialog, QStringLiteral("保存工况模板"), QStringLiteral("模板名称"),
+          QLineEdit::Normal, templateNames->currentText(), &confirmed).trimmed();
+      if (!confirmed || name.isEmpty()) return;
+      if (templates.contains(name) && QMessageBox::question(&dialog, QStringLiteral("保存工况模板"),
+          QStringLiteral("覆盖同名模板？")) != QMessageBox::Yes) return;
+      QJsonArray rows;
+      for (const auto& condition : result)
+        rows.append(QJsonObject{{QStringLiteral("channel"), condition.channel},
+                    {QStringLiteral("operation"), condition.operation}, {QStringLiteral("threshold"), condition.threshold},
+                    {QStringLiteral("enabled"), condition.enabled}});
+      templates.insert(name, QJsonObject{{QStringLiteral("enabled"), global->isChecked()},
+          {QStringLiteral("tolerance"), tolerance}, {QStringLiteral("conditions"), rows}});
+      settings.setValue(key, QJsonDocument(templates).toJson(QJsonDocument::Compact));
+      if (templateNames->findText(name) < 0) templateNames->addItem(name);
+      templateNames->setCurrentText(name);
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+      if (collect(true)) dialog.accept();
     });
     dialog.resize(620, 340);
     if (dialog.exec() != QDialog::Accepted) return;
     conditions = result;
     matchTolerance = tolerance;
+    filterEnabled = global->isChecked();
     if (!plottedFields.isEmpty()) draw(plottedFields);
   }
 
@@ -939,6 +997,8 @@ private:
         ++summary.sampled;
         for (const auto& condition : conditions)
         {
+          if (!filterEnabled) break;
+          if (!condition.enabled) continue;
           double value = sample.y;
           if (condition.channel != name)
           {
@@ -1064,6 +1124,7 @@ private:
   QCheckBox *startEnabled = nullptr, *endEnabled = nullptr;
   QComboBox *labelMode = nullptr, *system = nullptr;
   QVector<Condition> conditions;
+  bool filterEnabled = true;
   QMap<QString, Summary> summaries;
   double matchTolerance = 0.0;
   QWidget* analysisControls = nullptr;
