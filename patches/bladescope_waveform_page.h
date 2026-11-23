@@ -10,6 +10,8 @@
 #include <qwt_scale_widget.h>
 #include <QClipboard>
 #include <QDataStream>
+#include <QEventLoop>
+#include <QTimer>
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QHelpEvent>
@@ -94,7 +96,7 @@ public:
     connect(view, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
       if (!plottedFields.isEmpty()) draw(plottedFields);
     });
-    auto* modes = new QButtonGroup(this);
+    modes = new QButtonGroup(this);
     const QStringList labels{QStringLiteral("录波时序"), QStringLiteral("双轴对照"),
                              QStringLiteral("XY 分析"), QStringLiteral("时序趋势拟合")};
     for (int i = 0; i < labels.size(); ++i)
@@ -245,6 +247,8 @@ public:
     });
     connect(tags, &QListWidget::itemChanged, this, [this] { refreshAnalysisParameters(); });
     refreshGroups();
+    if (parent && qEnvironmentVariableIsSet("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT"))
+      verifyWorkspace();
   }
 
   void setMode(bool waveform, bool plotting)
@@ -739,6 +743,82 @@ private:
     matchTolerance = tolerance;
     filterEnabled = global->isChecked();
     if (!plottedFields.isEmpty()) draw(plottedFields);
+  }
+
+  static void verifyWorkspace()
+  {
+    PJ::PlotDataMapRef recording;
+    auto& speed = recording.addNumeric("speed")->second;
+    auto& torque = recording.addNumeric("torque")->second;
+    for (int i = 0; i < 32; ++i)
+    {
+      speed.pushBack({double(i), 100.0 + i});
+      torque.pushBack({double(i), 20.0 + 2 * i});
+    }
+    QAction analysis(nullptr);
+    QWidget sidebar;
+    Page page(recording, &analysis, [] {}, &sidebar, []() -> PlotWidget* { return nullptr; }, nullptr);
+    page.setMode(true, true);
+    page.groups->setCurrentIndex(0);
+    page.refreshTags();
+    const auto require = [](bool passed, const char* message) {
+      if (!passed) qFatal("BladeScope waveform acceptance: %s", message);
+    };
+    require(page.tags->count() == 2, "fixture measurements missing");
+    page.tags->item(0)->setCheckState(Qt::Checked);
+    page.tags->item(1)->setCheckState(Qt::Checked);
+    page.generate->click();
+    require(page.plot->curveList().size() == 2, "time plot did not draw the checked measurements");
+
+    page.modes->button(1)->click();
+    require(page.checkedFields().size() == 2 && page.parameterForm->rowCount() > 1 &&
+            !page.plot->isHidden() && !page.analysisPanel, "comparison setup changed the current plot");
+    auto* layout = qobject_cast<QComboBox*>(page.parameterForm->itemAt(0, QFormLayout::FieldRole)->widget());
+    require(layout != nullptr, "comparison layout control missing");
+    layout->setCurrentIndex(1);
+    page.generate->click();
+    require(page.analysisPanel && page.analysisPanel->parentWidget() == &page && !page.analysisPanel->isWindow(),
+            "comparison plot is outside the workspace");
+    const auto charts = page.analysisPanel->findChildren<QwtPlot*>();
+    require(charts.size() == 2, "stacked comparison does not have two charts");
+    auto* upper = charts.at(0);
+    auto* lower = charts.at(1);
+    upper->setAxisScale(QwtPlot::xBottom, 5.0, 12.0);
+    upper->replot();
+    require(upper->axisScaleDiv(QwtPlot::xBottom) == lower->axisScaleDiv(QwtPlot::xBottom),
+            "stacked charts do not share the time scale");
+
+    page.modes->button(2)->click();
+    require(page.checkedFields().size() == 2 && page.parameterForm->rowCount() == 3 && page.analysisPanel,
+            "XY setup did not preserve selection or show parameters");
+    page.generate->click();
+    require(page.analysisPanel && !page.analysisPanel->isWindow(), "XY chart is outside the workspace");
+    auto* xy = page.analysisPanel->findChild<PlotWidget*>();
+    require(xy && xy->isXYPlot() && xy->curveList().size() == 1, "XY scatter did not draw");
+
+    page.modes->button(3)->click();
+    page.tags->item(1)->setCheckState(Qt::Unchecked);
+    require(page.parameterForm->rowCount() == 4 && page.analysisPanel,
+            "trend setup did not preserve the existing plot");
+    page.generate->click();
+    require(page.analysisPanel && page.analysisPanel->parentWidget() == &page && !page.plot->isHidden(),
+            "trend controls and time plot are not in the workspace");
+    auto* summary = page.analysisPanel->findChild<QLabel*>();
+    require(summary != nullptr, "trend summary is missing");
+    QEventLoop waiting;
+    QTimer poll;
+    connect(&poll, &QTimer::timeout, &waiting, [&] {
+      if (page.plot->curveList().size() >= 2) waiting.quit();
+    });
+    QTimer::singleShot(5000, &waiting, &QEventLoop::quit);
+    poll.start(20);
+    waiting.exec();
+    require(page.plot->curveList().size() == 2 && !summary->text().isEmpty() &&
+            summary->text() != QStringLiteral("正在拟合…"), "trend overlay or summary did not finish");
+
+    page.modes->button(0)->click();
+    require(!page.analysisPanel && page.checkedFields().size() == 1 && page.plot->curveList().size() == 1,
+            "returning to time view did not preserve the new selection");
   }
 
   QStringList checkedFields() const
@@ -1601,6 +1681,7 @@ private:
   QString xyX, xyY, xyTolerance, trendField;
   int trendModel = 0, trendDegree = 1, trendWindow = 11, trendRange = 0;
   QStringList plottedFields;
+  QButtonGroup* modes = nullptr;
   QComboBox* view = nullptr;
   QComboBox *groups = nullptr, *style = nullptr;
   Tags* tags = nullptr;
