@@ -3,7 +3,6 @@
 #ifdef _WIN32
 #if __has_include("bladescope_authorization_config.h")
 #include "bladescope_authorization_config.h"
-#define BLADESCOPE_AUTH_ENABLED
 #else
 #define BLADESCOPE_AUTH_URL ""
 #define BLADESCOPE_AUTH_RSA_N ""
@@ -19,19 +18,23 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
 #include <QPushButton>
 #include <QSettings>
 #include <QSysInfo>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <windows.h>
 #include <bcrypt.h>
 #include <wincrypt.h>
+#include <winhttp.h>
+#include <memory>
+#include <utility>
 
 namespace BladeAuthorization
 {
+inline constexpr bool configured = sizeof(BLADESCOPE_AUTH_URL) > 1;
+
 class Controller final : public QObject
 {
 public:
@@ -198,22 +201,69 @@ private:
     return settings.status() == QSettings::NoError;
   }
 
-  template <typename Handler>
-  void post(const char* path, QJsonObject request, QObject* context, Handler handler)
+  struct InternetHandle
   {
-    request.insert("device", QString::fromLatin1(device));
-    QNetworkRequest networkRequest(QUrl(QString::fromLatin1(BLADESCOPE_AUTH_URL) + QString::fromLatin1(path)));
-    networkRequest.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    networkRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    networkRequest.setTransferTimeout(12000);
-    auto* reply = network.post(networkRequest, QJsonDocument(request).toJson(QJsonDocument::Compact));
-    reply->setReadBufferSize(8192);
-    QTimer::singleShot(12000, reply, [reply] { if (!reply->isFinished()) reply->abort(); });
-    connect(reply, &QNetworkReply::finished, context, [reply, handler] {
-      handler(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(),
-              QJsonDocument::fromJson(reply->read(8192)).object());
+    HINTERNET value;
+    ~InternetHandle() { if (value) WinHttpCloseHandle(value); }
+  };
+
+  struct Response
+  {
+    int status = 0;
+    QJsonObject object;
+  };
+
+  static Response request(const QString& path, QJsonObject data)
+  {
+    const QUrl origin{QString::fromLatin1(BLADESCOPE_AUTH_URL)};
+    if (origin.scheme() != "https" || origin.host().isEmpty()) return {};
+    const auto host = origin.host().toStdWString();
+    const auto target = path.toStdWString();
+    const InternetHandle session{WinHttpOpen(L"BladeScope", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
+    if (!session.value || !WinHttpSetTimeouts(session.value, 5000, 5000, 5000, 10000)) return {};
+    const InternetHandle connection{WinHttpConnect(session.value, host.c_str(),
+        INTERNET_PORT(origin.port(INTERNET_DEFAULT_HTTPS_PORT)), 0)};
+    if (!connection.value) return {};
+    const InternetHandle call{WinHttpOpenRequest(connection.value, L"POST", target.c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)};
+    DWORD redirects = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    if (!call.value || !WinHttpSetOption(call.value, WINHTTP_OPTION_REDIRECT_POLICY, &redirects, sizeof(redirects)))
+      return {};
+    auto json = QJsonDocument(data).toJson(QJsonDocument::Compact);
+    if (!WinHttpSendRequest(call.value, L"Content-Type: application/json\r\n", DWORD(-1),
+            json.data(), DWORD(json.size()), DWORD(json.size()), 0) ||
+        !WinHttpReceiveResponse(call.value, nullptr))
+      return {};
+    DWORD status = 0, size = sizeof(status);
+    if (!WinHttpQueryHeaders(call.value, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX))
+      return {};
+    QByteArray response;
+    char chunk[2048];
+    DWORD read = 0;
+    do
+    {
+      if (!WinHttpReadData(call.value, chunk, sizeof(chunk), &read) || response.size() + int(read) > 8192)
+        return {};
+      response.append(chunk, int(read));
+    } while (read);
+    return {int(status), QJsonDocument::fromJson(response).object()};
+  }
+
+  template <typename Handler>
+  void post(const char* path, QJsonObject data, QObject* context, Handler handler)
+  {
+    data.insert("device", QString::fromLatin1(device));
+    auto response = std::make_shared<Response>();
+    auto* worker = QThread::create([target = QString::fromLatin1(path), data = std::move(data), response] {
+      *response = request(target, data);
     });
-    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    connect(worker, &QThread::finished, context, [response, handler] {
+      handler(response->status, response->object);
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
   }
 
   void refresh()
@@ -232,7 +282,6 @@ private:
 
   QWidget* owner;
   QByteArray device;
-  QNetworkAccessManager network;
   bool refreshing = false;
 };
 }

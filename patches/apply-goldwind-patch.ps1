@@ -2109,8 +2109,7 @@ if ($authUrl -or $authModulus -or $authExponent) {
   Remove-Item "plotjuggler_app/bladescope_authorization_config.h" -ErrorAction SilentlyContinue
 }
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'if(WIN32)' -Encoding UTF8
-Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value '  find_package(Qt5 REQUIRED COMPONENTS Network)' -Encoding UTF8
-Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value '  target_link_libraries(plotjuggler PRIVATE Qt5::Network bcrypt crypt32)' -Encoding UTF8
+Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value '  target_link_libraries(plotjuggler PRIVATE winhttp bcrypt crypt32)' -Encoding UTF8
 Add-Content -Path "plotjuggler_app/CMakeLists.txt" -Value 'endif()' -Encoding UTF8
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"`n#include `"bladescope_authorization.h`"" }
@@ -2168,18 +2167,22 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     waveform->setMode(ui->widgetStack->currentWidget() == waveform,
                       index == 0 || ui->widgetStack->currentWidget() == waveform);
   });
-#ifdef BLADESCOPE_AUTH_ENABLED
-  auto* authorization = new BladeAuthorization::Controller(this);
-  auto* manageAuthorization = analysisMenu->addAction(QStringLiteral("授权管理"));
-  connect(manageAuthorization, &QAction::triggered, authorization, [authorization] { authorization->manage(); });
+#ifdef _WIN32
+  BladeAuthorization::Controller* authorization = nullptr;
+  if (BladeAuthorization::configured)
+  {
+    authorization = new BladeAuthorization::Controller(this);
+    auto* manageAuthorization = analysisMenu->addAction(QStringLiteral("授权管理"));
+    connect(manageAuthorization, &QAction::triggered, authorization, [authorization] { authorization->manage(); });
+  }
 #endif
   connect(waveformAction, &QAction::triggered, waveform, [this, waveform
-#ifdef BLADESCOPE_AUTH_ENABLED
+#ifdef _WIN32
       , authorization
 #endif
   ] {
-#ifdef BLADESCOPE_AUTH_ENABLED
-    if (!authorization->enter()) return;
+#ifdef _WIN32
+    if (authorization && !authorization->enter()) return;
 #endif
     waveform->refreshGroups();
     ui->widgetStack->setCurrentWidget(waveform);

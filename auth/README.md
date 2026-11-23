@@ -34,6 +34,6 @@ python3 -m venv .venv
 
 ## 构建 Windows 授权版
 
-运行 `.venv/bin/python auth/server.py --data /var/lib/bladescope-auth public-key` 获取公开的 RSA `modulus` 和 `exponent`。在打包环境设置 `BLADESCOPE_AUTH_URL`（HTTPS 域名，末尾无斜杠）、`BLADESCOPE_AUTH_RSA_N`（modulus）、`BLADESCOPE_AUTH_RSA_E`（exponent）。也可以通过 GitHub Actions 同名仓库变量传入。设置这三项后构建授权版。三项都为空时构建普通版。安装包中只包含 URL 和公钥。授权缓存在 Windows 当前用户下由 DPAPI 保护，并在使用时检查签名、设备和到期时间。离线期限依赖设备时间，适合常规账号授权管理。
+运行 `.venv/bin/python auth/server.py --data /var/lib/bladescope-auth public-key` 获取公开的 RSA `modulus` 和 `exponent`。在打包环境设置 `BLADESCOPE_AUTH_URL`（HTTPS 域名，末尾无斜杠）、`BLADESCOPE_AUTH_RSA_N`（modulus）、`BLADESCOPE_AUTH_RSA_E`（exponent）。也可以通过 GitHub Actions 同名仓库变量传入。设置这三项后构建授权版。三项都为空时构建普通版。安装包中只包含 URL 和公钥。授权 HTTPS 使用 Windows WinHTTP，沿用系统证书验证。授权缓存在 Windows 当前用户下由 DPAPI 保护，并在使用时检查签名、设备和到期时间。离线期限依赖设备时间，适合常规账号授权管理。
 
 正式分发前请在一台新 Windows 电脑使用实际的验证域名和发件服务，验收收码、在线激活、断网重启、到期续验和停用。独立授权服务的开发测试可用 `python -m unittest discover -s auth -v` 执行，采用模拟发件。
