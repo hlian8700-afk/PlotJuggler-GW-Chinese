@@ -18,6 +18,7 @@
 #include <QToolTip>
 #include <qwt_plot.h>
 #include <qwt_plot_curve.h>
+#include "bladescope_trend.h"
 
 namespace BladeWaveform
 {
@@ -147,8 +148,10 @@ public:
     generate = new QPushButton(QStringLiteral("作图"), sidebar);
     side->addWidget(generate);
     analysisControls = new QWidget(sidebar);
-    auto* actions = new QHBoxLayout(analysisControls);
-    actions->setContentsMargins(0, 0, 0, 0);
+    auto* analysisLayout = new QVBoxLayout(analysisControls);
+    analysisLayout->setContentsMargins(0, 0, 0, 0);
+    auto* actions = new QHBoxLayout;
+    analysisLayout->addLayout(actions);
     auto* filter = new QPushButton(QStringLiteral("条件筛选"), analysisControls);
     auto* statistics = new QPushButton(QStringLiteral("采样统计"), analysisControls);
     actions->addWidget(filter);
@@ -159,7 +162,10 @@ public:
     actions->addWidget(xy);
     connect(xy, &QPushButton::clicked, this, [this] { showXY(); });
     connect(comparison, &QPushButton::clicked, this, [this] { showComparison(); });
+    auto* trend = new QPushButton(QStringLiteral("时序趋势拟合"), analysisControls);
+    analysisLayout->addWidget(trend);
     side->addWidget(analysisControls);
+    connect(trend, &QPushButton::clicked, this, [this] { showTrend(); });
     connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
     connect(statistics, &QPushButton::clicked, this, [this] { showStatistics(); });
     plot = new PlotWidget(*shown, this);
@@ -569,11 +575,33 @@ private:
     if (!plottedFields.isEmpty()) draw(plottedFields);
   }
 
+  void showTrend()
+  {
+    QStringList fields;
+    for (const auto& curve : plot->curveList())
+    {
+      const auto name = QString::fromStdString(curve.src_name);
+      if (summaries.contains(name)) fields << name;
+    }
+    if (!canvas || fields.isEmpty())
+    {
+      QMessageBox::information(this, QStringLiteral("时序趋势拟合"), QStringLiteral("请先绘制有效的录波测点。"));
+      return;
+    }
+    bool confirmed = false;
+    const auto field = QInputDialog::getItem(this, QStringLiteral("时序趋势拟合"),
+        QStringLiteral("选择拟合测点"), fields, 0, false, &confirmed);
+    if (confirmed) BladeTrend::open(plot, canvas, field.toStdString());
+  }
+
   void showXY()
   {
     QStringList fields;
     for (const auto& curve : plot->curveList())
-      fields << QString::fromStdString(curve.src_name);
+    {
+      const auto name = QString::fromStdString(curve.src_name);
+      if (summaries.contains(name)) fields << name;
+    }
     if (fields.size() < 2)
     {
       QMessageBox::information(this, QStringLiteral("XY 分析"), QStringLiteral("请先绘制至少两个有有效数据的测点。"));
@@ -599,9 +627,12 @@ private:
     form->addRow(QStringLiteral("最大时间偏差（秒）"), tolerance);
     auto* apply = new QPushButton(QStringLiteral("绘制 XY"), &dialog);
     auto* difference = new QPushButton(QStringLiteral("Y−X 差值统计"), &dialog);
+    auto* fit = new QPushButton(QStringLiteral("多项式拟合"), &dialog);
+    fit->setEnabled(false);
     auto* actions = new QHBoxLayout;
     actions->addWidget(apply);
     actions->addWidget(difference);
+    actions->addWidget(fit);
     root->addLayout(actions);
     auto* xyPlot = new PlotWidget(xyData, &dialog);
     root->addWidget(xyPlot, 1);
@@ -609,6 +640,12 @@ private:
     if (!chart) return;
     auto* status = new QLabel(&dialog);
     root->addWidget(status);
+    auto* fitSummary = new QLabel(&dialog);
+    fitSummary->setWordWrap(true);
+    root->addWidget(fitSummary);
+    QwtPlotCurve fitCurve(QStringLiteral("XY 拟合"));
+    fitCurve.setPen(QPen(QColor(214, 87, 39), 2.0));
+    quint64 revision = 0;
     const auto redraw = [&] {
       bool valid = false;
       const double seconds = tolerance->text().toDouble(&valid);
@@ -619,6 +656,9 @@ private:
       }
       const auto& xs = shown->numeric.at(x->currentText().toStdString());
       const auto& ys = shown->numeric.at(y->currentText().toStdString());
+      ++revision;
+      fitCurve.detach();
+      fitSummary->clear();
       paired.clear();
       xyPlot->removeAllCurves();
       xyData.scatter_xy.clear();
@@ -646,9 +686,38 @@ private:
       xyPlot->zoomOut(false);
       xyPlot->replot();
       difference->setEnabled(!paired.empty());
+      fit->setEnabled(paired.size() >= 2);
       status->setText(QStringLiteral("配对 %1 / %2 个 X 采样点").arg(qulonglong(paired.size())).arg(qulonglong(xs.size())));
     };
     connect(apply, &QPushButton::clicked, &dialog, redraw);
+    connect(fit, &QPushButton::clicked, &dialog, [&] {
+      bool confirmed = false;
+      const int degree = QInputDialog::getInt(&dialog, QStringLiteral("多项式拟合"),
+          QStringLiteral("阶数"), 1, 1, 6, 1, &confirmed);
+      if (!confirmed) return;
+      auto rows = std::make_shared<BladeFit::Points>();
+      rows->reserve(paired.size());
+      for (const auto& point : paired) rows->push_back({point.x, point.y});
+      const auto ticket = ++revision;
+      fit->setEnabled(false);
+      fitCurve.detach();
+      chart->replot();
+      fitSummary->setText(QStringLiteral("正在拟合…"));
+      BladeTrend::background<BladeTrend::Trend>(&dialog, [rows, degree] {
+        std::sort(rows->begin(), rows->end(), [](const auto& a, const auto& b) { return a.x < b.x; });
+        return BladeTrend::calculate(*rows, 0, degree, rows->front().x, rows->back().x, QStringLiteral("X"));
+      }, [&, ticket](BladeTrend::Trend result, const QString& error) {
+        if (ticket != revision) return;
+        fit->setEnabled(true);
+        fitSummary->setText(error.isEmpty() ? result.summary : error);
+        if (!error.isEmpty() || result.points.empty()) return;
+        QVector<QPointF> samples;
+        for (const auto& point : result.points) samples.append(QPointF(point.x, point.y));
+        fitCurve.setSamples(samples);
+        fitCurve.attach(chart);
+        chart->replot();
+      });
+    });
     connect(difference, &QPushButton::clicked, &dialog, [&] {
       std::vector<double> values;
       values.reserve(paired.size());
@@ -722,7 +791,10 @@ private:
   {
     QStringList fields;
     for (const auto& curve : plot->curveList())
-      fields << QString::fromStdString(curve.src_name);
+    {
+      const auto name = QString::fromStdString(curve.src_name);
+      if (summaries.contains(name)) fields << name;
+    }
     if (fields.size() < 2)
     {
       QMessageBox::information(this, QStringLiteral("双轴对照"), QStringLiteral("请先绘制至少两个有有效数据的测点。"));
@@ -1051,7 +1123,8 @@ private:
   void applyStyle()
   {
     for (const auto& layer : plot->curveList())
-      layer.curve->setStyle(style->currentIndex() ? QwtPlotCurve::Dots : QwtPlotCurve::Lines);
+      if (summaries.contains(QString::fromStdString(layer.src_name)))
+        layer.curve->setStyle(style->currentIndex() ? QwtPlotCurve::Dots : QwtPlotCurve::Lines);
     plot->replot();
   }
 

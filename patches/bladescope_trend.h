@@ -22,7 +22,7 @@ void background(QObject* owner, Work work, Done done)
 }
 
 struct Trend { BladeFit::Points points; QString summary; };
-inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int width,double lo,double hi)
+inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int width,double lo,double hi,const QString& coordinate=QStringLiteral("t"))
 {
   using namespace BladeFit;
   Points rows;
@@ -40,13 +40,22 @@ inline Trend calculate(const BladeFit::Points& input,int mode,int degree,int wid
   }
   const auto poly=regress(rows,degree);
   QStringList coeff;
-  long double error=0;
-  for(auto p:rows){auto d=poly(p.x)-p.y;error+=d*d;}
+  long double error=0, mean=0, variance=0;
+  size_t count=0;
+  for(auto p:rows)
+  {
+    const long double residual=poly(p.x)-p.y;
+    error+=residual*residual;
+    const long double delta=p.y-mean;
+    mean+=delta / ++count;
+    variance+=delta*(p.y-mean);
+  }
+  const auto r2=variance>0 ? QString::number(double(1-error/variance),'g',8) : QStringLiteral("—");
   for(double v:poly.coefficients) coeff<<QString::number(v,'g',12);
   return {sample(rows.front().x,rows.back().x,poly),
-    QString::fromUtf8("z=(t−%1)/%2，p₀…pₙ = [%3]，RMSE %4，样本 %5")
-    .arg(poly.origin,0,'g',16).arg(poly.scale,0,'g',12).arg(coeff.join(", "))
-    .arg(std::sqrt(double(error/rows.size())),0,'g',8).arg(qulonglong(rows.size()))};
+    QString::fromUtf8("z=(%1−%2)/%3，p₀…pₙ = [%4]，RMSE %5，样本 %6，R² %7")
+    .arg(coordinate).arg(poly.origin,0,'g',16).arg(poly.scale,0,'g',12).arg(coeff.join(", "))
+    .arg(std::sqrt(double(error/rows.size())),0,'g',8).arg(qulonglong(rows.size())).arg(r2)};
 }
 
 inline void open(PlotWidget* plot,QwtPlot* canvasPlot,const std::string& source)
