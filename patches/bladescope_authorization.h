@@ -13,6 +13,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QFile>
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -116,6 +117,16 @@ public:
     };
     connect(request, &QPushButton::clicked, &dialog, [=] { send(false); });
     connect(verify, &QPushButton::clicked, &dialog, [=] { send(true); });
+    const auto smokePath = owner ? QString() : qEnvironmentVariable("BLADESCOPE_AUTH_SMOKE_OUTPUT");
+    if (!smokePath.isEmpty())
+    {
+      QTimer::singleShot(0, &dialog, [&dialog, smokePath] {
+        QFile result(smokePath);
+        if (dialog.isVisible() && result.open(QIODevice::WriteOnly))
+          result.write("startup-authorization-visible");
+        dialog.reject();
+      });
+    }
     dialog.exec();
   }
 

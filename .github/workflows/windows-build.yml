@@ -210,21 +210,25 @@ jobs:
           if (!(Test-Path (Join-Path $target "bin/DataLoadCSV.dll"))) { throw "Installed CSV plugin missing" }
           if (!(Test-Path (Join-Path $target "bin/wasmer.dll"))) { throw "Installed wasmer.dll missing" }
           if (!(Test-Path (Join-Path $target "bin/BladeScope.ico"))) { throw "BladeScope icon missing from installed files" }
-          # Launch for a few seconds to catch Windows loader errors (e.g. missing DLLs).
+          $protectedBuild = '${{ vars.BLADESCOPE_AUTH_URL }}' -ne ''
+          if ($protectedBuild) {
+            $env:BLADESCOPE_AUTH_SMOKE_OUTPUT = Join-Path $env:RUNNER_TEMP "bladescope-startup-authorization.txt"
+            Remove-Item $env:BLADESCOPE_AUTH_SMOKE_OUTPUT -ErrorAction SilentlyContinue
+          }
           $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
-          Start-Sleep -Seconds 8
-          $app.Refresh()
-          if ($app.HasExited) { throw "Installed application exited during startup (code $($app.ExitCode)); inspect runtime dependencies." }
-          if ('${{ vars.BLADESCOPE_AUTH_URL }}' -ne '') {
-            if ($app.MainWindowTitle -ne "BladeScope 授权管理") {
+          if ($protectedBuild) {
+            if (!$app.WaitForExit(15000)) {
               Stop-Process -Id $app.Id -Force
-              throw "Expected the startup authorization dialog before the main window"
+              throw "Application did not exit after canceling startup authorization"
             }
-            if (!$app.CloseMainWindow() -or !$app.WaitForExit(10000) -or $app.ExitCode -ne 0) {
-              if (!$app.HasExited) { Stop-Process -Id $app.Id -Force }
-              throw "Closing the authorization dialog must exit the application without entering the main window"
+            if ($app.ExitCode -ne 0 -or !(Test-Path $env:BLADESCOPE_AUTH_SMOKE_OUTPUT) -or
+                (Get-Content -Raw $env:BLADESCOPE_AUTH_SMOKE_OUTPUT) -ne 'startup-authorization-visible') {
+              throw "Expected the startup authorization dialog to show and cancellation to exit cleanly"
             }
           } else {
+            Start-Sleep -Seconds 8
+            $app.Refresh()
+            if ($app.HasExited) { throw "Installed application exited during startup (code $($app.ExitCode)); inspect runtime dependencies." }
             Stop-Process -Id $app.Id -Force
           }
           Write-Host "GUI executable passed startup smoke test."
