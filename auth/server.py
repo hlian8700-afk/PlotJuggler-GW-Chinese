@@ -20,6 +20,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
+from admin import Admin
+
 OFFLINE_SECONDS = 15 * 86400
 CODE_SECONDS = 600
 SCOPE = "bladescope.waveform"
@@ -150,6 +152,7 @@ class Authorization:
         self.code_key = (directory / "codes.key").read_bytes()
         self.mail = mail
         self.clock = clock
+        self.admin = Admin(self, connect, set_account)
 
     def digest(self, *parts):
         return hmac.digest(self.code_key, "\0".join(parts).encode(), "sha256")
@@ -250,6 +253,8 @@ class Authorization:
 
     def __call__(self, environ, respond):
         route = environ["PATH_INFO"]
+        if route == "/admin" or route.startswith("/admin/"):
+            return self.admin(environ, respond, os.getenv("BLADESCOPE_ADMIN_KEY", ""))
         if route == "/healthz" and environ["REQUEST_METHOD"] == "GET":
             with closing(connect(self.directory)) as db:
                 db.execute("SELECT 1 FROM account LIMIT 1").fetchone()

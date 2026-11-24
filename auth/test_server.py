@@ -133,3 +133,41 @@ class AuthorizationTests(unittest.TestCase):
         data = json.loads(b"".join(response))
         self.assertEqual(data, public_config(self.directory))
         self.assertEqual(set(data), {"modulus", "exponent"})
+
+    def test_admin_account_management(self):
+        from urllib.parse import urlencode
+        import re
+
+        def request(path, data=None, cookie="", fetch_site="same-origin"):
+            body = urlencode(data or {}).encode()
+            status, headers = [], {}
+            response = self.app({
+                "PATH_INFO": path, "REQUEST_METHOD": "POST" if data is not None else "GET",
+                "CONTENT_LENGTH": str(len(body)), "wsgi.input": io.BytesIO(body),
+                "HTTP_COOKIE": cookie, "HTTP_SEC_FETCH_SITE": fetch_site, "REMOTE_ADDR": "192.0.2.1",
+            }, lambda line, values: (status.append(int(line[:3])), headers.update(values)))
+            return status[0], headers, b"".join(response).decode()
+
+        with patch.dict(os.environ, {"BLADESCOPE_ADMIN_KEY": ""}):
+            self.assertEqual(request("/admin")[0], 404)
+        with patch.dict(os.environ, {"BLADESCOPE_ADMIN_KEY": "a" * 64}):
+            self.assertEqual(request("/admin/login", {"key": "bad"})[0], 401)
+            self.assertEqual(request("/admin/accounts", {"email": self.email, "action": "enable"})[0], 403)
+            status, headers, _ = request("/admin/login", {"key": "a" * 64})
+            self.assertEqual(status, 303)
+            self.assertIn("Secure; HttpOnly; SameSite=Strict", headers["Set-Cookie"])
+            cookie = headers["Set-Cookie"].split(";")[0]
+            _, _, page = request("/admin", cookie=cookie)
+            csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+            data = {"email": self.email, "action": "enable", "csrf": csrf}
+            self.assertEqual(request("/admin/accounts", data, cookie, "cross-site")[0], 403)
+            self.assertEqual(request("/admin/accounts", dict(data, csrf="invalid"), cookie)[0], 403)
+            self.assertEqual(request("/admin/accounts", data, cookie)[0], 303)
+            self.assertIn(self.email, request("/admin", cookie=cookie)[2])
+            code = self.activate()
+            self.assertEqual(self.post("verify", code=code)[0], 200)
+            self.assertEqual(request("/admin/accounts", dict(data, action="disable"), cookie)[0], 303)
+            self.assertIn("已停用", request("/admin", cookie=cookie)[2])
+            self.assertEqual(request("/admin/accounts", data, cookie)[0], 303)
+            self.assertEqual(request("/admin/logout", {"csrf": csrf}, cookie)[0], 303)
+            self.assertNotIn(self.email, request("/admin", cookie=cookie)[2])

@@ -52,3 +52,16 @@ python3 -m venv .venv
 使用 Resend 测试发件地址时，只能向该 Resend 账号自己的邮箱发信。首个账号应与 Resend 注册邮箱一致。以后开放给其他收件人时，先在 Resend 验证发件域名，再设置发件地址。
 
 部署后检查 `GET /healthz`。首次启动把指定邮箱加到账号库。已停用的账号保持停用，重新部署时也不会恢复。后续通过 `railway ssh` 进入服务容器，在容器里使用 `python /app/server.py --data /data list`、`enable` 或 `disable` 管理账号。通过 HTTPS 访问 `/v1/public-key`，把返回的公钥和当前的 Railway HTTPS 域名配置到 Windows 授权版构建变量。私钥和账号库随持久卷保留。
+
+## 网页管理台
+
+在 Railway 的 bladescope-auth 服务中添加私密变量 `BLADESCOPE_ADMIN_KEY`。使用以下 PowerShell 命令在管理员自己的电脑上生成 256 位随机密钥：
+
+```powershell
+$bytes = [byte[]]::new(32)
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+-join ($bytes | ForEach-Object { $_.ToString('x2') })
+```
+
+把生成的 64 位小写十六进制值保存到密码管理器，并直接填入 Railway 变量，应用部署后访问授权服务 HTTPS 域名下的 `/admin`。用同一个密钥登录，可开通、查找、停用或恢复已有账号。退出会结束当前会话，登录会话最多一小时。密钥为空或格式不正确时，管理入口返回 404。管理密钥独立于 Resend 发信密钥。
