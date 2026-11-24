@@ -215,8 +215,19 @@ jobs:
           Start-Sleep -Seconds 8
           $app.Refresh()
           if ($app.HasExited) { throw "Installed application exited during startup (code $($app.ExitCode)); inspect runtime dependencies." }
-          Stop-Process -Id $app.Id -Force
-          Write-Host "GUI executable survived startup smoke test."
+          if ('${{ vars.BLADESCOPE_AUTH_URL }}' -ne '') {
+            if ($app.MainWindowTitle -ne "BladeScope 授权管理") {
+              Stop-Process -Id $app.Id -Force
+              throw "Expected the startup authorization dialog before the main window"
+            }
+            if (!$app.CloseMainWindow() -or !$app.WaitForExit(10000) -or $app.ExitCode -ne 0) {
+              if (!$app.HasExited) { Stop-Process -Id $app.Id -Force }
+              throw "Closing the authorization dialog must exit the application without entering the main window"
+            }
+          } else {
+            Stop-Process -Id $app.Id -Force
+          }
+          Write-Host "GUI executable passed startup smoke test."
           $rows = @(Import-Csv -LiteralPath $csv -Encoding UTF8)
           $expectedRows = if ('${{ github.event.repository.private }}' -eq 'true') { 1981 } else { 2 }
           if ($rows.Count -ne $expectedRows) { throw "Expected $expectedRows mappings, found $($rows.Count)" }
@@ -229,6 +240,7 @@ jobs:
           Write-Host "Installer silent install and $expectedRows mapping checks passed."
 
       - name: Verify M01 tables, coefficients and CSV inside the installed Qt application
+        if: ${{ vars.BLADESCOPE_AUTH_URL == '' }}
         shell: pwsh
         run: |
           $exe = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest/bin/BladeScope.exe"

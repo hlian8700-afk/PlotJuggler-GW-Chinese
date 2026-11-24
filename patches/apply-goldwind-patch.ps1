@@ -1836,6 +1836,20 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
+  @{ Old = '#include "mainwindow.h"'; New = '#include "mainwindow.h"' + "`n" + '#include "bladescope_authorization.h"' }
+  @{ Old = '  MainWindow* window = nullptr;'; New = @'
+#ifdef _WIN32
+  if (BladeAuthorization::configured)
+  {
+    BladeAuthorization::Controller authorization(nullptr);
+    app.setQuitOnLastWindowClosed(false);
+    const bool authorized = authorization.enter();
+    app.setQuitOnLastWindowClosed(true);
+    if (!authorized) return 0;
+  }
+#endif
+  MainWindow* window = nullptr;
+'@ }
   @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.14"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
@@ -2176,14 +2190,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     connect(manageAuthorization, &QAction::triggered, authorization, [authorization] { authorization->manage(); });
   }
 #endif
-  connect(waveformAction, &QAction::triggered, waveform, [this, waveform
-#ifdef _WIN32
-      , authorization
-#endif
-  ] {
-#ifdef _WIN32
-    if (authorization && !authorization->enter()) return;
-#endif
+  connect(waveformAction, &QAction::triggered, waveform, [this, waveform] {
     waveform->refreshGroups();
     ui->widgetStack->setCurrentWidget(waveform);
   });

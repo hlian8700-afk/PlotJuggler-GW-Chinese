@@ -13,6 +13,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -44,15 +45,14 @@ public:
     if (!machine.isEmpty())
       device = QCryptographicHash::hash("BladeScope/waveform/" + machine,
                                        QCryptographicHash::Sha256).toHex();
-    QTimer::singleShot(0, this, [this] { refresh(); });
   }
 
   bool enter()
   {
+    const auto original = token();
+    if (!claims(original).isEmpty()) refreshOnStartup(original);
     if (claims(token()).isEmpty()) manage();
-    if (claims(token()).isEmpty()) return false;
-    refresh();
-    return true;
+    return !claims(token()).isEmpty();
   }
 
   void manage()
@@ -266,23 +266,24 @@ private:
     worker->start();
   }
 
-  void refresh()
+  void refreshOnStartup(const QString& original)
   {
-    const auto original = token();
-    if (refreshing || claims(original).isEmpty()) return;
-    refreshing = true;
-    post("/v1/refresh", {{"token", original}}, this, [this, original](int http, const QJsonObject& response) {
-      refreshing = false;
-      if (token() != original) return;
-      if (http == 200) acceptToken(response.value("token").toString());
-      else if (http == 403 && response.value("error").toString() == "revoked")
-        QSettings().remove("BladeScopeAuthorization/tokenV1");
+    QEventLoop waiting;
+    post("/v1/refresh", {{"token", original}}, &waiting, [this, original, &waiting](int http, const QJsonObject& response) {
+      if (token() == original)
+      {
+        if (http == 200) acceptToken(response.value("token").toString());
+        else if (http == 403 && response.value("error").toString() == "revoked")
+          QSettings().remove("BladeScopeAuthorization/tokenV1");
+      }
+      waiting.quit();
     });
+    QTimer::singleShot(3500, &waiting, &QEventLoop::quit);
+    waiting.exec();
   }
 
   QWidget* owner;
   QByteArray device;
-  bool refreshing = false;
 };
 }
 #endif
