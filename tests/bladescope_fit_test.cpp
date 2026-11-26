@@ -41,5 +41,48 @@ int main(){
  const auto rose=analyze(M11,north,p,{},month);
  assert(rose.bins.size()==1&&rose.bins.at(0).n==2);
  assert(std::abs(rose.bins.at(0).x)<1e-10);
- std::cout<<"19 analyses, QR trend, moving average, torque units, rose and transmission checks passed\n";
+ // Unit conversion must affect scatter, bins, fits and exports consistently.
+ Params torque;torque.rated=6250;torque.rpm=1677;torque.efficiency=1;
+ torque.width=.5;torque.rpmWidth=20;torque.torqueFitMin=1000;
+ assert(std::abs(torqueReference(torque)-35589.20909926103)<1e-7);
+ Channels nm,percent,knm;
+ for(int i=0;i<18;++i){
+   const double speed=i<9?900+i*20:1400+(i-9)*20;
+   const double value=110.*speed*speed/(1677.*1677.);
+   for(auto* channels:{&nm,&percent,&knm}){
+     (*channels)[Generator].push_back({double(i),speed});
+     (*channels)[Power].push_back({double(i),speed*speed*.002});
+   }
+   percent[TorquePct].push_back({double(i),value});
+   nm[TorquePct].push_back({double(i),value*torqueReference(torque)/100});
+   knm[TorquePct].push_back({double(i),value*torqueReference(torque)/100000});
+ }
+ const auto pctResult=analyze(M34,percent,torque,{},month);
+ torque.torqueUnit=NewtonMetre;
+ const auto nmResult=analyze(M34,nm,torque,{},month);
+ torque.torqueUnit=KiloNewtonMetre;
+ const auto knmResult=analyze(M34,knm,torque,{},month);
+ assert(nmResult.fitSegments.size()==2);
+ assert(nmResult.fitSamples==13);
+ assert(!std::isfinite(fittedValue(nmResult,1200)));
+ assert(!std::isfinite(fittedValue(nmResult,950)));
+ for(size_t i=0;i<nmResult.raw.size();++i){
+   assert(std::abs(nmResult.raw[i].y-pctResult.raw[i].y)<1e-8);
+   assert(std::abs(knmResult.raw[i].y-pctResult.raw[i].y)<1e-8);
+ }
+ for(size_t i=0;i<nmResult.fit.size();++i){
+   assert(nmResult.fit[i].x>=1000&&nmResult.fit[i].y>=0);
+   assert(std::abs(nmResult.fit[i].y-pctResult.fit[i].y)<1e-7);
+ }
+ torque.ratedTorque=30000;assert(torqueReference(torque)==30000);
+ const auto converted=analyze(M33,nm,torque,{},month);
+ assert(converted.fitSegments.size()==2);
+ assert(converted.fit.front().y!=converted.fit.back().y);
+ // Percentages over 100 are valid observations and must retain their magnitude.
+ torque.torqueUnit=Percent;torque.torqueFitMin=0;
+ Channels overload;
+ for(int i=0;i<6;++i){overload[Generator].push_back({double(i),1600.+i*20});overload[TorquePct].push_back({double(i),120.+i});}
+ const auto over=analyze(M34,overload,torque,{},month);
+ assert(over.fit.front().y>100);
+ std::cout<<"19 analyses and torque conversion, operating range, gap and overload regressions passed\n";
 }

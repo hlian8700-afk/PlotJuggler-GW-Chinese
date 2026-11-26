@@ -24,7 +24,7 @@ inline const QStringList& kinds()
 inline const QStringList& roles()
 {
   static const QStringList names={"风速 (m/s)","有功功率 (kW)","叶轮转速 (rpm)","发电机转速 (rpm)",
-    "桨距角 (°)","绝对风向 (°)","对风角度 (°)","转矩 (%)","运行状态码","室外温度 (°C)","故障标志","限功率标志","启停过渡标志"};
+    "桨距角 (°)","绝对风向 (°)","对风角度 (°)","转矩（单位见下方）","运行状态码","室外温度 (°C)","故障标志","限功率标志","启停过渡标志"};
   return names;
 }
 inline QString num(double x){return std::isfinite(x)?QString::number(x,'g',12):QString();}
@@ -242,6 +242,9 @@ class Panel : public QWidget
     p.ratedWind=n("ratedWind",0);p.width=n("width",.5);p.tolerance=n("tolerance",1);
     p.efficiency=n("efficiency",1);p.sectors=int(n("sectors",16));p.degree=int(n("degree",4));
     p.torqueDegree=int(n("torqueDegree",2));p.normal=int(n("normal",0));p.filterState=config.value("filterState").toBool();
+    p.torqueUnit=config.value("torqueUnit").toInt(Percent);
+    p.ratedTorque=n("ratedTorque",0);p.rpmWidth=n("rpmWidth",0);p.torqueFitMin=n("torqueFitMin",0);
+    p.torqueNonnegative=config.value("torqueNonnegative").toBool(true);
     p.rejectFlags=config.value("rejectFlags").toBool(true);
     p.generator=config.value("generator").toBool();p.absoluteYaw=config.value("absoluteYaw").toBool(true);
     for(int i=0;i<NRoles;++i){
@@ -291,6 +294,11 @@ class Panel : public QWidget
     auto* pages=new QTabWidget;layout.addWidget(pages,1);
     auto* mappingPage=new QWidget;
     auto* mappingLayout=new QVBoxLayout(mappingPage);
+    auto* unitRow=new QHBoxLayout;
+    unitRow->addWidget(new QLabel(QStringLiteral("转矩测点输入单位")));
+    auto* torqueUnit=new QComboBox;torqueUnit->addItems({"%","N·m","kN·m"});
+    torqueUnit->setCurrentIndex(config.value("torqueUnit").toInt(Percent));
+    unitRow->addWidget(torqueUnit);unitRow->addStretch();mappingLayout->addLayout(unitRow);
     auto* mapping=new QTableWidget(NRoles,4);
     mappingLayout->addWidget(mapping);
     pages->addTab(mappingPage,QStringLiteral("测点关联"));
@@ -330,12 +338,17 @@ class Panel : public QWidget
     parameter("rho","空气密度 (kg/m³)","1.225");parameter("ratio","齿轮箱变比","1");
     parameter("rpm","当前转速轴的额定转速 (rpm)","");parameter("cutIn","切入风速 (m/s)","3");
     parameter("ratedWind","额定风速 (m/s)","");parameter("cutOut","切出风速 (m/s)","25");
-    parameter("efficiency","发电机效率 (0–1)","1");parameter("width","横轴分箱宽度","0.5");
+    parameter("efficiency","发电机效率 (0–1)","1");parameter("width","横轴分箱宽度（风速为 m/s）","0.5");
+    parameter("rpmWidth","转速分箱宽度 (rpm，留空沿用原宽度)","");
+    parameter("ratedTorque","发电机额定转矩 (N·m，留空按功率/效率/额定转速计算)","");
+    parameter("torqueFitMin","M33 / M34 拟合最低发电机转速 (rpm)","0");
     parameter("tolerance","最大时间匹配差 (s)","1");parameter("degree","Cp–λ 多项式阶数 (4–6)","4");
-    parameter("torqueDegree","M34 转矩拟合阶数 (2–3)","2");
+    parameter("torqueDegree","M33 / M34 转矩拟合阶数 (2–3)","2");
     parameter("start","起始时间（原始秒，可留空）","");parameter("end","结束时间（原始秒，可留空）","");
     parameter("normal","正常运行状态码","0");
     auto* state=new QCheckBox(QStringLiteral("仅保留正常运行状态"));state->setChecked(config.value("filterState").toBool());f->addRow(state);
+    auto* nonnegative=new QCheckBox(QStringLiteral("M33 / M34 拟合输出下限为 0（保留原始散点）"));
+    nonnegative->setChecked(config.value("torqueNonnegative").toBool(true));f->addRow(nonnegative);
     auto* flags=new QCheckBox(QStringLiteral("性能曲线排除故障、限功率和启停标志（0 为正常）"));
     flags->setChecked(config.value("rejectFlags").toBool(true));f->addRow(flags);
     auto* gen=new QCheckBox(QStringLiteral("M21 / M35 使用发电机转速"));gen->setChecked(config.value("generator").toBool());f->addRow(gen);
@@ -343,9 +356,10 @@ class Panel : public QWidget
     auto* sectors=new QComboBox;sectors->addItems({"16","24"});sectors->setCurrentText(QString::number(config.value("sectors").toInt(16)));f->addRow(QStringLiteral("风玫瑰扇区"),sectors);
     QMap<QString,QPair<QCheckBox*,bool>> toggles{
       {"generator",{gen,false}}, {"absoluteYaw",{abs,true}}, {"rejectFlags",{flags,true}},
-      {"filterState",{state,false}}};
+      {"filterState",{state,false}}, {"torqueNonnegative",{nonnegative,true}}};
     auto captureMapping = [&] {
       QJsonObject values;
+      values["torqueUnit"]=torqueUnit->currentIndex();
       for(int i=0;i<NRoles;++i){
         values["role"+QString::number(i)]=selectors[i]->currentText().trimmed();
         const auto a=mapping->item(i,2)->text().trimmed(), b=mapping->item(i,3)->text().trimmed();
@@ -372,12 +386,16 @@ class Panel : public QWidget
     };
     profileControls(mappingLayout,&d,"measurement-associations",QStringLiteral("测点关联组"),captureMapping,
       [&](const QJsonObject& values) {
+        torqueUnit->setCurrentIndex(values.value("torqueUnit").toInt(Percent));
         for(int i=0;i<NRoles;++i){
           selectors[i]->setEditText(values.value("role"+QString::number(i)).toString());
           const auto limits=values.value("limit"+QString::number(i)).toArray();
           for(int j=0;j<2;++j) mapping->item(i,j+2)->setText(limits.size()==2?num(limits[j].toDouble()):QString());
         }
       }, [](const QJsonObject& values) {
+        if(values.contains("torqueUnit") && (!values.value("torqueUnit").isDouble() ||
+           values.value("torqueUnit").toDouble()!=values.value("torqueUnit").toInt() ||
+           values.value("torqueUnit").toInt()<Percent || values.value("torqueUnit").toInt()>KiloNewtonMetre)) return false;
         for(int i=0;i<NRoles;++i){
           if(!values.value("role"+QString::number(i)).isString()) return false;
           const auto key="limit"+QString::number(i);
@@ -501,6 +519,10 @@ class Panel : public QWidget
         invalid(QStringLiteral("请检查分箱宽度、效率和拟合阶数"));return;}
       if(next.value("torqueDegree").toInt(2)<2||next.value("torqueDegree").toInt(2)>3){
         invalid(QStringLiteral("转矩拟合支持二阶或三阶"));return;}
+      for(const auto& key:{"rpmWidth","ratedTorque"})
+        if(next.contains(key) && next.value(key).toDouble()<=0){
+          invalid(QStringLiteral("转速分箱宽度和额定转矩须为正数或留空"));return;}
+      if(next.value("torqueFitMin").toDouble()<0){invalid(QStringLiteral("拟合最低转速不能为负数"));return;}
       try {
         if(theory->toPlainText().trimmed().isEmpty()){
           next["reference"]=QJsonArray();
@@ -711,11 +733,20 @@ class Panel : public QWidget
       for(int i=0;i<4;++i)layer(QStringLiteral("密度 %1").arg(i+1),colors[i],2,palette[i],QwtPlotCurve::Dots);
       layer(QStringLiteral("已标注"),marked,2,QColor("#d91d86"),QwtPlotCurve::Dots);
     }
-    layer(QStringLiteral("拟合结果"),r.fit,3,QColor("#e86137"));
+    if(r.fitSegments.empty()) layer(QStringLiteral("拟合结果"),r.fit,3,QColor("#e86137"));
+    else for(size_t i=0;i<r.fitSegments.size();++i)
+      layer(QStringLiteral("拟合结果 %1").arg(qulonglong(i+1)),r.fitSegments[i],3,QColor("#e86137"),
+            r.fitSegments[i].size()==1?QwtPlotCurve::Dots:QwtPlotCurve::Lines);
     if(k==M03&&std::isfinite(r.peakX))layer(QStringLiteral("最大 Cp %1 · λ %2").arg(num(r.peakY),num(r.peakX)),
       {{r.peakX,r.peakY}},3,QColor("#df2a8c"),QwtPlotCurve::Dots);
     for(size_t i=0;i<comparisons.size();++i){
       const auto& pair=comparisons[i]; const auto& compared=*pair.second;
+      if(!compared.fitSegments.empty()){
+        for(const auto& segment:compared.fitSegments)
+          layer(QStringLiteral("对比 ")+pair.first,segment,3,QColor::fromHsv(int((125+67*i)%360),180,205),
+                segment.size()==1?QwtPlotCurve::Dots:QwtPlotCurve::Lines);
+        continue;
+      }
       Points path;
       if(k==M11)path=roseOutline(compared);
       else if(k==M12){
@@ -728,6 +759,14 @@ class Panel : public QWidget
     QString summary=QStringLiteral("有效 %1　已筛除 %2　标注 %3").arg(qulonglong(r.raw.size())).arg(qulonglong(r.rejected)).arg(qulonglong(markedCount));
     if(k==M02)summary+=std::isfinite(r.shape)?QStringLiteral("　Weibull k=%1，A=%2 m/s").arg(num(r.shape),num(r.scale)):QStringLiteral("　样本不足以估计 Weibull 参数");
     if(k==M41)summary+=QStringLiteral("　实测传动比 %1").arg(num(r.slope));
+    if(k==M33||k==M34){
+      summary+=QStringLiteral("　拟合候选样本 %1　拟合最低转速 %2 rpm　分箱 %3 rpm")
+        .arg(qulonglong(r.fitSamples)).arg(num(p.torqueFitMin),num(binWidth(k,p)));
+      if(r.fit.empty())summary+=QStringLiteral("　不同转速箱不足，未生成拟合线");
+      if(p.torqueNonnegative)summary+=QStringLiteral("　拟合输出下限 0");
+      if(k==M34)summary+=QStringLiteral("　输入 %1 → 输出 %　额定转矩 %2 N·m")
+        .arg(QStringList{"%","N·m","kN·m"}.value(p.torqueUnit),num(torqueReference(p)));
+    }
     if(k==M11)summary+=QStringLiteral("　正北向上，顺时针　风速分级 <4 / 4–8 / 8–12 / ≥12 m/s");
     if(k==M01)summary+=energySummary();
     makeTables();status->setText(summary);setProperty("bladeFitResultsReady",true);
@@ -765,7 +804,7 @@ class Panel : public QWidget
   void makeTables()
   {
     const auto& r=*active;const int k=displayKind;
-    stats={{"箱序号","横轴均值","纵轴均值","样本数","样本标准差","最小值","最大值","拟合值","参考值","偏差(%)","频率(%)","扇区平均功率(kW)"}};
+    stats={{"箱序号",axes(k)[0]+"均值",axes(k)[1]+"均值","样本数","样本标准差","最小值","最大值","拟合值","参考值","偏差(%)","频率(%)","扇区平均功率(kW)"}};
     if(k==M02){
       stats={{"箱序号","风速下界 (m/s)","风速上界 (m/s)","样本数","实测频率 (%)","Weibull 频率 (%)"}};
       const double width = current->params.width;
@@ -781,7 +820,7 @@ class Panel : public QWidget
       }
     }
     else for(auto& entry:r.bins){
-      const auto& b=entry.second;double ref=interpolate(r.reference,b.x),fit=interpolate(r.fit,b.x);
+      const auto& b=entry.second;double ref=interpolate(r.reference,b.x),fit=fittedValue(r,b.x);
       stats.append({QString::number(qlonglong(entry.first)),num(b.x),num(b.y),QString::number(qulonglong(b.n)),num(b.sd()),num(b.lo),num(b.hi),
                    num(fit),num(ref),num(ref!=0?100*(fit-ref)/ref:missing()),num(100.*b.n/r.raw.size()),
                    k==M11?num(r.sectorPower.at(size_t(entry.first))):QString()});
@@ -790,7 +829,7 @@ class Panel : public QWidget
     for(auto& item:comparisons){
       const auto& other=*item.second;Bin deltas,relative;
       const auto baseValues=compareValues(r),otherValues=compareValues(other);
-      for(auto b:baseValues){double y=interpolate(otherValues,b.x);if(!std::isfinite(y))continue;
+      for(auto b:baseValues){double y=other.fitSegments.empty()?interpolate(otherValues,b.x):fittedValue(other,b.x);if(!std::isfinite(y))continue;
         deltas.add(b.x,y-b.y);if(std::abs(b.y)>1e-9)relative.add(b.x,100*(y-b.y)/std::abs(b.y));}
       double energy=0,covered=0,total=0;
       if(k==M01)for(auto& b:r.resource){
@@ -954,8 +993,12 @@ public:
     button(out,"导出图片",[this]{if(active)QMetaObject::invokeMethod(plot,"on_savePlotToFile",Qt::DirectConnection);});
     button(out,"导出拟合点",[this]{
       if(!active)return;
-      QVector<QStringList> rows{{"曲线集","分析类型","横坐标","纵坐标"}};
-      auto append=[&](QString name,const Result& r){for(auto pt:compareValues(r))rows.append({name,kinds()[displayKind],num(pt.x),num(pt.y)});};
+      QVector<QStringList> rows{{"曲线集","分析类型",axes(displayKind)[0],axes(displayKind)[1],"分段"}};
+      auto append=[&](QString name,const Result& r){
+        if(r.fitSegments.empty())for(auto pt:compareValues(r))rows.append({name,kinds()[displayKind],num(pt.x),num(pt.y),"1"});
+        else for(size_t i=0;i<r.fitSegments.size();++i)for(auto pt:r.fitSegments[i])
+          rows.append({name,kinds()[displayKind],num(pt.x),num(pt.y),QString::number(qulonglong(i+1))});
+      };
       append(current->name,*active);for(auto& item:comparisons)append(item.first,*item.second);
       saveCsv(this,"导出拟合点",rows);
     });

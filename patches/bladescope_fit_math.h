@@ -106,6 +106,7 @@ enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
             Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, NRoles };
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,
             M51,M52,M53,M55, NKind };
+enum TorqueUnit { Percent, NewtonMetre, KiloNewtonMetre };
 struct Params
 {
   double rated=0, diameter=0, rho=1.225, ratio=1, rpm=0, cutIn=3, cutOut=25,
@@ -113,6 +114,9 @@ struct Params
   double start=-std::numeric_limits<double>::infinity(), end=-start;
   int degree=4, torqueDegree=2, sectors=16, normal=0;
   bool filterState=false, generator=false, absoluteYaw=true, excludeNegative=true, rejectFlags=true;
+  int torqueUnit=Percent;
+  double ratedTorque=0, rpmWidth=0, torqueFitMin=0;
+  bool torqueNonnegative=true;
   std::map<int,std::pair<double,double>> limits;
   Points reference;
 };
@@ -181,6 +185,8 @@ struct Result
   std::map<std::pair<long long,long long>,size_t> density;
   std::map<long long,Bin> bins;
   Points fit, reference;
+  std::vector<Points> fitSegments;
+  size_t fitSamples=0;
   std::vector<Points> sectors;
   std::vector<ModelPart> models;
   std::vector<double> sectorPower;
@@ -195,6 +201,22 @@ inline double interpolate(const Points& p,double x)
   if(it==p.begin() || it->x==x) return it->y;
   const auto prev=*(it-1);
   return prev.y+(it->y-prev.y)*(x-prev.x)/(it->x-prev.x);
+}
+inline double fittedValue(const Result& r,double x)
+{
+  if(r.fitSegments.empty()) return interpolate(r.fit,x);
+  for(const auto& segment:r.fitSegments)
+    if(x>=segment.front().x && x<=segment.back().x) return interpolate(segment,x);
+  return missing();
+}
+inline double torqueReference(const Params& p)
+{
+  return p.ratedTorque>0?p.ratedTorque:
+    (p.rated>0 && p.rpm>0 && p.efficiency>0 ? p.rated*1000*60/(2*pi*p.rpm*p.efficiency):missing());
+}
+inline double binWidth(int kind,const Params& p)
+{
+  return (kind==M32||kind==M33||kind==M34||kind==M35||kind==M41) && p.rpmWidth>0 ? p.rpmWidth:p.width;
 }
 inline std::pair<double,double> weibull(const std::vector<Record>& records)
 {
@@ -235,6 +257,42 @@ inline void curves(int kind,const Params& p,Result& r)
     return;
   }
   if(kind==M55) {r.fit=bins;return;}
+  if(kind==M33 || kind==M34)
+  {
+    // Fit the measured operating region; keep reference models in a separate layer.
+    Points eligible;
+    std::map<long long,Bin> fitBins;
+    for(const auto& record:r.raw) if(record.x>=p.torqueFitMin){
+      ++r.fitSamples;
+      fitBins[static_cast<long long>(std::floor(record.x/binWidth(kind,p)))].add(record.x,record.y);
+    }
+    for(const auto& entry:fitBins) eligible.push_back({entry.second.x,entry.second.y});
+    if(eligible.empty()) return;
+    std::array<Points,2> regions;
+    for(const auto& point:eligible)regions[point.x>=p.rpm?1:0].push_back(point);
+    for(const auto& region:regions){
+      if(region.size()<=size_t(p.torqueDegree)) continue;
+      const auto model=regress(region,p.torqueDegree);
+      r.models.push_back({region.front().x,region.back().x,model.origin,model.scale,
+        p.torqueNonnegative?"y=max(0,sum(p_i*z^i))":"y=sum(p_i*z^i)",model.coefficients});
+      // Empty bins break a displayed curve instead of bridging unobserved regions.
+      size_t begin=0;
+      for(size_t i=1;i<=region.size();++i){
+        if(i<region.size() && region[i].x-region[i-1].x<=2*binWidth(kind,p)) continue;
+        auto segment=sample(region[begin].x,region[i-1].x,[&](double x){
+          const double y=model(x);return p.torqueNonnegative?std::max(0.,y):y;
+        });
+        r.fit.insert(r.fit.end(),segment.begin(),segment.end());
+        r.fitSegments.push_back(std::move(segment));begin=i;
+      }
+    }
+    const double referenceStart=std::max(p.rpm,eligible.front().x);
+    if(referenceStart<=eligible.back().x)
+      r.reference=sample(referenceStart,eligible.back().x,[&](double x){
+        return kind==M34?100.:9550*p.rated/(p.efficiency*x);
+      });
+    return;
+  }
   if(kind==M41)
   {
     long double xx=0,xy=0;
@@ -342,6 +400,15 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
   for(auto role:requiredRoles) if(channels[role].empty()) throw std::runtime_error("缺少所需测点");
   if(!(p.width>0) || p.end<p.start || p.tolerance<0 || p.sectors<1)
     throw std::runtime_error("请检查分箱宽度、时间范围和匹配容差");
+  if(!std::isfinite(p.rpmWidth)||p.rpmWidth<0 || !std::isfinite(p.torqueFitMin)||p.torqueFitMin<0)
+    throw std::runtime_error("请检查转速分箱宽度和转矩拟合最低转速");
+  if(kind==M33||kind==M34){
+    if(p.torqueDegree<2||p.torqueDegree>3 || !(p.efficiency>0&&p.efficiency<=1))
+      throw std::runtime_error("请检查转矩拟合阶数和发电机效率");
+    if(kind==M34 && (p.torqueUnit<Percent||p.torqueUnit>KiloNewtonMetre ||
+       (p.torqueUnit!=Percent && !std::isfinite(torqueReference(p)))))
+      throw std::runtime_error("转矩单位或额定转矩无效，请填写额定转矩或功率、发电机额定转速和效率");
+  }
   if(((needsCp(kind)||kind==M06) && !(p.diameter>0)) || (needsCp(kind) && !(p.rho>0)))
     throw std::runtime_error("请填写叶轮直径和空气密度");
   if((kind==M01||kind==M32||kind==M33) && !(p.rated>0))
@@ -414,7 +481,8 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
       case M35:x=row[speedRole(p)];y=cp;break;
       case M41:x=rot;y=gen;break;
       case M32:x=gen;y=kw;break;
-      case M34:x=gen;y=row[TorquePct];break;
+      case M34:x=gen;y=p.torqueUnit==Percent?row[TorquePct]:
+        row[TorquePct]*(p.torqueUnit==KiloNewtonMetre?1000.:1.)*100/torqueReference(p);break;
       case M33:x=gen;y=gen>0?9550.*kw/(p.efficiency*gen):missing();break;
       case M51:x=row[Temp];y=cp;break;
       case M52:x=yaw;y=cp;break;
@@ -423,7 +491,7 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     }
     if(!valid||!std::isfinite(x)||!std::isfinite(y)){++out.rejected;continue;}
     out.raw.push_back({x,y,t,sampleId});
-    double index=std::floor(x/(kind==M55?1:p.width));
+    double index=std::floor(x/(kind==M55?1:binWidth(kind,p)));
     if(!std::isfinite(index)||std::abs(index)>=double(std::numeric_limits<long long>::max()))
       throw std::runtime_error("测量值超出分箱范围，请检查单位或设置有效上下限");
     long long bin=static_cast<long long>(index);
