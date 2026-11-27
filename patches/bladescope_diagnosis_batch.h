@@ -97,7 +97,7 @@ inline QVector<BatchResult> runBatchQueue(QVector<BatchJob> jobs,ConditionPack p
   packCheck(jobs.size()<=200,"单批最多 200 个任务");QSet<QString> ids;
   for(const auto& job:jobs){packCheck(!ids.contains(job.id),"批量任务 ID 重复");ids.insert(job.id);}
   QVector<BatchResult> results;BatchRunCache cache;
-  for(int i=0;i<jobs.size();++i){if(BladeDiagnosis::trialCancelled(cancel))break;auto result=runBatchJob(jobs[i],pack,bindings,options,cancel,&cache);results<<result;if(completed)completed(i,result);if(BladeDiagnosis::trialCancelled(cancel))break;}
+  for(int i=0;i<jobs.size();++i){if(BladeDiagnosis::trialCancelled(cancel))break;auto result=runBatchJob(jobs[i],pack,bindings,options,cancel,&cache);if(completed)completed(i,result);if(!result.reportPath.isEmpty())result.report={};results<<result;if(BladeDiagnosis::trialCancelled(cancel))break;}
   return results;
 }
 

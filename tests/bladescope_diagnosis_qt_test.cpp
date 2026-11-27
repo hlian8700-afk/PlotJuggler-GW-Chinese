@@ -165,5 +165,23 @@ int main(int argc,char** argv){
  QTimer::singleShot(20000,&fusionTimer,[&]{fusionTimer.stop();for(auto* dialog:panel.findChildren<QDialog*>())dialog->reject();});fusionTimer.start();
  showCandidateFusion(&panel,fusionPack,{"demo","model",{}},{calculated},numericalDefinitionHash(fusionPack),{},{recorded},0,1,true);
  assert(fusionPassed);
+
+ // Batch stays embedded, preserves attempts and completed reports, and exposes detail/back.
+ auto* batchEntry=panel.findChild<QPushButton*>("diagnosisBatchEntry");assert(batchEntry);batchEntry->click();
+ assert(panel.findChild<BatchPage*>("diagnosisBatchPage"));
+ QTemporaryDir batchDirectory;assert(batchDirectory.isValid());const auto batchPath=batchDirectory.filePath("recording.csv");
+ {QFile f(batchPath);assert(f.open(QIODevice::WriteOnly));f.write("TimeStamp,speed\n0,120\n1,130\n2,140\n");}
+ ConditionPack batchPack;batchPack.id="batch-demo";batchPack.version="1";batchPack.vendor="demo";batchPack.model="model";
+ ConditionRule batchRule;batchRule.id="speed";batchRule.title="invented";batchRule.primaryRole="speed";batchRule.unit="rpm";batchRule.source="synthetic";batchRule.state=BladeDiagnosis::RuleState::PendingValidation;batchRule.spec.threshold=100;batchRule.spec.maximumGapMs=1000;batchPack.rules<<batchRule;
+ const auto batchKey="BladeScope/conditionMappings/"+QString::fromLatin1(QCryptographicHash::hash(QByteArray("demo\nmodel\n\nbatch-demo\n1"),QCryptographicHash::Sha256).toHex());
+ QSettings().setValue(batchKey,QJsonDocument(QJsonObject{{"speed",QJsonObject{{"field","speed"},{"unit","rpm"},{"scale",1},{"axis",0}}}}).toJson());
+ BatchPage batch([]{return BladeDiagnosis::Scope{"demo","model",{}};},[]{});
+ batch.setPack(batchPack);batch.addFiles({batchPath,batchPath});batch.setReportDirectory(batchDirectory.path());
+ auto* batchTable=batch.findChild<QTableWidget*>("diagnosisBatchTasks");assert(batchTable&&batchTable->rowCount()==1);
+ batch.findChild<QCheckBox*>("batchIncludePending")->setChecked(true);assert(!batch.findChild<QCheckBox*>("batchMappingsConfirmed")->isChecked());batch.findChild<QCheckBox*>("batchMappingsConfirmed")->setChecked(true);
+ batch.runPending();assert(batchTable->item(0,5)->text()=="1");const auto firstReport=batchTable->item(0,7)->text();assert(QFileInfo::exists(firstReport));
+ batch.runPending();assert(batchTable->item(0,5)->text()=="1");assert(batch.summaryCsv().contains("recording.csv"));
+ batchTable->cellDoubleClicked(0,0);assert(batch.findChild<QPlainTextEdit*>("batchResultDetails")->toPlainText().contains("bladescope.batch-job.v1"));
+ assert(QFileInfo::exists(firstReport));
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }

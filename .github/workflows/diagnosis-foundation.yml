@@ -4,6 +4,7 @@ on:
     branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample, feature/diagnosis-rule-trial, feature/diagnosis-condition-pack, feature/diagnosis-evidence-fusion, feature/diagnosis-local-batch]
     paths:
       - 'patches/bladescope_diagnosis_batch.h'
+      - 'patches/bladescope_diagnosis_batch_panel.h'
       - 'tests/bladescope_diagnosis_batch_test.cpp'
       - 'patches/bladescope_diagnosis_core.h'
       - 'tools/import_diagnosis_config.py'

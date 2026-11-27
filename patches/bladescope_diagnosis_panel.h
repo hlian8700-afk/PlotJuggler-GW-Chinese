@@ -7,9 +7,11 @@
 #include "bladescope_diagnosis_events.h"
 #include "bladescope_diagnosis_trial_panel.h"
 #include "bladescope_diagnosis_pack_panel.h"
+#include "bladescope_diagnosis_batch_panel.h"
 
 namespace BladeDiagnosisUI {
 class Panel final:public QWidget {
+  QStackedWidget* workspace=nullptr;BatchPage* batchPage=nullptr;
   QVector<EventRow> events;
   QTableWidget* table;
   QLabel *status,*quality;
@@ -190,9 +192,10 @@ public:
   void importEventFile(const QString& path,const QString& kind){if(kind=="SC"||kind=="ActionList")load(kind,path);}
   Panel(std::function<QStringList()> names,std::function<void(QStringList,double,double)> draw,
         std::function<void()> back,QWidget* parent=nullptr):QWidget(parent),available(std::move(names)),evidence(std::move(draw)){
-    setObjectName("bladeDiagnosisPanel");auto* root=new QVBoxLayout(this);auto* top=new QHBoxLayout;root->addLayout(top);
+    setObjectName("bladeDiagnosisPanel");auto* outer=new QVBoxLayout(this);outer->setContentsMargins(0,0,0,0);workspace=new QStackedWidget;outer->addWidget(workspace);auto* single=new QWidget;workspace->addWidget(single);auto* root=new QVBoxLayout(single);auto* top=new QHBoxLayout;root->addLayout(top);
     auto button=[&](QString text,auto callback){auto* b=new QPushButton(text);top->addWidget(b);connect(b,&QPushButton::clicked,this,callback);return b;};
     button("返回时序",back);button("导入 SC",[this]{load("SC");});button("关联 ActionList",[this]{load("ActionList");});
+    auto* batchEntry=button("本地批量",[this]{if(!batchPage){batchPage=new BatchPage([this]{return BladeDiagnosis::Scope{vendor->text().trimmed().toStdString(),model->text().trimmed().toStdString(),controller->text().trimmed().toStdString()};},[this]{workspace->setCurrentIndex(0);},workspace);workspace->addWidget(batchPage);}batchPage->enter();workspace->setCurrentWidget(batchPage);});batchEntry->setObjectName("diagnosisBatchEntry");
     button("草稿台账检查",[this]{inspectPackage();});
     button("条件规则包",[this]{
       if(vendor->text().trimmed().isEmpty()||model->text().trimmed().isEmpty()){status->setText("请先在事件参数中填写当前厂商与机型，再配置规则包");return;}
