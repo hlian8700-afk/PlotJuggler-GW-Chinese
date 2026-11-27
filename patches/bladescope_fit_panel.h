@@ -768,6 +768,8 @@ class Panel : public QWidget
     if(selectedYawBin>=0){const double x=pair?c.positiveLow+(selectedYawBin+.5)*c.pairStep:c.angleLow+(selectedYawBin+.5)*c.angleStep;
       layer("选中角度",{{x,0}},0,QColor("#da368e"),QwtPlotCurve::Dots);}
     plot->zoomOut(false);plot->replot();
+    if(pair){auto rect=yawDifference->currentBoundingRect();const auto upper=plot->currentBoundingRect();
+      rect.setLeft(upper.left());rect.setRight(upper.right());yawDifference->setZoomRectangle(rect,false);yawDifference->replot();}
     fillYawTable(yawTable[0],yawPairRows);fillYawTable(yawTable[1],yawBinRows);fillYawTable(yawTable[2],yawQualityRows);
     status->setText(QString("有效 %1 / %2　配对覆盖 %3%　功率差 %4 kW　风速差 %5 m/s　%6%7\n基线不足 %8，百分比不可用 %9；%10。结果用于筛查，连续样本存在相关性。")
       .arg(qulonglong(r.accepted)).arg(qulonglong(r.input)).arg(num(100*aggregate.coverage))
@@ -1196,6 +1198,13 @@ public:
     yawDifference=new AnalysisPlot(yawDifferenceData,this);plotSplit->addWidget(yawDifference);yawDifference->hide();
     QMetaObject::invokeMethod(yawDifference,"setModeXY",Qt::DirectConnection,Q_ARG(bool,true));
     yawDifference->activateGrid(true);yawDifference->setContextMenuEnabled(false);plotSplit->setStretchFactor(0,3);plotSplit->setStretchFactor(1,1);
+    auto linkYaw=[this](AnalysisPlot* target,QRectF changed){
+      if(displayKind!=M56||yawView->currentIndex()!=1)return;
+      auto rect=target->currentBoundingRect();rect.setLeft(changed.left());rect.setRight(changed.right());
+      target->setZoomRectangle(rect,false);target->replot();
+    };
+    connect(plot,&PlotWidget::rectChanged,this,[this,linkYaw](PlotWidget*,QRectF rect){linkYaw(yawDifference,rect);});
+    connect(yawDifference,&PlotWidget::rectChanged,this,[this,linkYaw](PlotWidget*,QRectF rect){linkYaw(plot,rect);});
     plot->setContextMenuEnabled(false);plot->qwtPlot()->setAcceptDrops(false);
     canvas=plot->qwtPlot()->canvas();rubber=new SelectionGuide(canvas);
     auto* tools=new QHBoxLayout;layout->addLayout(tools);select=new QComboBox;
