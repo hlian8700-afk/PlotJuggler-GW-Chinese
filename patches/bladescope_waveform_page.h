@@ -88,7 +88,7 @@ public:
     connect(returnButton, &QPushButton::clicked, this, std::move(back));
     header->addWidget(returnButton);
     auto* analysis = new QPushButton(QStringLiteral("分析"), this);
-    analysis->setMinimumWidth(76);
+    analysis->setMinimumWidth(76);analysis->setObjectName("bladeWaveformAnalysisMenu");
     auto* menu = new QMenu(analysis);
     menu->addAction(curveAnalysis);
     menu->addAction(QStringLiteral("录波分析"))->setEnabled(false);
@@ -306,6 +306,16 @@ public:
       auto rect=target->currentBoundingRect();rect.setLeft(lo-target->timeOffset());rect.setRight(hi-target->timeOffset());
       target->setZoomRectangle(rect,false);target->replot();
     }
+  }
+  void plotDiagnosticEvidence(const QStringList& fields,double lo,double hi){
+    setCurveMode(false);setMode(true,true);analysisMode=0;modes->button(0)->setChecked(true);
+    groups->setCurrentIndex(0);refreshTags(true);
+    for(int i=0;i<tags->count();++i)tags->item(i)->setCheckState(fields.contains(tags->item(i)->data(Qt::UserRole).toString())?Qt::Checked:Qt::Unchecked);
+    start->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(lo*1000),Qt::UTC));
+    end->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(hi*1000),Qt::UTC));
+    startEnabled->setChecked(true);endEnabled->setChecked(true);filterEnabled=false;
+    refreshAnalysisParameters();draw(fields);
+    status->setText(status->text()+QStringLiteral("；诊断证据窗口，条件筛选已关闭，未自动判断故障原因"));
   }
   void setMode(bool waveform, bool plotting)
   {

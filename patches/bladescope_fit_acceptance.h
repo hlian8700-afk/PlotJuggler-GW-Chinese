@@ -1,5 +1,6 @@
 #pragma once
 #include "bladescope_fit_panel.h"
+#include "bladescope_diagnosis_panel.h"
 #include "bladescope_label_xlsx.h"
 #include "bladescope_sqlite_recording.h"
 #include "bladescope_txt_recording.h"
@@ -34,6 +35,19 @@ inline void verifyTorqueProjection(QWidget* window,const QString& output,std::fu
     if(before<=0||std::abs(ordinate()*1000-before)>1e-7||!chart->axisTitle(QwtPlot::yLeft).text().contains("kN")){fail("M33 UI output projection");return;}
     panel->grab().save(QDir(output).filePath("m33-unit-projection.png"));panel->hide();panel->deleteLater();
     if(existed)QSettings().setValue(key,previous);else QSettings().remove(key);
+    const auto eventCsv=BladeDiagnosisUI::parseCsv("time,code\n2024-02-08T12:00:00+08:00,SyntheticFault\n");
+    const auto parsed=BladeDiagnosisUI::importEvents(eventCsv,BladeDiagnosisUI::ImportOptions{},"synthetic.csv","SC");
+    if(parsed.events.size()!=1||BladeDiagnosisUI::iso(parsed.events.front().original)!="2024-02-08 04:00:00.000"){fail("diagnosis explicit time zone");return;}
+    bool evidenceRequested=false;
+    BladeDiagnosisUI::Panel diagnosis([]{return QStringList{"synthetic_signal"};},
+      [&](QStringList fields,double lo,double hi){evidenceRequested=fields==QStringList{"synthetic_signal"}&&hi-lo==120;},[]{},window);
+    diagnosis.resize(1000,650);diagnosis.show();diagnosis.enter();
+    auto* list=diagnosis.findChild<QListWidget*>("diagnosisEvidenceSignals");
+    if(!list||list->count()!=1){fail("diagnosis measurements missing");return;}
+    list->item(0)->setSelected(true);
+    for(auto* button:diagnosis.findChildren<QPushButton*>())if(button->text()=="在录波视图查看所选证据")button->click();
+    if(!evidenceRequested||!window->findChild<QAction*>("bladeDiagnosisEntry")){fail("diagnosis menu or evidence request");return;}
+    diagnosis.grab().save(QDir(output).filePath("diagnosis-events-preview.png"));diagnosis.hide();
     QCoreApplication::exit(0);
   });timer->start(25);
 }

@@ -1836,10 +1836,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.18"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.19"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.18") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.19") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2091,12 +2091,12 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = '  _show_point_marker->setSymbol(sym);'; New = "  _show_point_marker->setSymbol(sym);`n  _show_point_marker->setVisible(false);" }
 )
-foreach ($fitHeader in @("bladescope_ui_shared.h", "bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
+foreach ($fitHeader in @("bladescope_diagnosis_core.h", "bladescope_diagnosis_events.h", "bladescope_diagnosis_panel.h", "bladescope_ui_shared.h", "bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"" }
+  @{ Old = '#include "mainwindow.h"'; New = "#include `"mainwindow.h`"`n#include `"bladescope_fit_panel.h`"`n#include `"bladescope_fit_acceptance.h`"`n#include `"bladescope_waveform_page.h`"`n#include `"bladescope_diagnosis_panel.h`"" }
   @{ Old = '  int headerButtonIndex = 0;'; New = @'
   auto* fitEntry = new QToolButton(tabCorner);
   fitEntry->setText(QStringLiteral("曲线分析"));
@@ -2137,6 +2137,26 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   auto* analysisMenu = new QMenu(fitEntry);
   analysisMenu->addAction(curveAnalysisAction);
   auto* waveformAction = analysisMenu->addAction(QStringLiteral("录波分析"));
+  auto* diagnosisAction=analysisMenu->addAction(QStringLiteral("故障分析（预览）"));
+  diagnosisAction->setObjectName("bladeDiagnosisEntry");ui->menuTools->addAction(diagnosisAction);
+  connect(diagnosisAction,&QAction::triggered,this,[this]{
+    auto* widget=ui->widgetStack->findChild<QWidget*>("bladeDiagnosisPanel");
+    if(!widget){
+      auto names=[this]{QStringList fields;for(const auto& pair:_mapped_plot_data.numeric)if(pair.second.size())fields<<QString::fromStdString(pair.first);fields.sort();return fields;};
+      auto draw=[this](QStringList fields,double lo,double hi){
+        auto* page=ui->widgetStack->findChild<QWidget*>("bladeWaveformPage");if(!page)return;
+        auto* waveform=static_cast<BladeWaveform::Page*>(page);ui->widgetStack->setCurrentWidget(page);
+        waveform->plotDiagnosticEvidence(fields,lo,hi);
+      };
+      auto* panel=new BladeDiagnosisUI::Panel(names,draw,[this]{ui->widgetStack->setCurrentIndex(0);});
+      auto* scroll=new QScrollArea(ui->widgetStack);scroll->setWidgetResizable(true);scroll->setFrameShape(QFrame::NoFrame);scroll->setWidget(panel);
+      ui->widgetStack->addWidget(scroll);widget=panel;
+    }
+    auto* scroll=qobject_cast<QScrollArea*>(widget->parentWidget()->parentWidget());
+    if(scroll)ui->widgetStack->setCurrentWidget(scroll);
+    static_cast<BladeDiagnosisUI::Panel*>(widget)->enter();
+  });
+
   auto* sharedTags = new QWidget(ui->leftMainWindowFrame);
   auto* waveform = new BladeWaveform::Page(_mapped_plot_data, curveAnalysisAction, [this] {
     ui->widgetStack->setCurrentIndex(0);
@@ -2145,6 +2165,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     return docker && docker->plotCount() ? docker->plotAt(0) : nullptr;
   }, ui->widgetStack);
   ui->widgetStack->addWidget(waveform);
+  if(auto* menuButton=waveform->findChild<QPushButton*>("bladeWaveformAnalysisMenu"))menuButton->menu()->addAction(diagnosisAction);
   const int labelIndex = ui->leftLayout->indexOf(_curvelist_widget);
   ui->leftLayout->removeWidget(_curvelist_widget);
   _curvelist_widget->hide();
