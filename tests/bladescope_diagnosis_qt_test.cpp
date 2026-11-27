@@ -131,5 +131,23 @@ int main(int argc,char** argv){
  });
  assert(trialPassed);
 
+
+ bool packTested=false;QTimer packTimer;packTimer.setInterval(20);
+ QObject::connect(&packTimer,&QTimer::timeout,&panel,[&]{
+   auto* dialog=panel.findChild<QDialog*>("diagnosisPackDialog");if(!dialog||packTested)return;
+   packTested=true;assert(dialog->findChild<QTableWidget*>("conditionPackRules")->rowCount()==4);
+   assert(dialog->findChild<QTableWidget*>("conditionPackMappings")->rowCount()==5);
+   assert(!dialog->findChild<QCheckBox*>("conditionPackConfirmed")->isChecked());
+   assert(!dialog->findChild<QCheckBox*>("conditionPackPending")->isChecked());
+   dialog->findChild<QPushButton*>("conditionPackRun")->click();
+   assert(dialog->findChild<QTableWidget*>("conditionPackResults")->rowCount()==4);
+   assert(dialog->findChild<QTableWidget*>("conditionPackResults")->item(0,2)->text()==QString::fromUtf8("草稿未执行"));
+   assert(dialog->findChild<QPushButton*>("conditionPackExport")->isEnabled());
+   dialog->findChild<QCheckBox*>("conditionPackPending")->setChecked(true);
+   assert(!dialog->findChild<QPushButton*>("conditionPackExport")->isEnabled());packTimer.stop();dialog->reject();
+ });
+ QTimer::singleShot(20000,&packTimer,[&]{packTimer.stop();for(auto* dialog:panel.findChildren<QDialog*>())dialog->reject();});packTimer.start();
+ showConditionPack(&panel,{"synthetic_signal"},"demo","model",0,1,[](QString,double,double){return std::vector<BladeDiagnosis::RawSample>{{0,1},{1,1}};},[](QStringList,double,double){});
+ assert(packTested);
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }
