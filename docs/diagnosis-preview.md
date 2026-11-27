@@ -1,34 +1,37 @@
-# Condition pack manager: 3.17.0.23 preview
+# Candidate evidence fusion: 3.17.0.24 preview
 
-This milestone adds versioned, scoped condition packs and shared-snapshot multi-condition runs. It remains in the diagnostic-engine integration phase. It does not convert the 131679-row draft inventory into validated root-cause rules.
+This is a further diagnostic-engine integration milestone, not a validated automatic root-cause system. Rule calibration with confirmed field outcomes is still required.
 
-## Operator workflow
-1. In Fault Analysis → Event Parameters, declare the current vendor, model and optional controller/firmware identity, then choose the event window.
-2. Open Condition Pack. New packs contain four empty draft templates, not manufacturer thresholds.
-3. Edit a template: specify its canonical primary/reference role IDs, target unit, positive threshold, timing, source citation and optional original source version/hash/row. Mark it pending validation when complete.
-4. On Role Mappings, choose the actual original signal, input unit, explicit additional scale and blade axis. Missing saved signals remain unmapped; they are never rebound to another channel.
-5. Confirm mappings. Pending conditions run only when the explicit include-pending option is checked. Draft and disabled conditions never run.
-6. Run once, inspect each result and its parameters, link the selected mapped signals back to the recording view, and export the JSON/CSV evidence report.
+## Operator flow
+1. Set the declared turbine vendor/model/controller, event center/window and SC time offset.
+2. Open Condition Pack, configure/map the waveform conditions and run them.
+3. Open Candidate and Event Fusion. Add a candidate, select its required waveform conditions and event-record requirements; all requirements use AND semantics. Supply source information and mark complete experimental definitions pending validation.
+4. Confirm that the event logs belong to this turbine and that their time definition is correct. Separate SC/ActionList coverage assertions default to false. Only assert complete coverage after checking the actual source logs for this exact window.
+5. Include pending definitions explicitly when trialling them, run fusion, inspect each predicate and matched record, and export the report. Save the condition pack to retain candidate definitions.
 
-Pack JSON contains definitions and roles. Actual signal bindings are saved locally under a hash of vendor/model/controller/pack ID/version. The imported pack's vendor/model and, when present, controller must match the current declared context exactly. A controller-specific pack does not run when the controller context is unknown.
+Old v1 packs without candidates still load. New candidate definitions use an optional candidates array in the same format. Older application versions reject the extension rather than silently discard it.
 
-## Lifecycle and trust
-The editor offers draft, pending-validation and disabled states. Editing a source-declared validated rule clears its reviewer/date/cases and demotes it. Imported validated conditions require nonempty reviewer, ISO date and case IDs; these are declarations supplied by the source, not software certification or a guarantee of correctness. All numerical results remain condition evidence rather than automatic root-cause verdicts.
+## Semantics and safeguards
+- Exact event matching compares trimmed full original code text, case-sensitively.
+- SC numeric-prefix matching retains leading zeros and requires either the whole numeric code or a following underscore. It does not match a longer numeric code.
+- Action-token matching compares full semicolon-delimited action items, preserving r/f prefixes. Repeated identical tokens in one record count once.
+- Only record_presence semantics are accepted. Operating state is not treated as a fault-active flag, and trigger/recovery or r/f meanings are not inferred.
+- An event hit is evidence of a record, not proof of a fault remaining active. With no hit, the term is unknown unless the user confirmed identity/time and the corresponding log's complete window coverage.
+- Waveform data/parameter/mapping failures and unexecuted dependencies are unknown, not normal. A failed numerical condition means the candidate's requirements were not jointly met; it is not an all-clear for the turbine.
+- Pure log or pure waveform candidates are labelled accordingly. Joint support still requires field verification. No probability or confidence percentage is invented.
+- Draft/disabled candidates never run. Pending candidates and dependencies require explicit trial inclusion. Imported validated status remains a source declaration, not software certification.
+- Editing a condition demotes source-validated candidates that depend on it and clears their review declarations. Referenced condition IDs cannot be renamed or deleted until candidate references are updated.
+- Candidate references, code modes, review/source metadata and size limits are strictly validated. There are no scripts or expressions.
 
-Unknown JSON fields, duplicate IDs, incompatible role target units, invalid numbers, excessive sizes and missing review/source data are rejected. No expressions or scripts are evaluated. Limits are 2 MiB, 64 conditions and 32 roles. The schema is in schemas/condition-pack-v1.schema.json; additional ID and cross-role constraints are enforced by the native reader.
+## Compute and provenance
+Candidate changes do not recompute existing waveform features when their numerical definitions are unchanged. Mapping, condition or context changes clear the numerical context. Every fusion run indexes only needed event predicates once, shared across candidates.
 
-The audited legacy SQLite package remains a separate draft-ledger inspection function. It is not accepted as executable condition JSON. Unresolved legacy priorities and prose are not guessed.
+The report preserves the candidate/condition definitions, immutable numerical context and raw-data fingerprints, imported/executed package hashes, event identity and coverage assertions, event-snapshot hash, window and SC offset context, predicate truth/reason and matched source records. Event fingerprints hash canonical JSON records including original/aligned times, source identity and raw status, with the versioned bladescope-events-json-v1 prefix. They identify the normalized event snapshot, not the original file bytes.
 
-## Units, data and compute
-Supported explicit same-dimension conversions include rad/s → rpm, rad → deg, g → m/s2 and m/s → mm/s. Velocity and acceleration are not interchangeable. Conflicting units/scales/axes assigned to one actual signal are rejected for the affected conditions. Pitch mappings must name distinct signals on the same declared axis.
+CSV exports separate context, definitions, numerical evidence, predicates and matched-event rows instead of repeating the entire run in every candidate row. Spreadsheet formula-like scalar prefixes are escaped; the JSON report retains original values.
 
-Each eligible source signal is copied once per run into an immutable original-data snapshot, shared by the conditions. There is no cross-run snapshot reuse that could conceal a source update. Rendering decimation and display filters are not used. Existing quality gates and the opt-in identical-duplicate coalescing operate on copies. Cancellation publishes no partial report.
+Each candidate exports at most 256 matched-event details, distributed across its event requirements; total hit counts remain complete and truncation is explicit. Cancellation publishes no partial output. Changes to confirmation/coverage flags invalidate the previous export without rereading waveform data.
 
-Reports include the complete executed pack, lifecycle, mappings/units/scales/axes, window/event context, per-condition parameters and quality/matching/coalescing counts, imported and executed pack SHA256, and sample counts/fingerprints for each raw snapshot. The fingerprint format is little-endian IEEE binary64 time/value pairs with a versioned prefix. Optional original source file hashes are preserved as declared citations, not automatically verified against a local file.
+Synthetic regression covers positive, absent/unknown and explicitly-covered-absent records, identity confirmation, leading-zero boundaries, action tokens, duplicate tokens, windows, scope, stale calculations, AND truth, lifecycle demotion, dangling references, unsupported active-fault semantics, bounded evidence and cancellation. Qt regression runs the real fusion dialog and verifies stale-export invalidation.
 
-Edits invalidate the previous result/export. Reports display missing/invalid data distinctly from a failed numerical condition. CSV rows retain both their condition/evidence and run context; JSON retains the complete structured run.
-
-## Validation and remaining work
-Synthetic tests cover scope and controller mismatch, lifecycle gating, missing and conflicting mappings, same-axis restrictions, all four families, unit dimensions, malformed packs, review declarations, fingerprint changes and cancellation. Qt tests cover the manager's draft defaults, asynchronous run and stale-export invalidation.
-
-Real-case ground truth and manufacturer-specific rule validation remain necessary before promoting rules for operational diagnosis. Batch/network tasks and final end-to-end production acceptance remain subsequent phases. User recordings, original configuration tables and private inventory paths are not published with these builds.
+Remaining: manufacturer/case validation, reviewed legacy rule adaptation, batch/network tasks and final production acceptance. User raw recordings, original configuration tables and private inventory remain excluded from public source and binaries.
