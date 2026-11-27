@@ -226,6 +226,7 @@ class Panel : public QWidget
   QList<bool> visibleLayers{true,true,true,true};
   std::vector<std::pair<QwtPlotCurve*,int>> layers;
   QComboBox *yawView,*yawUnit,*yawWind;
+  QCheckBox* yawSpread;
   QWidget* yawControls;
   AnalysisPlot* yawDifference=nullptr;
   PJ::PlotDataMapRef yawDifferenceData;
@@ -697,7 +698,7 @@ class Panel : public QWidget
     const bool pair=yawView->currentIndex()==1,pct=yawUnit->currentIndex()==1;
     clearPlot();for(auto* curve:yawDiffCurves){curve->detach();delete curve;}yawDiffCurves.clear();
     yawDifference->removeAllCurves();yawDifferenceData.scatter_xy.clear();
-    yawDifference->setVisible(pair);yawUnit->setEnabled(!pair);select->setEnabled(false);
+    yawDifference->setVisible(pair);yawUnit->setEnabled(!pair);select->setEnabled(false);yawSpread->setEnabled(!pair);
     const auto aggregate=BladeYaw::aggregate(r,band);
     yawQualityRows=yawMetadata();
     yawQualityRows.append({"当前加权功率差 kW",aggregate.weight?num(aggregate.delta):QString()});
@@ -752,6 +753,16 @@ class Panel : public QWidget
       for(const auto& bin:r.bins){if(band>=0&&bin.windBin!=band)continue;const auto& b=pct?bin.stats.percent:bin.stats.residual;
         if(b.n<size_t(c.minSamples))continue;means[bin.windBin].push_back({bin.stats.angle.y,b.y});}
       for(const auto& entry:means)layer("分箱均值 "+BladeYawUI::windRange(c,entry.first)+" m/s",entry.second,1,QColor::fromHsv((entry.first*67+28)%360,180,180),QwtPlotCurve::Dots);
+      if(yawSpread->isChecked()){
+        size_t count=0;
+        for(const auto& bin:r.bins){if(band>=0&&bin.windBin!=band)continue;
+          const auto& b=pct?bin.stats.percent:bin.stats.residual;
+          if(b.n<size_t(c.minSamples))continue;
+          if(++count>1000)break;
+          layer(QString("离散度 %1").arg(qulonglong(count)),{{bin.stats.angle.y,b.y-b.sd()},{bin.stats.angle.y,b.y+b.sd()}},1,QColor("#9da6af"));
+          layers.back().first->setItemAttribute(QwtPlotItem::Legend,false);
+        }
+      }
       layer("零残差",{{c.angleLow,0},{c.angleHigh,0}},0,QColor("#888888"));
     }
     if(selectedYawBin>=0){const double x=pair?c.positiveLow+(selectedYawBin+.5)*c.pairStep:c.angleLow+(selectedYawBin+.5)*c.angleStep;
@@ -768,7 +779,7 @@ class Panel : public QWidget
   {
     const bool yawMode=kind->currentIndex()==M56;
     yawControls->setVisible(yawMode);yawExpand->setVisible(yawMode);
-    if(!yawMode){yawDifference->hide();yawTables->hide();}
+    if(!yawMode){yawDifference->hide();yawTables->hide();select->setEnabled(true);}
     if(yawMode){calculateYaw();return;}
     const int k=kind->currentIndex();const auto ticket=++generation;
     if(stop)stop->store(true);
@@ -1060,12 +1071,31 @@ class Panel : public QWidget
       if(undoStack.size()==16)undoStack.erase(undoStack.begin());
       undoStack.emplace_back(current->excluded,current->marked);
       if(mode==2){current->marked.insert(chosen.begin(),chosen.end());render();}
-      else{current->excluded.insert(chosen.begin(),chosen.end());current->cache.clear();calculate();}
+      else{current->excluded.insert(chosen.begin(),chosen.end());current->cache.clear();current->yawResult.reset();calculate();}
     });
   }
 protected:
   bool eventFilter(QObject* watched,QEvent* event) override
   {
+    if(watched==canvas&&displayKind==M56&&yawActive&&event->type()==QEvent::ToolTip){
+      const auto* e=static_cast<QHelpEvent*>(event);const double x=plot->qwtPlot()->invTransform(QwtPlot::xBottom,e->pos().x());
+      const auto& c=yawActive->config;const bool pair=yawView->currentIndex()==1;const int band=yawWind->currentData().toInt();
+      if(pair){const int bin=BladeYaw::index(x,c.positiveLow,c.positiveHigh,c.pairStep);
+        if(bin>=0){const auto a=BladeYaw::aggregate(*yawActive,band,bin);const auto ranges=BladeYawUI::pairRange(c,bin);
+          QToolTip::showText(e->globalPos(),QString("正侧 %1° ↔ 负侧 %2°\n共同权重 %3；有效单元 %4；覆盖 %5%\n功率差 %6 kW；风速差 %7 m/s\n%8")
+            .arg(ranges[0],ranges[1]).arg(qulonglong(a.weight)).arg(qulonglong(a.eligible)).arg(num(100*a.coverage))
+            .arg(a.weight?num(a.delta):"—",a.weight?num(a.windDelta):"—",QString::fromStdString(a.outcome)),canvas);}
+      }else{
+        const int bin=BladeYaw::index(x,c.angleLow,c.angleHigh,c.angleStep);QStringList lines;
+        for(const auto& b:yawActive->bins)if(b.angleBin==bin&&(band<0||b.windBin==band)){
+          const auto& s=yawUnit->currentIndex()?b.stats.percent:b.stats.residual;
+          lines<<QString("%1 m/s，样本 %2，均值 %3，SD %4").arg(BladeYawUI::windRange(c,b.windBin))
+            .arg(qulonglong(s.n)).arg(s.n?num(s.y):"—",s.n?num(s.sd()):"—");if(lines.size()>=8)break;
+        }
+        if(!lines.empty())QToolTip::showText(e->globalPos(),lines.join('\n'),canvas);
+      }
+      return true;
+    }
     if(watched==canvas&&displayKind==M56&&yawActive&&event->type()==QEvent::MouseButtonRelease){
       const auto* e=static_cast<QMouseEvent*>(event);
       const double x=plot->qwtPlot()->invTransform(QwtPlot::xBottom,e->pos().x());
@@ -1134,6 +1164,7 @@ public:
     yawView=new QComboBox;yawView->setObjectName("m56View");yawView->addItems({"功率残差","正负角度配对"});yawLine->addWidget(yawView);
     yawWind=new QComboBox;yawWind->setObjectName("m56WindBand");yawWind->addItem("全部风速段",-1);yawLine->addWidget(yawWind);
     yawUnit=new QComboBox;yawUnit->setObjectName("m56Unit");yawUnit->addItems({"kW","%"});yawLine->addWidget(yawUnit);
+    yawSpread=new QCheckBox("±1 SD");yawSpread->setToolTip("样本离散度，最多绘制1000箱；全量统计见结果表");yawLine->addWidget(yawSpread);
     auto* yawExport=new QToolButton;yawExport->setText("导出");yawExport->setPopupMode(QToolButton::InstantPopup);
     auto* yawExportMenu=new QMenu(yawExport);yawExport->setMenu(yawExportMenu);yawLine->addWidget(yawExport);
     auto exportYaw=[this](bool pairs){if(!yawActive)return;auto rows=yawMetadata();rows.append(QStringList{});
@@ -1145,6 +1176,7 @@ public:
     connect(yawView,qOverload<int>(&QComboBox::currentIndexChanged),this,updateYaw);
     connect(yawWind,qOverload<int>(&QComboBox::currentIndexChanged),this,updateYaw);
     connect(yawUnit,qOverload<int>(&QComboBox::currentIndexChanged),this,updateYaw);
+    connect(yawSpread,&QCheckBox::toggled,this,updateYaw);
     top->addStretch();
     poolMenu=new QToolButton;poolMenu->setText("曲线集比较");poolMenu->setPopupMode(QToolButton::InstantPopup);compareMenu=new QMenu(poolMenu);poolMenu->setMenu(compareMenu);top->addWidget(poolMenu);
     auto* saveSet=compareMenu->addAction("保存当前曲线集");
@@ -1168,7 +1200,7 @@ public:
     auto* tools=new QHBoxLayout;layout->addLayout(tools);select=new QComboBox;
     select->addItems({"浏览","框选排除","框选标注","上界线以上排除","下界线以下排除"});tools->addWidget(select);
     button(tools,"撤销",[this]{if(!current||undoStack.empty())return;
-      auto old=std::move(undoStack.back());undoStack.pop_back();current->excluded=std::move(old.first);current->marked=std::move(old.second);current->cache.clear();calculate();});
+      auto old=std::move(undoStack.back());undoStack.pop_back();current->excluded=std::move(old.first);current->marked=std::move(old.second);current->cache.clear();current->yawResult.reset();calculate();});
     for(int i=0;i<4;++i){auto* c=new QCheckBox(QStringList{"参考","分箱","散点","拟合 / 对比"}[i]);c->setChecked(true);tools->addWidget(c);
       connect(c,&QCheckBox::toggled,this,[this,i](bool on){visibleLayers[i]=on;for(auto item:layers)if(item.second==i)item.first->setVisible(on);plot->replot();});}
     sampleStyle=new QComboBox;
