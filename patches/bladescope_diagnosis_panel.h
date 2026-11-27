@@ -15,7 +15,7 @@ class Panel final:public QWidget {
   QSpinBox *offset,*before,*after;
   QComboBox *encoding,*separator;
   QLineEdit *vendor,*model;
-  QListWidget* signals;
+  QListWidget* measurementList;
   std::function<QStringList()> available;
   std::function<void(QStringList,double,double)> evidence;
   std::shared_ptr<std::atomic_bool> cancellation;
@@ -101,7 +101,7 @@ public:
     button("检查规则包",[this]{inspectPackage();});
     encoding=new QComboBox;encoding->addItems({"UTF-8","GB18030","UTF-16"});top->addWidget(encoding);
     separator=new QComboBox;separator->addItems({"逗号分隔","Tab 分隔"});top->addWidget(separator);top->addStretch();
-    auto* options=new QFormLayout;root->addLayout(options);vendor=new QLineEdit;model=new QLineEdit;
+    auto* optionsWidget=new QWidget;auto* options=new QFormLayout(optionsWidget);root->addWidget(optionsWidget);optionsWidget->hide();button("事件参数",[optionsWidget]{optionsWidget->setVisible(!optionsWidget->isVisible());});vendor=new QLineEdit;model=new QLineEdit;
     vendor->setPlaceholderText("厂商，待确认");model->setPlaceholderText("机型，待确认");options->addRow("厂商 / 机型",vendor);options->addRow("机型",model);
     center=new QDateTimeEdit(QDateTime::currentDateTimeUtc());center->setTimeSpec(Qt::UTC);center->setDisplayFormat("yyyy-MM-dd HH:mm:ss.zzz");
     offset=new QSpinBox;offset->setRange(-86400000,86400000);offset->setSuffix(" ms");
@@ -110,12 +110,12 @@ public:
     options->addRow("前窗口",before);options->addRow("后窗口",after);
     table=new QTableWidget(0,7);table->setObjectName("diagnosisEventTable");table->setHorizontalHeaderLabels({"原始时间","对齐时间（UTC）","来源类别","代码/动作","状态原文","源文件","数据记录号"});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->setSelectionBehavior(QAbstractItemView::SelectRows);table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);root->addWidget(table,2);
-    signals=new QListWidget;signals->setObjectName("diagnosisEvidenceSignals");signals->setMaximumHeight(150);signals->setSelectionMode(QAbstractItemView::ExtendedSelection);root->addWidget(signals);
+    measurementList=new QListWidget;measurementList->setObjectName("diagnosisEvidenceSignals");measurementList->setMaximumHeight(150);measurementList->setSelectionMode(QAbstractItemView::ExtendedSelection);root->addWidget(measurementList);
     quality=new QLabel;quality->setWordWrap(true);root->addWidget(quality);
     status=new QLabel("请先用主界面加载录波；SC 和动作清单均可选。当前为本地事件核对与证据查看基础界面，未启用自动诊断。");status->setWordWrap(true);root->addWidget(status);
     auto* bottom=new QHBoxLayout;root->addLayout(bottom);
     auto* show=new QPushButton("在录波视图查看所选证据");bottom->addWidget(show);
-    connect(show,&QPushButton::clicked,this,[this]{QStringList fields;for(auto* item:signals->selectedItems())fields<<item->text();
+    connect(show,&QPushButton::clicked,this,[this]{QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();
       if(fields.empty()||fields.size()>16){status->setText("请选择 1～16 个证据测点");return;}
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;evidence(fields,t-before->value(),t+after->value());});
     auto* exportButton=new QPushButton("导出当前事件窗口 CSV");bottom->addWidget(exportButton);
@@ -128,9 +128,10 @@ public:
     });
     auto update=[this]{refresh();};connect(center,&QDateTimeEdit::dateTimeChanged,this,update);
     for(auto* spin:{before,after,offset})connect(spin,qOverload<int>(&QSpinBox::valueChanged),this,update);
+    connect(table,&QTableWidget::cellDoubleClicked,this,[this](int row,int){if(row>=0&&row<visible.size()){const auto t=visible[row].aligned;center->setDateTime(QDateTime::fromMSecsSinceEpoch(t,Qt::UTC));}});
     refresh();
   }
-  void enter(){signals->clear();signals->addItems(available());refresh();}
+  void enter(){measurementList->clear();measurementList->addItems(available());refresh();}
   ~Panel()override{if(cancellation)cancellation->store(true);}
 };
 }
