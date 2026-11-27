@@ -103,7 +103,7 @@ inline Points average(const Points& p, size_t width)
 }
 
 enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
-            Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, NRoles };
+            Status, Temp, FaultFlag, CurtailFlag, TransitionFlag, YawActiveFlag, NRoles };
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,
             M51,M52,M53,M55, NKind };
 enum TorqueUnit { Percent, NewtonMetre, KiloNewtonMetre };

@@ -2,7 +2,7 @@ name: Windows x64 build (PlotJuggler 3.17.0)
 
 on:
   push:
-    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224 ]
+    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56 ]
     paths:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
@@ -23,6 +23,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: customization
+
+      - name: Verify analysis math regressions
+        shell: pwsh
+        run: |
+          cmake -S customization/tests -B analysis-tests -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Analysis test configuration failed" }
+          cmake --build analysis-tests --config Release
+          if ($LASTEXITCODE -ne 0) { throw "Analysis test build failed" }
+          ctest --test-dir analysis-tests -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Analysis regression failed" }
 
       - name: Prepare example labels for public builds
         if: ${{ !github.event.repository.private }}
@@ -176,7 +186,7 @@ jobs:
       - name: Package portable x64 build
         shell: pwsh
         run: |
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.15-win64-portable.zip" -Force
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.16-win64-portable.zip" -Force
 
       - name: Build Windows EXE installer
         shell: pwsh
@@ -187,14 +197,14 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
-          $setup = "customization/installer/BladeScope-3.17.0.15-win64-Setup.exe"
+          $setup = "customization/installer/BladeScope-3.17.0.16-win64-Setup.exe"
           if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
           Write-Host "Installer created: $setup"
 
       - name: Smoke test EXE installer and Chinese mapping
         shell: pwsh
         run: |
-          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.15-win64-Setup.exe"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.16-win64-Setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
@@ -257,9 +267,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.15-win64' || 'BladeScope-3.17.0.15-win64-demo' }}
+          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.16-win64' || 'BladeScope-3.17.0.16-win64-demo' }}
           path: |
-            BladeScope-3.17.0.15-win64-portable.zip
-            customization/installer/BladeScope-3.17.0.15-win64-Setup.exe
+            BladeScope-3.17.0.16-win64-portable.zip
+            customization/installer/BladeScope-3.17.0.16-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30

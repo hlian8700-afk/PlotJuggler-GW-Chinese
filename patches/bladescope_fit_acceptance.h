@@ -10,6 +10,41 @@
 
 namespace BladeFitUI
 {
+inline void verifyYaw(QWidget* window,const QString& output,std::function<void(QString)> fail)
+{
+  auto data=std::make_shared<PJ::PlotDataMapRef>();
+  auto add=[&](const char* name,double t,double value){auto& curve=data->addNumeric(name)->second;curve.pushBack({t,value});};
+  int t=0;
+  for(int band=0;band<2;++band)for(double angle:{0.,4.5,-4.5,5.5,-5.5,6.5,-6.5,7.5,-7.5})for(int n=0;n<3;++n){
+    add("yaw_wind",t,6.5+band);add("yaw_angle",t,angle);add("yaw_power",t,500+500*band+(angle>0?40:0));++t;
+  }
+  QSettings saved;const auto key=QStringLiteral("BladeScope/curveAnalysis");const bool existed=saved.contains(key);const auto previous=saved.value(key);
+  const QJsonObject config{{"role0","yaw_wind"},{"role1","yaw_power"},{"role6","yaw_angle"},
+    {"m56_config",QJsonObject{{"minSamples",2}}}};
+  saved.setValue(key,QJsonDocument(config).toJson(QJsonDocument::Compact));
+  auto* panel=new Panel(*data,[]{},window);panel->resize(1200,700);panel->show();
+  if(existed)saved.setValue(key,previous);else saved.remove(key);
+  auto* kind=panel->findChild<QComboBox*>("bladeFitKind");kind->setCurrentIndex(M56);panel->enter();
+  auto* timer=new QTimer(panel);auto elapsed=std::make_shared<QElapsedTimer>();elapsed->start();
+  QObject::connect(timer,&QTimer::timeout,panel,[=]{
+    (void)data;
+    if(!panel->property("bladeFitResultsReady").toBool()){
+      if(elapsed->elapsed()>15000){timer->stop();fail("M56 did not compute");}return;
+    }
+    timer->stop();auto* pairs=panel->findChild<QTableWidget*>("m56Results0");
+    auto* bins=panel->findChild<QTableWidget*>("m56Results1");
+    auto* view=panel->findChild<QComboBox*>("m56View");auto* unit=panel->findChild<QComboBox*>("m56Unit");auto* wind=panel->findChild<QComboBox*>("m56WindBand");
+    if(!pairs||!bins||!view||!unit||!wind||pairs->rowCount()!=8){fail("M56 tables or controls missing");return;}
+    for(int row=0;row<pairs->rowCount();++row)if(std::abs(pairs->item(row,12)->text().toDouble()-40)>1e-8){fail("M56 weighted power difference");return;}
+    const int computations=panel->property("m56CoreComputations").toInt();unit->setCurrentIndex(1);view->setCurrentIndex(1);wind->setCurrentIndex(1);
+    if(panel->property("m56CoreComputations").toInt()!=computations||pairs->rowCount()!=4){fail("M56 view switches recomputed or wind filter failed");return;}
+    QFile file(QDir(output).filePath("m56-pairs.csv"));if(!file.open(QIODevice::WriteOnly)){fail("M56 CSV fixture");return;}
+    QTextStream stream(&file);stream.setCodec("UTF-8");
+    for(int row=0;row<pairs->rowCount();++row){QStringList values;for(int col=0;col<pairs->columnCount();++col)values<<pairs->item(row,col)->text();stream<<values.join(',')<<'\n';}
+    stream.flush();file.close();panel->grab().save(QDir(output).filePath("m56-pair-view.png"));
+    panel->hide();panel->deleteLater();QCoreApplication::exit(0);
+  });timer->start(25);
+}
 
 inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* entry,
                       QStackedWidget* stack, const QString& output)
@@ -322,7 +357,7 @@ inline void verifyM01(QWidget* window, PJ::PlotDataMapRef& data, QToolButton* en
         fail(QStringLiteral("return to time series"));
         return;
       }
-      QCoreApplication::exit(0);
+      verifyYaw(window,output,[fail](QString message){fail(message);});
     });
     poll->start(25);
   });
