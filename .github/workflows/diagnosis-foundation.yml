@@ -1,7 +1,7 @@
 name: Diagnosis foundation validation
 on:
   push:
-    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample, feature/diagnosis-rule-trial, feature/diagnosis-condition-pack]
+    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample, feature/diagnosis-rule-trial, feature/diagnosis-condition-pack, feature/diagnosis-evidence-fusion]
     paths:
       - 'patches/bladescope_diagnosis_core.h'
       - 'tools/import_diagnosis_config.py'
@@ -15,6 +15,9 @@ on:
       - 'patches/bladescope_diagnosis_trial_panel.h'
       - 'patches/bladescope_diagnosis_pack.h'
       - 'patches/bladescope_diagnosis_pack_panel.h'
+      - 'patches/bladescope_diagnosis_fusion.h'
+      - 'patches/bladescope_diagnosis_fusion_panel.h'
+      - 'tests/bladescope_diagnosis_fusion_test.cpp'
       - 'tests/bladescope_diagnosis_pack_test.cpp'
       - 'tests/bladescope_diagnosis_trial_test.cpp'
       - 'tests/bladescope_diagnosis_qt_test.cpp'
@@ -53,3 +56,5 @@ jobs:
           /tmp/diagnosis-qt-test
           g++ -std=c++17 -fPIC -UNDEBUG -I patches tests/bladescope_diagnosis_pack_test.cpp $(pkg-config --cflags --libs Qt5Core) -o /tmp/diagnosis-pack-test
           /tmp/diagnosis-pack-test
+          g++ -std=c++17 -fPIC -UNDEBUG -I patches tests/bladescope_diagnosis_fusion_test.cpp $(pkg-config --cflags --libs Qt5Core) -o /tmp/diagnosis-fusion-test
+          /tmp/diagnosis-fusion-test

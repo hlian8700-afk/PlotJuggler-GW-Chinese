@@ -2091,7 +2091,7 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
   @{ Old = '  _show_point_marker->setSymbol(sym);'; New = "  _show_point_marker->setSymbol(sym);`n  _show_point_marker->setVisible(false);" }
 )
-foreach ($fitHeader in @("bladescope_diagnosis_core.h", "bladescope_diagnosis_events.h", "bladescope_diagnosis_panel.h", "bladescope_diagnosis_trial.h", "bladescope_diagnosis_trial_panel.h", "bladescope_diagnosis_pack.h", "bladescope_diagnosis_pack_panel.h", "bladescope_ui_shared.h", "bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
+foreach ($fitHeader in @("bladescope_diagnosis_core.h", "bladescope_diagnosis_events.h", "bladescope_diagnosis_panel.h", "bladescope_diagnosis_trial.h", "bladescope_diagnosis_trial_panel.h", "bladescope_diagnosis_pack.h", "bladescope_diagnosis_pack_panel.h", "bladescope_diagnosis_fusion.h", "bladescope_diagnosis_fusion_panel.h", "bladescope_ui_shared.h", "bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }

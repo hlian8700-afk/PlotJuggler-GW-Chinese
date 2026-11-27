@@ -149,5 +149,21 @@ int main(int argc,char** argv){
  QTimer::singleShot(20000,&packTimer,[&]{packTimer.stop();for(auto* dialog:panel.findChildren<QDialog*>())dialog->reject();});packTimer.start();
  showConditionPack(&panel,{"synthetic_signal"},"demo","model",0,1,[](QString,double,double){return std::vector<BladeDiagnosis::RawSample>{{0,1},{1,1}};},[](QStringList,double,double){});
  assert(packTested);
+
+ ConditionPack fusionPack;fusionPack.id="demo";fusionPack.version="1";fusionPack.vendor="demo";fusionPack.model="model";
+ ConditionRule wave;wave.id="wave";wave.title="wave";wave.primaryRole="speed";wave.unit="rpm";wave.state=BladeDiagnosis::RuleState::PendingValidation;wave.source="invented";wave.spec.threshold=100;fusionPack.rules<<wave;
+ CandidateRule candidate;candidate.id="candidate";candidate.title="invented candidate";candidate.state=BladeDiagnosis::RuleState::PendingValidation;candidate.source="invented";candidate.conditions=QStringList{"wave"};candidate.codes.append({"SC","numeric_prefix","0100010"});fusionPack.candidates<<candidate;
+ ConditionResult calculated;calculated.id="wave";calculated.ran=true;calculated.trial.state=BladeDiagnosis::TrialState::Supported;
+ EventRow recorded;recorded.kind="SC";recorded.code="0100010_SC_DEMO";recorded.aligned=500;recorded.original=500;recorded.source="synthetic.csv";recorded.row=1;
+ bool fusionPassed=false;int fusionStage=0;QTimer fusionTimer;fusionTimer.setInterval(20);
+ QObject::connect(&fusionTimer,&QTimer::timeout,&panel,[&]{
+   auto* dialog=panel.findChild<QDialog*>("diagnosisFusionDialog");if(!dialog)return;
+   if(fusionStage==0){fusionStage=1;assert(!dialog->findChild<QCheckBox*>("fusionIdentity")->isChecked());dialog->findChild<QPushButton*>("fusionRun")->click();}
+   else if(fusionStage==1){auto* result=dialog->findChild<QTableWidget*>("fusionResults");if(result->rowCount()!=1)return;assert(result->item(0,2)->text().contains("部分支持"));fusionStage=2;dialog->findChild<QCheckBox*>("fusionIdentity")->setChecked(true);dialog->findChild<QPushButton*>("fusionRun")->click();}
+   else if(fusionStage==2){auto* result=dialog->findChild<QTableWidget*>("fusionResults");if(result->rowCount()!=1)return;assert(result->item(0,2)->text().contains("候选证据共同满足"));assert(dialog->findChild<QPushButton*>("fusionExport")->isEnabled());dialog->findChild<QCheckBox*>("fusionSCComplete")->setChecked(true);assert(!dialog->findChild<QPushButton*>("fusionExport")->isEnabled());fusionPassed=true;fusionStage=3;fusionTimer.stop();dialog->reject();}
+ });
+ QTimer::singleShot(20000,&fusionTimer,[&]{fusionTimer.stop();for(auto* dialog:panel.findChildren<QDialog*>())dialog->reject();});fusionTimer.start();
+ showCandidateFusion(&panel,fusionPack,{"demo","model",{}},{calculated},numericalDefinitionHash(fusionPack),{},{recorded},0,1,true);
+ assert(fusionPassed);
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }

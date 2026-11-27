@@ -1,0 +1,23 @@
+#include "bladescope_diagnosis_fusion.h"
+#include <cassert>
+using namespace BladeDiagnosisUI;using namespace BladeDiagnosis;
+ConditionPack sample(){ConditionPack p;p.id="demo";p.version="1";p.vendor="demo";p.model="model";ConditionRule r;r.id="wave";r.title="wave";r.unit="rpm";r.primaryRole="speed";r.source="invented";r.state=RuleState::PendingValidation;r.spec.threshold=100;p.rules<<r;CandidateRule c;c.id="candidate";c.title="invented candidate";c.state=RuleState::PendingValidation;c.source="invented";c.conditions=QStringList{"wave"};c.codes.append({"SC","numeric_prefix","0100010"});p.candidates<<c;return parseConditionPack(QJsonDocument(conditionPackJson(p)).toJson());}
+int main(){auto p=sample();ConditionResult good;good.id="wave";good.ran=true;good.trial.state=TrialState::Supported;good.trial.metric=120;good.primaryField="speed";QVector<ConditionResult> values{good};EventRow e;e.kind="SC";e.code="0100010_SC_DEMO";e.original=400;e.aligned=500;e.source="synthetic.csv";e.row=9;QVector<EventRow> logs{e};Scope scope{"demo","model",{}};const auto hash=numericalDefinitionHash(p);
+ auto run=[&](QVector<EventRow> events,bool identity,bool coverage){return runCandidateFusion(p,scope,values,numericalDefinitionHash(p),events,{0,1000},true,identity,coverage,false);};
+ assert(run(logs,true,false)[0].truth==Truth::Yes);
+ assert(run(logs,false,false)[0].truth==Truth::Unknown);
+ assert(run({},true,false)[0].truth==Truth::Unknown);assert(run({},true,true)[0].truth==Truth::No);
+ auto outside=logs;outside[0].aligned=1001;assert(run(outside,true,false)[0].truth==Truth::Unknown);
+ auto prefix=logs;prefix[0].code="01000101_SC_DEMO";assert(run(prefix,true,false)[0].truth==Truth::Unknown);
+ assert(runCandidateFusion(p,scope,values,hash,logs,{0,1000},false,true,false,false)[0].status==QString::fromUtf8("待验证未执行"));
+ auto modified=p;modified.candidates[0].title="changed candidate";assert(numericalDefinitionHash(modified)==hash);modified.rules[0].spec.threshold=200;assert(numericalDefinitionHash(modified)!=hash);assert(runCandidateFusion(modified,scope,values,hash,logs,{0,1000},true,true,false,false)[0].truth==Truth::Unknown);
+ values[0].trial.state=TrialState::NotSupported;assert(run(logs,true,false)[0].truth==Truth::No);values[0].trial.state=TrialState::Supported;
+ auto wrong=scope;wrong.vendor="other";assert(runCandidateFusion(p,wrong,values,hash,logs,{0,1000},true,true,false,false)[0].status==QString::fromUtf8("机型不适用"));
+ p.candidates[0].codes.clear();p.candidates[0].codes.append({"ActionList","action_token","rDemo"});auto action=e;action.kind="ActionList";action.code="rDemo; fDemo; rDemo;";auto found=run({action},true,false)[0];assert(found.truth==Truth::Yes);assert(found.evidence.last().toObject()["matched_total"].toInt()==1);p.candidates[0].codes[0].code="rDem";assert(run({action},true,false)[0].truth==Truth::Unknown);
+ p=sample();auto invalid=p;invalid.candidates[0].conditions=QStringList{"missing"};bool reference=false;try{parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());}catch(...){reference=true;}assert(reference);
+ invalid=p;invalid.candidates[0].state=RuleState::Validated;bool validation=false;try{parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());}catch(...){validation=true;}assert(validation);invalid.candidates[0].reviewer="demo";invalid.candidates[0].reviewDate="2025-01-01";invalid.candidates[0].cases=QStringList{"invented-case"};invalid=parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());demoteCandidateDependents(invalid,"wave");assert(invalid.candidates[0].state==RuleState::PendingValidation&&invalid.candidates[0].cases.empty());
+ QVector<EventRow> many;for(int i=0;i<600;++i){auto event=e;event.row=i+1;many<<event;}auto all=run(many,true,false)[0].evidence.last().toObject();assert(all["matched_total"].toInt()==600&&all["matched"].toArray().size()==256&&all["matched_detail_truncated"].toBool());
+ auto object=conditionPackJson(p);auto candidates=object["candidates"].toArray();auto candidate=candidates[0].toObject();auto codes=candidate["required_codes"].toArray();auto code=codes[0].toObject();code["semantics"]="active_fault";codes[0]=code;candidate["required_codes"]=codes;candidates[0]=candidate;object["candidates"]=candidates;bool semantics=false;try{parseConditionPack(QJsonDocument(object).toJson());}catch(...){semantics=true;}assert(semantics);
+ std::atomic_bool cancelled{true};assert(runCandidateFusion(p,scope,values,hash,logs,{0,1000},true,true,false,false,&cancelled).empty());
+ p.candidates.clear();assert(!conditionPackJson(p).contains("candidates"));assert(parseConditionPack(QJsonDocument(conditionPackJson(p)).toJson()).candidates.empty());
+}

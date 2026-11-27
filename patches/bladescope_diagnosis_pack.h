@@ -9,7 +9,12 @@ struct ConditionRule {
   QStringList cases;int sourceRow=0;BladeDiagnosis::RuleState state=BladeDiagnosis::RuleState::Draft;
   BladeDiagnosis::TrialSpec spec;
 };
-struct ConditionPack {QString id,version,vendor,model,controller,sourceHash;QVector<ConditionRule> rules;};
+struct CodeRequirement {QString kind="SC",mode="exact",code;};
+struct CandidateRule {
+  QString id,title,source,sourceHash,sourceVersion,reviewer,reviewDate,advice;int sourceRow=0;
+  QStringList cases,conditions;QVector<CodeRequirement> codes;BladeDiagnosis::RuleState state=BladeDiagnosis::RuleState::Draft;
+};
+struct ConditionPack {QString id,version,vendor,model,controller,sourceHash;QVector<ConditionRule> rules;QVector<CandidateRule> candidates;};
 struct RoleBinding {QString field,unit;double scale=1;int axis=0;};
 struct ConditionResult {QString id,title,status,reason,primaryField,referenceField;BladeDiagnosis::TrialResult trial;bool ran=false;};
 inline QString packStateName(BladeDiagnosis::RuleState state){
@@ -33,13 +38,39 @@ inline QJsonObject conditionJson(const ConditionRule& r){
     {"minimum_cycles",s.minimumCycles},{"merge_identical",s.mergeIdentical},{"source",r.source},{"source_row",r.sourceRow},{"source_sha256",r.sourceHash},{"source_version",r.sourceVersion},
     {"reviewer",r.reviewer},{"review_date",r.reviewDate},{"case_ids",cases}};
 }
+inline QJsonObject candidateJson(const CandidateRule& r){
+  QJsonArray cases,conditions,codes;for(const auto& v:r.cases)cases.append(v);for(const auto& v:r.conditions)conditions.append(v);
+  for(const auto& code:r.codes)codes.append(QJsonObject{{"kind",code.kind},{"match",code.mode},{"code",code.code},{"semantics","record_presence"}});
+  return {{"id",r.id},{"title",r.title},{"state",packStateName(r.state)},{"required_conditions",conditions},{"required_codes",codes},
+    {"source",r.source},{"source_row",r.sourceRow},{"source_sha256",r.sourceHash},{"source_version",r.sourceVersion},{"reviewer",r.reviewer},{"review_date",r.reviewDate},{"case_ids",cases},{"advice",r.advice}};
+}
+inline CandidateRule parseCandidate(const QJsonObject& o,const QSet<QString>& conditionIds){
+  packKeys(o,{"id","title","state","required_conditions","required_codes","source","source_row","source_sha256","source_version","reviewer","review_date","case_ids","advice"});
+  CandidateRule r;r.id=packText(o,"id");r.title=packText(o,"title");const QStringList states{"draft","pending_validation","validated","disabled"};const auto state=packText(o,"state");packCheck(states.contains(state),"候选规则生命周期无效");r.state=static_cast<BladeDiagnosis::RuleState>(states.indexOf(state));
+  packCheck(o.value("required_conditions").isArray()&&o.value("required_codes").isArray(),"候选规则条件和事件要求必须是数组");
+  QSet<QString> refs;for(const auto& value:o.value("required_conditions").toArray()){packCheck(value.isString()&&conditionIds.contains(value.toString())&&!refs.contains(value.toString()),"候选引用了缺失或重复的波形条件 ID");refs.insert(value.toString());r.conditions<<value.toString();}packCheck(r.conditions.size()<=64,"候选引用条件过多");
+  QSet<QString> terms;for(const auto& value:o.value("required_codes").toArray()){
+    packCheck(value.isObject(),"事件要求必须是对象");const auto code=value.toObject();packKeys(code,{"kind","match","code","semantics"});CodeRequirement term;term.kind=packText(code,"kind");term.mode=packText(code,"match");term.code=packText(code,"code");
+    packCheck(term.kind=="SC"||term.kind=="ActionList","事件来源类别无效");packCheck(code.value("semantics")=="record_presence","仅支持记录出现语义；不猜测触发或恢复状态");
+    packCheck(term.mode=="exact"||(term.kind=="SC"&&term.mode=="numeric_prefix")||(term.kind=="ActionList"&&term.mode=="action_token"),"事件匹配模式不适用于此来源");
+    if(term.mode=="numeric_prefix")packCheck(QRegularExpression("^[0-9]{1,16}$").match(term.code).hasMatch(),"数字代码前缀必须保留原始数字与前导零");
+    if(term.mode=="action_token")packCheck(!term.code.contains(';'),"动作 token 必须是单个原文动作项");
+    const auto key=term.kind+"\n"+term.mode+"\n"+term.code;packCheck(!terms.contains(key),"候选事件要求重复");terms.insert(key);r.codes<<term;
+  }
+  packCheck(r.codes.size()<=32,"每个候选最多 32 项事件要求");r.source=packText(o,"source",false,4096);r.sourceRow=packInt(o,"source_row",0,0,10000000);r.sourceHash=packText(o,"source_sha256",false);r.sourceVersion=packText(o,"source_version",false);r.reviewer=packText(o,"reviewer",false);r.reviewDate=packText(o,"review_date",false);r.advice=packText(o,"advice",false,4096);
+  packCheck(r.sourceHash.isEmpty()||QRegularExpression("^[0-9a-fA-F]{64}$").match(r.sourceHash).hasMatch(),"候选来源 SHA256 无效");
+  packCheck(o.value("case_ids").isArray()||o.value("case_ids").isUndefined(),"候选验证案例必须为数组");for(const auto& value:o.value("case_ids").toArray()){packCheck(value.isString()&&!value.toString().trimmed().isEmpty()&&value.toString().size()<=256,"候选验证案例无效");r.cases<<value.toString();}packCheck(r.cases.size()<=100,"候选验证案例过多");
+  if(r.state==BladeDiagnosis::RuleState::PendingValidation||r.state==BladeDiagnosis::RuleState::Validated)packCheck(!r.source.isEmpty()&&(!r.conditions.empty()||!r.codes.empty()),"待验证或已验证候选缺少来源或要求");
+  if(r.state==BladeDiagnosis::RuleState::Validated)packCheck(!r.reviewer.isEmpty()&&QDate::fromString(r.reviewDate,Qt::ISODate).isValid()&&!r.cases.empty(),"已验证候选缺少审核人、日期或案例");return r;
+}
+inline void demoteCandidateDependents(ConditionPack& pack,const QString& condition){for(auto& candidate:pack.candidates)if(candidate.conditions.contains(condition)&&candidate.state==BladeDiagnosis::RuleState::Validated){candidate.state=BladeDiagnosis::RuleState::PendingValidation;candidate.reviewer.clear();candidate.reviewDate.clear();candidate.cases.clear();}}
 inline QJsonObject conditionPackJson(const ConditionPack& pack){QJsonArray rules;for(const auto& r:pack.rules)rules.append(conditionJson(r));
-  return {{"format","bladescope.condition-pack.v1"},{"id",pack.id},{"version",pack.version},{"vendor",pack.vendor},{"model",pack.model},{"controller",pack.controller},{"conditions",rules}};
+  QJsonObject object{{"format","bladescope.condition-pack.v1"},{"id",pack.id},{"version",pack.version},{"vendor",pack.vendor},{"model",pack.model},{"controller",pack.controller},{"conditions",rules}};if(!pack.candidates.empty()){QJsonArray candidates;for(const auto& r:pack.candidates)candidates.append(candidateJson(r));object["candidates"]=candidates;}return object;
 }
 inline ConditionPack parseConditionPack(const QByteArray& bytes){
   packCheck(bytes.size()<=2*1024*1024,"规则包超过 2 MiB 上限");QJsonParseError error;auto document=QJsonDocument::fromJson(bytes,&error);
   packCheck(error.error==QJsonParseError::NoError&&document.isObject(),"规则包不是有效 JSON 对象");const auto root=document.object();
-  packKeys(root,{"format","id","version","vendor","model","controller","conditions"});packCheck(root.value("format")=="bladescope.condition-pack.v1","规则包格式或版本不受支持");
+  packKeys(root,{"format","id","version","vendor","model","controller","conditions","candidates"});packCheck(root.value("format")=="bladescope.condition-pack.v1","规则包格式或版本不受支持");
   ConditionPack pack;pack.id=packText(root,"id");pack.version=packText(root,"version");pack.vendor=packText(root,"vendor");pack.model=packText(root,"model");pack.controller=packText(root,"controller",false);
   packCheck(root.value("conditions").isArray(),"conditions 必须是数组");const auto list=root.value("conditions").toArray();packCheck(list.size()<=64,"每包最多 64 条条件");QSet<QString> ids;QMap<QString,QString> roleUnits;
   for(const auto& item:list){
@@ -71,6 +102,9 @@ inline ConditionPack parseConditionPack(const QByteArray& bytes){
     if(r.state==BladeDiagnosis::RuleState::Validated)packCheck(!r.reviewer.isEmpty()&&QDate::fromString(r.reviewDate,Qt::ISODate).isValid()&&!r.cases.empty(),"已验证状态缺少审核人、日期或案例编号；不会自动升级状态");
     pack.rules<<r;
   }
+  packCheck(root.value("candidates").isArray()||root.value("candidates").isUndefined(),"candidates 必须是数组");
+  const auto candidates=root.value("candidates").toArray();packCheck(candidates.size()<=64,"每包最多 64 个候选");QSet<QString> candidateIds;
+  for(const auto& value:candidates){packCheck(value.isObject(),"候选必须是对象");auto candidate=parseCandidate(value.toObject(),ids);packCheck(!candidateIds.contains(candidate.id),"候选 ID 重复");candidateIds.insert(candidate.id);pack.candidates<<candidate;}
   pack.sourceHash=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());return pack;
 }
 inline QMap<QString,QString> conditionRoles(const ConditionPack& pack){QMap<QString,QString> roles;for(const auto& r:pack.rules){roles[r.primaryRole]=r.unit;if(!r.referenceRole.isEmpty())roles[r.referenceRole]=r.unit;}return roles;}

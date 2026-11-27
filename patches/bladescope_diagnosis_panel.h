@@ -197,7 +197,8 @@ public:
     button("条件规则包",[this]{
       if(vendor->text().trimmed().isEmpty()||model->text().trimmed().isEmpty()){status->setText("请先在事件参数中填写当前厂商与机型，再配置规则包");return;}
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);
-      showConditionPack(this,available(),vendor->text().trimmed(),model->text().trimmed(),t-before->value(),t+after->value(),trialReader,evidence,QString("中心 UTC=%1；SC 偏移=%2 ms；当前窗口事件数=%3；状态含义未配置").arg(iso(qRound64(t*1000))).arg(offset->value()).arg(visible.size()),controller->text().trimmed());});
+      auto eventSnapshot=events;for(auto& event:eventSnapshot)event.aligned=BladeDiagnosis::alignedScTime(event.original,event.kind=="SC"?qint64(offset->value()):0);
+      showConditionPack(this,available(),vendor->text().trimmed(),model->text().trimmed(),t-before->value(),t+after->value(),trialReader,evidence,QString("中心 UTC=%1；SC 偏移=%2 ms；当前窗口事件数=%3；状态含义未配置").arg(iso(qRound64(t*1000))).arg(offset->value()).arg(visible.size()),controller->text().trimmed(),eventSnapshot);});
     auto navigate=[this](bool forward){
       const qint64 now=center->dateTime().toMSecsSinceEpoch();qint64 target=now;bool found=false;
       for(const auto& item:events){const auto t=BladeDiagnosis::alignedScTime(item.original,item.kind=="SC"?qint64(offset->value()):0);
