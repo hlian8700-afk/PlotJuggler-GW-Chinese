@@ -107,5 +107,29 @@ int main(int argc,char** argv){
    QMetaObject::invokeMethod(panel.findChild<QTableWidget*>("diagnosisEventTable"),"cellClicked",Qt::DirectConnection,Q_ARG(int,0),Q_ARG(int,0));
    assert(panel.findChild<QPlainTextEdit*>("diagnosisSingleEventDetails")->toPlainText().contains("DT#"));
  }
+
+ bool trialStarted=false,trialPassed=false;QTimer trialTimer;trialTimer.setInterval(20);
+ QObject::connect(&trialTimer,&QTimer::timeout,&panel,[&]{
+   auto* dialog=panel.findChild<QDialog*>("diagnosisTrialDialog");if(!dialog)return;
+   auto* out=dialog->findChild<QPlainTextEdit*>("trialOutput");
+   if(!trialStarted){
+     trialStarted=true;dialog->findChild<QComboBox*>("trialPrimary")->setCurrentIndex(1);
+     dialog->findChild<QLineEdit*>("trialThreshold")->setText("100");
+     dialog->findChild<QCheckBox*>("trialUnitsConfirmed")->setChecked(true);
+     dialog->findChild<QPushButton*>("trialRun")->click();
+   }
+   if(out->toPlainText().contains("试验条件成立")){
+     trialPassed=true;assert(dialog->findChild<QPushButton*>("trialExport")->isEnabled());
+     dialog->findChild<QLineEdit*>("trialThreshold")->setText("101");assert(!dialog->findChild<QPushButton*>("trialExport")->isEnabled());
+     trialTimer.stop();dialog->reject();
+   }
+ });
+ QTimer::singleShot(20000,&trialTimer,[&]{trialTimer.stop();for(auto* dialog:panel.findChildren<QDialog*>())dialog->reject();});
+ trialTimer.start();
+ showTrial(&panel,{"synthetic_signal"},"demo","model",0,1,20,[](QString,double,double){
+   std::vector<BladeDiagnosis::RawSample> values;for(int i=0;i<=100;++i)values.push_back({i*.01,120});return values;
+ });
+ assert(trialPassed);
+
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }

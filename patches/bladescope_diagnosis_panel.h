@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include "bladescope_diagnosis_events.h"
+#include "bladescope_diagnosis_trial_panel.h"
 
 namespace BladeDiagnosisUI {
 class Panel final:public QWidget {
@@ -182,6 +183,7 @@ class Panel final:public QWidget {
     QSqlDatabase::removeDatabase(name);QMessageBox::information(this,"规则包检查",message);
   }
 public:
+  TrialReader trialReader;
   std::function<std::pair<double,double>()> recordingRange;
   std::function<QStringList(QStringList,double,double,int)> inspectDataQuality;
   void importEventFile(const QString& path,const QString& kind){if(kind=="SC"||kind=="ActionList")load(kind,path);}
@@ -226,6 +228,9 @@ public:
     connect(show,&QPushButton::clicked,this,[this]{QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();
       if(fields.empty()||fields.size()>16){status->setText("请选择 1～16 个证据测点");return;}
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);evidence(fields,t-before->value(),t+after->value());});
+    auto* trial=new QPushButton("单条规则试跑");trial->setObjectName("diagnosisTrialEntry");bottom->addWidget(trial);
+    connect(trial,&QPushButton::clicked,this,[this]{const double t=center->dateTime().toMSecsSinceEpoch()/1000.;
+      showTrial(this,available(),vendor->text(),model->text(),t-before->value(),t+after->value(),maxGap->value(),trialReader);});
     auto* checkQuality=new QPushButton("诊断前数据检查");bottom->addWidget(checkQuality);
     connect(checkQuality,&QPushButton::clicked,this,[this]{
       QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();

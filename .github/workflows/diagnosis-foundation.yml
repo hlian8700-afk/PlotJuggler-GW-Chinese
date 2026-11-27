@@ -1,7 +1,7 @@
 name: Diagnosis foundation validation
 on:
   push:
-    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample]
+    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample, feature/diagnosis-rule-trial]
     paths:
       - 'patches/bladescope_diagnosis_core.h'
       - 'tools/import_diagnosis_config.py'
@@ -11,6 +11,9 @@ on:
       - '.github/workflows/diagnosis-foundation.yml'
       - 'patches/bladescope_diagnosis_events.h'
       - 'patches/bladescope_diagnosis_panel.h'
+      - 'patches/bladescope_diagnosis_trial.h'
+      - 'patches/bladescope_diagnosis_trial_panel.h'
+      - 'tests/bladescope_diagnosis_trial_test.cpp'
       - 'tests/bladescope_diagnosis_qt_test.cpp'
   workflow_dispatch:
 permissions:
@@ -26,6 +29,8 @@ jobs:
           /tmp/diagnosis-test
           g++ -std=c++17 -Wall -Wextra -Werror -pedantic -UNDEBUG -I patches tests/bladescope_diagnosis_quality_test.cpp -o /tmp/quality-test
           /tmp/quality-test
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -UNDEBUG -I patches tests/bladescope_diagnosis_trial_test.cpp -o /tmp/trial-test
+          /tmp/trial-test
       - name: Verify draft configuration import
         run: python3 -m unittest discover -s tests -p 'test_diagnosis_import.py' -v
       - name: Verify existing analysis regressions
