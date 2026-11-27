@@ -68,3 +68,15 @@ inline QVector<CandidateResult> runCandidateFusion(const ConditionPack& pack,con
   return results;
 }
 }
+
+namespace BladeDiagnosisUI {
+inline QByteArray fusionCsv(const QJsonObject& report){
+  QByteArray bytes("\xEF\xBB\xBF");bytes+="record_type,id,title,status,reason,details_json\n";
+  auto append=[&](QString type,QString id,QString title,QString status,QString reason,QJsonObject detail){QStringList row{type,id,title,status,reason,QString::fromUtf8(QJsonDocument(detail).toJson(QJsonDocument::Compact))};for(auto& cell:row){if(!cell.isEmpty()&&QString("=+-@\t\r").contains(cell.front()))cell.prepend('\'');cell=csvCell(cell);}bytes+=row.join(',').toUtf8()+'\n';};
+  for(auto i=report.begin();i!=report.end();++i)if(i.key()!="pack"&&i.key()!="results"&&i.key()!="numerical_context")append("context",i.key(),{},{},{},QJsonObject{{"value",i.value()}});
+  const auto pack=report.value("pack").toObject();for(const auto& value:pack.value("conditions").toArray()){const auto object=value.toObject();append("condition_definition",object["id"].toString(),object["title"].toString(),object["state"].toString(),{},object);}for(const auto& value:pack.value("candidates").toArray()){const auto object=value.toObject();append("candidate_definition",object["id"].toString(),object["title"].toString(),object["state"].toString(),{},object);}
+  const auto numerical=report.value("numerical_context").toObject();for(auto i=numerical.begin();i!=numerical.end();++i){if(i.key()=="results"){for(const auto& value:i.value().toArray()){const auto object=value.toObject();append("numerical_result",object["id"].toString(),{},object["status"].toString(),object["reason"].toString(),object);}}else if(i.key()=="bindings"||i.key()=="snapshot_audit"){const auto object=i.value().toObject();for(auto entry=object.begin();entry!=object.end();++entry)append(i.key(),entry.key(),{},{},{},entry.value().toObject());}else append("numerical_context",i.key(),{},{},{},QJsonObject{{"value",i.value()}});}
+  for(const auto& value:report.value("results").toArray()){const auto result=value.toObject();const auto id=result["id"].toString();append("candidate_result",id,result["title"].toString(),result["status"].toString(),"逐项依据见 predicate 行",QJsonObject{{"truth",result["truth"]}});int number=0;for(const auto& raw:result["evidence"].toArray()){auto term=raw.toObject();const auto matched=term.take("matched").toArray();const auto key=id+"/"+QString::number(++number);append("predicate",key,term["id"].toString(),term["truth"].toString(),term["reason"].toString(),term);int record=0;for(const auto& event:matched)append("matched_event",key+"/"+QString::number(++record),{},{},{},event.toObject());}}
+  return bytes;
+}
+}
