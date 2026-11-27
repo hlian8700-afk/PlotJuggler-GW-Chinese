@@ -5,7 +5,7 @@
 #include "bladescope_diagnosis_trial.h"
 namespace BladeDiagnosisUI {
 struct ConditionRule {
-  QString id,title,primaryRole,referenceRole,unit,source,reviewer,reviewDate;
+  QString id,title,primaryRole,referenceRole,unit,source,sourceHash,sourceVersion,reviewer,reviewDate;
   QStringList cases;int sourceRow=0;BladeDiagnosis::RuleState state=BladeDiagnosis::RuleState::Draft;
   BladeDiagnosis::TrialSpec spec;
 };
@@ -30,7 +30,7 @@ inline QJsonObject conditionJson(const ConditionRule& r){
     {"primary_role",r.primaryRole},{"reference_role",r.referenceRole},{"unit",r.unit},
     {"threshold",std::isfinite(s.threshold)?QJsonValue(s.threshold):QJsonValue(QJsonValue::Null)},
     {"duration_ms",double(s.durationMs)},{"maximum_gap_ms",double(s.maximumGapMs)},{"tolerance_ms",double(s.toleranceMs)},
-    {"minimum_cycles",s.minimumCycles},{"merge_identical",s.mergeIdentical},{"source",r.source},{"source_row",r.sourceRow},
+    {"minimum_cycles",s.minimumCycles},{"merge_identical",s.mergeIdentical},{"source",r.source},{"source_row",r.sourceRow},{"source_sha256",r.sourceHash},{"source_version",r.sourceVersion},
     {"reviewer",r.reviewer},{"review_date",r.reviewDate},{"case_ids",cases}};
 }
 inline QJsonObject conditionPackJson(const ConditionPack& pack){QJsonArray rules;for(const auto& r:pack.rules)rules.append(conditionJson(r));
@@ -44,7 +44,7 @@ inline ConditionPack parseConditionPack(const QByteArray& bytes){
   packCheck(root.value("conditions").isArray(),"conditions 必须是数组");const auto list=root.value("conditions").toArray();packCheck(list.size()<=64,"每包最多 64 条条件");QSet<QString> ids;QMap<QString,QString> roleUnits;
   for(const auto& item:list){
     packCheck(item.isObject(),"条件必须是对象");const auto o=item.toObject();
-    packKeys(o,{"id","title","family","state","primary_role","reference_role","unit","threshold","duration_ms","maximum_gap_ms","tolerance_ms","minimum_cycles","merge_identical","source","source_row","reviewer","review_date","case_ids"});
+    packKeys(o,{"id","title","family","state","primary_role","reference_role","unit","threshold","duration_ms","maximum_gap_ms","tolerance_ms","minimum_cycles","merge_identical","source","source_row","source_sha256","source_version","reviewer","review_date","case_ids"});
     ConditionRule r;r.id=packText(o,"id");r.title=packText(o,"title");packCheck(!ids.contains(r.id),"条件 ID 重复");ids.insert(r.id);
     const auto family=packText(o,"family");const QStringList families{"overspeed","pitch_following","vibration_ac_rms","speed_fluctuation_rms"};packCheck(families.contains(family),"未知条件类型");r.spec.family=static_cast<BladeDiagnosis::TrialFamily>(families.indexOf(family));
     const auto state=packText(o,"state");const QStringList states{"draft","pending_validation","validated","disabled"};packCheck(states.contains(state),"未知生命周期状态");r.state=static_cast<BladeDiagnosis::RuleState>(states.indexOf(state));
@@ -64,7 +64,7 @@ inline ConditionPack parseConditionPack(const QByteArray& bytes){
     packCheck(std::isnan(r.spec.threshold)||(std::isfinite(r.spec.threshold)&&r.spec.threshold>0),"阈值必须是有限正数");
     r.spec.durationMs=packInt(o,"duration_ms",1000,1,3600000);r.spec.maximumGapMs=packInt(o,"maximum_gap_ms",100,1,3600000);
     r.spec.toleranceMs=packInt(o,"tolerance_ms",0,0,60000);r.spec.minimumCycles=packInt(o,"minimum_cycles",2,1,1000);r.spec.mergeIdentical=packBool(o,"merge_identical",false);
-    r.source=packText(o,"source",false,4096);r.sourceRow=packInt(o,"source_row",0,0,10000000);r.reviewer=packText(o,"reviewer",false);r.reviewDate=packText(o,"review_date",false);
+    r.source=packText(o,"source",false,4096);r.sourceHash=packText(o,"source_sha256",false);r.sourceVersion=packText(o,"source_version",false);packCheck(r.sourceHash.isEmpty()||QRegularExpression("^[0-9a-fA-F]{64}$").match(r.sourceHash).hasMatch(),"来源 SHA256 摘要无效");r.sourceRow=packInt(o,"source_row",0,0,10000000);r.reviewer=packText(o,"reviewer",false);r.reviewDate=packText(o,"review_date",false);
     packCheck(o.value("case_ids").isArray()||o.value("case_ids").isUndefined(),"case_ids 必须为数组");
     for(const auto& id:o.value("case_ids").toArray()){packCheck(id.isString()&&!id.toString().trimmed().isEmpty()&&id.toString().size()<=256,"验证案例编号无效");r.cases<<id.toString();}packCheck(r.cases.size()<=100,"验证案例编号过多");
     if(r.state==BladeDiagnosis::RuleState::PendingValidation||r.state==BladeDiagnosis::RuleState::Validated)packCheck(std::isfinite(r.spec.threshold)&&!r.source.isEmpty(),"待验证/已验证条件缺少阈值或来源");
