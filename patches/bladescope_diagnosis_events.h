@@ -6,7 +6,7 @@
 #include "bladescope_diagnosis_core.h"
 
 namespace BladeDiagnosisUI {
-struct Csv {QStringList headers;QVector<QStringList> rows;QVector<int> recordNumbers;QStringList errors;int skippedPreamble=0,trimmedTrailing=0,skippedFooter=0;};
+struct Csv {QStringList headers;QVector<QStringList> rows;QVector<int> recordNumbers;QStringList errors;int skippedPreamble=0,trimmedTrailing=0,skippedFooter=0;bool inferredHeader=false;};
 inline Csv parseCsv(QString text,QChar separator=QChar(','),const std::atomic_bool* cancel=nullptr,int headerRecord=1,bool validOnly=false) {
   if(text.startsWith(QChar(0xfeff)))text.remove(0,1);
   // Preamble is line-oriented vendor metadata, not CSV. Skip it before quote validation.
@@ -23,7 +23,7 @@ inline Csv parseCsv(QString text,QChar separator=QChar(','),const std::atomic_bo
       for(auto name:names){
         name=name.trimmed();if(name.startsWith('"')&&name.endsWith('"'))name=name.mid(1,name.size()-2);
         const auto key=name.toLower();
-        time=time||QRegularExpression("^(st|str)?(trigger(time)?|timestamp|datetime|time)$").match(key).hasMatch()||key=="时间"||key=="触发时间";
+        time=time||QRegularExpression("^(st|str)?(trigger(time(stamp)?)?|timestamp|datetime|time)$").match(key).hasMatch()||key=="时间"||key=="触发时间";
         code=code||QRegularExpression("^(st|str)?(description|code|errorcode|faultcode|action|actionname|actioncode)$").match(key).hasMatch()||key=="代码"||key=="故障代码"||key=="动作";
       }
       if(time&&code){headerRecord=nonempty;found=true;break;}
@@ -111,20 +111,18 @@ struct ImportOptions {
 inline qint64 parseTime(QString value,const ImportOptions& o) {
   value=value.trimmed();
   const bool iec=value.startsWith("DT#",Qt::CaseInsensitive)||value.startsWith("DATE_AND_TIME#",Qt::CaseInsensitive);
-  if(iec){
-    value=value.mid(value.indexOf('#')+1);
-    // IEC date/time uses a hyphen between the date and clock, with an optional fractional second.
-    const auto match=QRegularExpression("^(\\d{4}-\\d{1,2}-\\d{1,2})[- T](\\d{1,2}:\\d{2}:\\d{2})(?:[.,](\\d{1,9}(?:_\\d{3}){0,2}))?(Z|[+-]\\d{2}:?\\d{2})?$",QRegularExpression::CaseInsensitiveOption).match(value);
-    if(!match.hasMatch())throw std::runtime_error("DT# 时间格式不支持，请检查完整时间值");
-    const auto date=QDate::fromString(match.captured(1),"yyyy-M-d");
-    const auto time=QTime::fromString(match.captured(2),"H:mm:ss");
-    if(!date.isValid()||!time.isValid())throw std::runtime_error("DT# 日期或时间无效");
-    auto fraction=match.captured(3);fraction.remove('_');
-    if(fraction.size()>9)throw std::runtime_error("DT# 小数秒超过支持精度");
-    if(fraction.size()>3&&fraction.mid(3).contains(QRegularExpression("[1-9]")))
-      throw std::runtime_error("DT# 小数秒超过毫秒精度，拒绝静默截断");
-    value=date.toString("yyyy-MM-dd")+"T"+time.toString("HH:mm:ss")+"."+fraction.left(3).leftJustified(3,'0')+match.captured(4).toUpper();
-  }
+  if(iec)value=value.mid(value.indexOf('#')+1);
+  // Vendor SC and headerless actions use variable-width date and clock components.
+  const auto local=QRegularExpression("^(\\d{4})-(\\d{1,2})-(\\d{1,2})[- T](\\d{1,2}):(\\d{1,2}):(\\d{1,2})(?:[.,](\\d{1,9}(?:_\\d{3}){0,2}))?(Z|[+-]\\d{2}:?\\d{2})?$",QRegularExpression::CaseInsensitiveOption).match(value);
+  if(local.hasMatch()){
+    const QDate date(local.captured(1).toInt(),local.captured(2).toInt(),local.captured(3).toInt());
+    const QTime time(local.captured(4).toInt(),local.captured(5).toInt(),local.captured(6).toInt());
+    if(!date.isValid()||!time.isValid())throw std::runtime_error("日期或时间无效");
+    auto fraction=local.captured(7);fraction.remove('_');
+    if(fraction.size()>9||(fraction.size()>3&&fraction.mid(3).contains(QRegularExpression("[1-9]"))))
+      throw std::runtime_error("小数秒超过毫秒精度，拒绝静默截断");
+    value=date.toString("yyyy-MM-dd")+"T"+time.toString("HH:mm:ss")+"."+fraction.left(3).leftJustified(3,'0')+local.captured(8).toUpper();
+  }else if(iec)throw std::runtime_error("DT# 时间格式不支持，请检查完整时间值");
   bool numeric=false;double number=value.toDouble(&numeric);
   if(numeric){
     const long double ms=static_cast<long double>(number)*(o.numericMilliseconds?1.L:1000.L);
@@ -141,8 +139,34 @@ inline qint64 parseTime(QString value,const ImportOptions& o) {
   if(!explicitZone)date=QDateTime(date.date(),date.time(),Qt::OffsetFromUTC,o.utcOffsetSeconds);
   return date.toUTC().toMSecsSinceEpoch();
 }
+// Headerless ActionList is accepted only in ActionList mode and with all vendor metadata keys.
+inline Csv parseHeaderlessActions(QString text,QChar separator,bool validOnly,const std::atomic_bool* cancel){
+  QTextStream stream(&text,QIODevice::ReadOnly);QStringList lines;QSet<QString> keys;int count=0;
+  while(!stream.atEnd()&&count<256){
+    const auto line=stream.readLine();lines<<line;
+    if(line.trimmed().isEmpty())continue;
+    ++count;
+    const auto trimmed=line.trimmed();
+    if(trimmed.startsWith("SeqNo"+QString(separator))&&trimmed.contains("WindParkName:"))keys.insert("park");
+    if(trimmed.startsWith("TurbineNumber:")||trimmed.startsWith("WindTurbineNumber:"))keys.insert("turbine");
+    if(trimmed.startsWith("TurbineStyle:"))keys.insert("model");
+    if(trimmed.startsWith("ProgramVersion:"))keys.insert("version");
+    const auto first=line.section(separator,0,0).trimmed();bool integer=false;first.toLongLong(&integer);
+    if(integer&&keys.size()==4){
+      QString body=line+"\n"+stream.readAll();
+      auto csv=parseCsv(QStringList{"SeqNo","TimeStamp","OperationMode","ActionList"}.join(separator)+"\n"+body,separator,cancel,1,validOnly);
+      if(csv.headers.size()!=4)throw std::runtime_error("无表头 ActionList 必须严格为四列");
+      for(auto& number:csv.recordNumbers)number+=count-2;
+      if(!csv.errors.empty())throw std::runtime_error("无表头 ActionList 列数不一致，请先核对格式；未忽略任何记录");
+      ImportOptions check;check.timeColumn=1;check.codeColumn=3;
+      for(const auto& row:csv.rows){parseTime(row[1],check);if(row[3].trimmed().isEmpty())throw std::runtime_error("动作列表为空");}
+      csv.skippedPreamble=count-1;csv.inferredHeader=true;return csv;
+    }
+  }
+  throw std::runtime_error("未识别到受支持的无表头 ActionList；请检查四项厂商说明与四列数据");
+}
 struct CsvDetection {Csv csv;QString encoding;QChar separator;};
-inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动",QChar separator=QChar(),int headerRecord=0,bool validOnly=false,const std::atomic_bool* cancel=nullptr){
+inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动",QChar separator=QChar(),int headerRecord=0,bool validOnly=false,const std::atomic_bool* cancel=nullptr,bool actionListProfile=false){
   QStringList encodings;
   if(requested!="自动")encodings<<requested;
   else if(bytes.startsWith(QByteArray::fromHex("fffe")))encodings<<"UTF-16LE";
@@ -155,7 +179,9 @@ inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动"
     const QVector<QChar> separators=separator.isNull()?QVector<QChar>{',','\t',';'}:QVector<QChar>{separator};
     QVector<CsvDetection> matches;
     for(const auto sep:separators)try{
-      auto csv=parseCsv(text,sep,cancel,headerRecord,validOnly);
+      Csv csv;
+      if(actionListProfile&&headerRecord==0){try{csv=parseCsv(text,sep,cancel,headerRecord,validOnly);}catch(...){csv=parseHeaderlessActions(text,sep,validOnly,cancel);}}
+      else csv=parseCsv(text,sep,cancel,headerRecord,validOnly);
       // A delimiter must occur in the header and produce data of the same shape.
       if(csv.rows.empty())throw std::runtime_error("没有可预览的数据记录");
       matches.push_back({std::move(csv),enc,sep});

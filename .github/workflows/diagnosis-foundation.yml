@@ -1,7 +1,7 @@
 name: Diagnosis foundation validation
 on:
   push:
-    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv]
+    branches: [feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample]
     paths:
       - 'patches/bladescope_diagnosis_core.h'
       - 'tools/import_diagnosis_config.py'

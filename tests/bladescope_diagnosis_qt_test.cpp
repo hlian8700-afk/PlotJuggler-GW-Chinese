@@ -65,6 +65,17 @@ int main(int argc,char** argv){
  auto quotedEnd=parseCsv("time,code\n1,\"first\n//END\nlast\"\n");
  assert(quotedEnd.rows.size()==1&&quotedEnd.rows[0][1].contains("//END")&&quotedEnd.skippedFooter==0);
 
+
+ auto scHeader=vendorText;scHeader.replace("stTriggerTime,","stTriggerTimeStamp,");
+ auto exactHeader=detectCsv(scHeader.toUtf8());assert(exactHeader.csv.rows.size()==2);
+ assert(parseTime("DT#2025-2-8-16:5:0.334",vendorOptions)==parseTime("2025-02-08T08:05:00.334Z",vendorOptions));
+ const auto headerless=QString("SeqNo, WindParkName: DEMO\nTurbineNumber: 1\nTurbineStyle: Demo\nProgramVersion: Demo\n"
+   "1,\"2025-2-8-16:5:0.334  \",\"OPERATION_CONNECT\",\"rDemo;fDemo;\"\n"
+   "2,\"2025-2-8-16:5:1.4\",\"OPERATION_CONNECT\",\"rOther;\"\n//END\n");
+ auto actions=detectCsv(headerless.toUtf8(),"自动",QChar(),0,false,nullptr,true);
+ assert(actions.csv.inferredHeader&&actions.csv.skippedPreamble==4&&actions.csv.rows.size()==2&&actions.csv.recordNumbers[0]==5);
+ ImportOptions ao;ao.timeColumn=1;ao.codeColumn=3;assert(importEvents(actions.csv,ao,"synthetic.csv","ActionList").errors.empty());
+ bool wrongKind=false;try{detectCsv(headerless.toUtf8());}catch(...){wrongKind=true;}assert(wrongKind);
  bool drew=false;
  Panel panel([]{return QStringList{"synthetic_signal"};},[&](QStringList names,double lo,double hi){
    assert(names==QStringList{"synthetic_signal"});assert(hi-lo==120);drew=true;
@@ -75,7 +86,7 @@ int main(int argc,char** argv){
  assert(drew);assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->columnCount()==8);
  // Exercise the real bounded mapping dialog and asynchronous publication for both file kinds.
  for(const auto& kind:QStringList{"SC","ActionList"}){
-   QTemporaryFile input;assert(input.open());input.write(vendorText.toUtf8());input.flush();
+   QTemporaryFile input;assert(input.open());input.write(kind=="SC"?scHeader.toUtf8():headerless.toUtf8());input.flush();
    bool accepted=false;QTimer confirm;confirm.setInterval(20);
    QObject::connect(&confirm,&QTimer::timeout,&panel,[&]{
      auto* dialog=panel.findChild<QDialog*>("diagnosisImportDialog");if(!dialog)return;

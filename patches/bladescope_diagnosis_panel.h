@@ -101,7 +101,7 @@ class Panel final:public QWidget {
       const int headerIndex=header.value();const bool partial=validOnly.isChecked();
       QProgressDialog progress("正在识别事件文件…","取消",0,0,&d);progress.setWindowModality(Qt::WindowModal);
       QEventLoop loop;
-      auto* worker=QThread::create([=]{try{result->value=detectCsv(bytes,encodingName,delimiter,headerIndex,partial,cancelled.get());}catch(const std::exception& e){result->error=QString::fromUtf8(e.what());}});
+      auto* worker=QThread::create([=]{try{result->value=detectCsv(bytes,encodingName,delimiter,headerIndex,partial,cancelled.get(),kind=="ActionList");}catch(const std::exception& e){result->error=QString::fromUtf8(e.what());}});
       connect(&progress,&QProgressDialog::canceled,&loop,[=]{cancelled->store(true);});
       connect(worker,&QThread::finished,&loop,&QEventLoop::quit);
       progress.show();worker->start();loop.exec();worker->wait();delete worker;QObject::disconnect(&progress,nullptr,&loop,nullptr);progress.reset();progress.close();
@@ -117,17 +117,19 @@ class Panel final:public QWidget {
       int timeDefault=0,codeDefault=1;
       for(int i=0;i<csv.headers.size();++i){
         const auto name=csv.headers[i].toLower();
-        if(name=="sttriggertime"||name=="strtriggertime"||name=="triggertime"||name=="timestamp"||name=="时间")timeDefault=i;
+        if(name=="sttriggertimestamp"||name=="strtriggertimestamp"||name=="sttriggertime"||name=="strtriggertime"||name=="triggertime"||name=="timestamp"||name=="时间")timeDefault=i;
         if(name=="stdescription"||name=="strdescription"||name=="errorcode"||name=="faultcode"||name=="actionname"||name=="actioncode")codeDefault=i;
       }
+      if(csv.inferredHeader){timeDefault=1;codeDefault=3;}
       restore(times,"time",timeDefault);restore(codes,"code",codeDefault);restore(states,"state",0);restore(descriptions,"description",0);
+      if(csv.inferredHeader){times.setCurrentIndex(1);codes.setCurrentIndex(3);states.setCurrentIndex(0);descriptions.setCurrentIndex(3);}
       preview.setColumnCount(csv.headers.size());preview.setHorizontalHeaderLabels(csv.headers);
       preview.setRowCount(qMin(20,csv.rows.size()));
       for(int i=0;i<preview.rowCount();++i)for(int j=0;j<csv.headers.size();++j){
         auto* item=new QTableWidgetItem(csv.rows[i][j]);item->setToolTip(item->text());preview.setItem(i,j,item);
       }
-      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；已跳过前置说明 %3 行和结束标记 %4 条。DT# 时间自动识别，时区仍须确认。")
-        .arg(result->value.encoding).arg(result->value.separator=='\t'?"Tab":QString(result->value.separator)).arg(csv.skippedPreamble).arg(csv.skippedFooter));
+      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；已跳过前置说明 %3 行和结束标记 %4 条。DT# 时间自动识别，时区仍须确认。%5")
+        .arg(result->value.encoding).arg(result->value.separator=='\t'?"Tab":QString(result->value.separator)).arg(csv.skippedPreamble).arg(csv.skippedFooter).arg(csv.inferredHeader?" 无表头动作清单按厂商四列格式补全，请确认动作列表列。":""));
       ready=true;validate();
     };
     connect(&retry,&QPushButton::clicked,&d,rebuild);
@@ -151,10 +153,11 @@ class Panel final:public QWidget {
       if(ticket!=generation)return;
       if(!error->isEmpty()){status->setText(*error);return;}
       if(result->events.empty()){status->setText("没有有效事件；请检查列、时区与时间格式。原有数据未清除。");return;}
+      const bool keepCenter=kind=="ActionList"&&!events.empty();
       events.erase(std::remove_if(events.begin(),events.end(),[&](const auto& e){return e.kind==kind&&e.source==result->events.front().source;}),events.end());
       events+=result->events;
       const qint64 t=result->events.front().original+(kind=="SC"?qint64(offset->value()):0);
-      center->setDateTime(QDateTime::fromMSecsSinceEpoch(t,Qt::UTC));refresh();
+      if(!keepCenter)center->setDateTime(QDateTime::fromMSecsSinceEpoch(t,Qt::UTC));refresh();
       status->setText(QString("导入 %1 条，拒绝 %2 条。当前仅事件核对，尚未启用自动故障结论。").arg(result->events.size()).arg(result->errors.size()));
       if(!result->errors.empty()){QMessageBox msg(QMessageBox::Warning,"部分记录被拒绝","展开详情查看错误；未静默忽略无效记录。",QMessageBox::Ok,this);
         msg.setDetailedText(result->errors.join('\n'));msg.exec();}
