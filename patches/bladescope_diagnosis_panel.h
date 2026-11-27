@@ -230,7 +230,7 @@ public:
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);evidence(fields,t-before->value(),t+after->value());});
     auto* trial=new QPushButton("单条规则试跑");trial->setObjectName("diagnosisTrialEntry");bottom->addWidget(trial);
     connect(trial,&QPushButton::clicked,this,[this]{const double t=center->dateTime().toMSecsSinceEpoch()/1000.;
-      showTrial(this,available(),vendor->text(),model->text(),t-before->value(),t+after->value(),maxGap->value(),trialReader);});
+      showTrial(this,available(),vendor->text(),model->text(),t-before->value(),t+after->value(),maxGap->value(),trialReader,QString("中心 UTC=%1；SC 偏移=%2 ms；当前窗口事件数=%3；状态触发/恢复含义未配置").arg(iso(qRound64(t*1000))).arg(offset->value()).arg(visible.size()));});
     auto* checkQuality=new QPushButton("诊断前数据检查");bottom->addWidget(checkQuality);
     connect(checkQuality,&QPushButton::clicked,this,[this]{
       QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();

@@ -8,7 +8,7 @@ struct TrialSpec {
   TrialFamily family=TrialFamily::Overspeed;
   Scope scope;double threshold=std::numeric_limits<double>::quiet_NaN();
   std::int64_t durationMs=1000,maximumGapMs=100,toleranceMs=0;
-  int minimumCycles=2;bool mergeIdentical=false,unitsConfirmed=false;
+  int minimumCycles=2,primaryAxis=0,referenceAxis=0;bool mergeIdentical=false,unitsConfirmed=false;
   double gain=1,referenceGain=1;
 };
 struct TrialResult {
@@ -33,6 +33,8 @@ inline TrialResult runTrial(const TrialSpec& spec,const Scope& actual,Interval w
   if(spec.scope.vendor.empty()||spec.scope.model.empty()||!spec.scope.matches(actual)){
     out.state=TrialState::NotApplicable;out.reason="Vendor/model scope is missing or does not match";return out;
   }
+  if(static_cast<int>(spec.family)<0||static_cast<int>(spec.family)>3){out.state=TrialState::Invalid;out.reason="Unknown trial family";return out;}
+  if(spec.family==TrialFamily::PitchFollowing&&(spec.primaryAxis<1||spec.primaryAxis>3||spec.referenceAxis!=spec.primaryAxis)){out.state=TrialState::Invalid;out.reason="Pitch actual and command must be mapped to the same confirmed blade axis";return out;}
   if(!window.valid()||window.begin==window.end||!spec.unitsConfirmed||!std::isfinite(spec.threshold)||spec.threshold<=0||
      !std::isfinite(spec.gain)||spec.gain<=0||!std::isfinite(spec.referenceGain)||spec.referenceGain<=0||
      spec.maximumGapMs<=0||spec.durationMs<=0||spec.toleranceMs<0||spec.minimumCycles<1){
@@ -47,6 +49,7 @@ inline TrialResult runTrial(const TrialSpec& spec,const Scope& actual,Interval w
     other=trialNormalize(reference,spec.mergeIdentical,out.referenceMerged);
     out.referenceQuality=inspectWindow(other,window,spec.maximumGapMs);
     if(!out.referenceQuality.ready){out.reason="Reference data quality is insufficient";return out;}
+    for(std::size_t i=1;i<other.size();++i)if(other[i].time<=other[i-1].time){out.reason="Reference boundary timestamps must be strictly increasing";return out;}
   }
   const double lo=window.begin/1000.,hi=window.end/1000.;std::vector<RawSample> samples;
   std::size_t cursor=0;

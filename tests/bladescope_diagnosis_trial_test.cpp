@@ -10,7 +10,8 @@ int main(){
  a.insert(a.begin()+1,a.front());assert(runTrial(spec,scope,{0,1000},a).state==TrialState::Unknown);
  spec.mergeIdentical=true;r=runTrial(spec,scope,{0,1000},a);assert(r.state==TrialState::Supported&&r.merged==1&&a.size()==102);
  a[1].value=999;assert(runTrial(spec,scope,{0,1000},a).state==TrialState::Unknown);a.erase(a.begin()+1);
- spec.family=TrialFamily::PitchFollowing;spec.threshold=5;assert(runTrial(spec,scope,{0,1000},a,b).state==TrialState::Supported);
+ spec.family=TrialFamily::PitchFollowing;spec.threshold=5;
+ assert(runTrial(spec,scope,{0,1000},a,b).state==TrialState::Invalid);spec.primaryAxis=1;spec.referenceAxis=2;assert(runTrial(spec,scope,{0,1000},a,b).state==TrialState::Invalid);spec.referenceAxis=1;assert(runTrial(spec,scope,{0,1000},a,b).state==TrialState::Supported);
  for(auto& s:b)s.time+=.002;
  assert(runTrial(spec,scope,{10,990},a,b).state==TrialState::Unknown);spec.toleranceMs=3;assert(runTrial(spec,scope,{10,990},a,b).state==TrialState::Supported);
  spec.family=TrialFamily::VibrationAC;spec.threshold=1;r=runTrial(spec,scope,{0,1000},a);assert(r.state==TrialState::NotSupported&&r.metric==0);
