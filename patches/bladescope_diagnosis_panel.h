@@ -37,8 +37,8 @@ class Panel final:public QWidget {
     quality->setText(QStringLiteral("当前窗口 %1 条 / 已加载 %2 条；SC 对齐 = 原始时间 + %3 ms，TR 不移动。状态值保留原文，不猜测触发/恢复含义。")
       .arg(visible.size()).arg(events.size()).arg(offset->value()));
   }
-  void load(QString kind){
-    const auto path=QFileDialog::getOpenFileName(this,kind+" CSV",{},"CSV / TXT (*.csv *.txt);;All files (*)");
+  void load(QString kind,QString path={}){
+    if(path.isEmpty())path=QFileDialog::getOpenFileName(this,kind+" CSV",{},"CSV / TXT (*.csv *.txt);;All files (*)");
     if(path.isEmpty())return;
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly)){QMessageBox::warning(this,"读取失败",file.errorString());return;}
@@ -103,7 +103,7 @@ class Panel final:public QWidget {
       auto* worker=QThread::create([=]{try{result->value=detectCsv(bytes,encodingName,delimiter,headerIndex,partial,cancelled.get());}catch(const std::exception& e){result->error=QString::fromUtf8(e.what());}});
       connect(&progress,&QProgressDialog::canceled,&loop,[=]{cancelled->store(true);});
       connect(worker,&QThread::finished,&loop,&QEventLoop::quit);
-      progress.show();worker->start();loop.exec();worker->wait();delete worker;progress.close();
+      progress.show();worker->start();loop.exec();worker->wait();delete worker;QObject::disconnect(&progress,nullptr,&loop,nullptr);progress.reset();progress.close();
       if(cancelled->load()){summary.setText("已取消预览");return;}
       if(!result->error.isEmpty()){summary.setText(result->error);return;}
       csv=std::move(result->value.csv);
@@ -168,6 +168,7 @@ class Panel final:public QWidget {
     QSqlDatabase::removeDatabase(name);QMessageBox::information(this,"规则包检查",message);
   }
 public:
+  void importEventFile(const QString& path,const QString& kind){if(kind=="SC"||kind=="ActionList")load(kind,path);}
   Panel(std::function<QStringList()> names,std::function<void(QStringList,double,double)> draw,
         std::function<void()> back,QWidget* parent=nullptr):QWidget(parent),available(std::move(names)),evidence(std::move(draw)){
     setObjectName("bladeDiagnosisPanel");auto* root=new QVBoxLayout(this);auto* top=new QHBoxLayout;root->addLayout(top);

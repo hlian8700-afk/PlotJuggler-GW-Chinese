@@ -3,7 +3,7 @@
 #include <iostream>
 using namespace BladeDiagnosisUI;
 int main(int argc,char** argv){
- QApplication app(argc,argv);
+ QApplication app(argc,argv);QCoreApplication::setOrganizationName("BladeScopeSyntheticTests");QCoreApplication::setApplicationName("DiagnosisImport");QSettings().clear();
  const auto csv=parseCsv("time,code,state\r\n\"2024-02-08 12:00:00.000\",\"Fault,\"\"A\"\"\",1\r\n\"2024-02-08 12:00:01.000\",\"line1\nline2\",0\r\n");
  assert(csv.rows.size()==2&&csv.rows[0][1]=="Fault,\"A\""&&csv.rows[1][1]=="line1\nline2");
  ImportOptions o;o.stateColumn=2;o.utcOffsetSeconds=28800;
@@ -49,5 +49,25 @@ int main(int argc,char** argv){
  assert(list&&list->count()==1);list->item(0)->setSelected(true);
  for(auto* b:panel.findChildren<QPushButton*>())if(b->text()=="在录波视图查看所选证据")b->click();
  assert(drew);assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->columnCount()==8);
+ // Exercise the real bounded mapping dialog and asynchronous publication for both file kinds.
+ for(const auto& kind:QStringList{"SC","ActionList"}){
+   QTemporaryFile input;assert(input.open());input.write("time;code;description\n2025-02-08T12:00:00Z;A;detail\n");input.flush();
+   bool accepted=false;QTimer confirm;confirm.setInterval(20);
+   QObject::connect(&confirm,&QTimer::timeout,&panel,[&]{
+     auto* dialog=panel.findChild<QDialog*>("diagnosisImportDialog");if(!dialog)return;
+     auto* preview=dialog->findChild<QTableWidget*>("diagnosisImportPreview");
+     auto* buttons=dialog->findChild<QDialogButtonBox*>();
+     if(!preview||preview->rowCount()!=1||!buttons||!buttons->button(QDialogButtonBox::Ok)->isEnabled())return;
+     assert(dialog->width()<=QGuiApplication::primaryScreen()->availableGeometry().width());
+     accepted=true;confirm.stop();buttons->button(QDialogButtonBox::Ok)->click();
+   });
+   QTimer::singleShot(10000,&confirm,[&]{confirm.stop();for(auto* d:panel.findChildren<QDialog*>())d->reject();});
+   confirm.start();panel.importEventFile(input.fileName(),kind);assert(accepted);
+   QEventLoop waiting;QTimer check;check.setInterval(20);
+   const int expected=kind=="SC"?1:2;
+   QObject::connect(&check,&QTimer::timeout,&waiting,[&]{if(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected)waiting.quit();});
+   QTimer::singleShot(10000,&waiting,&QEventLoop::quit);check.start();waiting.exec();
+   assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected);
+ }
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }
