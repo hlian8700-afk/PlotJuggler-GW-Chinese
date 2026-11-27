@@ -677,7 +677,7 @@ class Panel : public QWidget
   }
   QVector<QStringList> yawMetadata() const
   {
-    QVector<QStringList> rows{{"元信息","值"},{"版本","3.17.0.16"},{"当前视图",yawView->currentText()},
+    QVector<QStringList> rows{{"元信息","值"},{"版本","3.17.0.17"},{"当前视图",yawView->currentText()},
       {"残差显示单位",yawUnit->currentText()},{"配对指标单位","kW"},{"风速段",yawWind->currentText()}};
     if(!yawActive)return rows;
     const auto& r=*yawActive;const auto& c=r.config;
@@ -918,7 +918,9 @@ class Panel : public QWidget
     clearPlot();
     const auto& r=*active;const auto& p=current->params;
     emptyHint->setVisible(r.raw.empty());if(r.raw.empty())emptyHint->setText(QStringLiteral("筛选后无有效样本，请检查参数与时间范围"));
-    const int k=displayKind;const auto labels=displayAxes();
+    const int k=displayKind;
+    if((k==M33||k==M34)&&!std::isfinite(displayFactor(p))){QSignalBlocker block(torqueOutput);torqueOutput->setCurrentIndex(k==M33?NewtonMetre:Percent);}
+    const auto labels=displayAxes();
     plot->qwtPlot()->setAxisTitle(QwtPlot::xBottom,labels[0]);plot->qwtPlot()->setAxisTitle(QwtPlot::yLeft,labels[1]);
     layer(k==M01&&p.reference.empty()?QStringLiteral("机组参数估算参考"):QStringLiteral("标准曲线参考"),r.reference,0,QColor("#a57bd5"));
     size_t markedCount = 0;
@@ -1215,7 +1217,7 @@ public:
     torqueOutput=new QComboBox;torqueOutput->setObjectName("bladeTorqueOutput");torqueOutput->addItems({"%","N·m","kN·m"});
     torqueOutput->setToolTip("显示/导出转矩单位；切换不会重新获取数据或拟合");torqueOutput->hide();top->addWidget(torqueOutput);
     connect(torqueOutput,qOverload<int>(&QComboBox::activated),this,[this](int index){
-      if(!current)return;
+      if(!current||!active||(displayKind!=M33&&displayKind!=M34))return;
       if(!std::isfinite(torqueDisplayFactor(displayKind,index,current->params))){
         QMessageBox::warning(this,"转矩单位","缺少额定转矩，请在机组参数中填写额定转矩或功率、效率和额定转速。");
         QSignalBlocker block(torqueOutput);torqueOutput->setCurrentIndex(displayKind==M33?NewtonMetre:Percent);return;}

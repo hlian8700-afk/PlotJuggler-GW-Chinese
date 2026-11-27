@@ -934,7 +934,8 @@ private:
   {
     delete analysisPanel;
     analysisPanel = nullptr;
-    if (plot) plot->show();
+    if (plot) plot->setVisible(!shown->numeric.empty());
+    if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->setVisible(shown->numeric.empty());
   }
 
   QWidget* makeAnalysisPanel()
@@ -942,6 +943,7 @@ private:
     analysisPanel = new QWidget(this);
     workspace->addWidget(analysisPanel, 1);
     plot->hide();
+    if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->hide();
     return analysisPanel;
   }
 
