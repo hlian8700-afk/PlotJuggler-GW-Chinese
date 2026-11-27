@@ -19,7 +19,7 @@ int main(){
  bool dimensions=false;try{conditionUnitGain("mm/s","m/s2");}catch(...){dimensions=true;}assert(dimensions);
  auto invalid=p;invalid.rules[0].state=RuleState::Validated;
  bool proof=false;try{parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());}catch(...){proof=true;}assert(proof);
- invalid.rules[0].reviewer="demo-reviewer";invalid.rules[0].reviewDate="2025-01-01";invalid.rules[0].cases={"invented-case"};invalid=parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());assert(runConditionPack(invalid,{"demo","model",{}},bindings,data,{0,1000},true,false)[0].ran);
+ invalid.rules[0].reviewer="demo-reviewer";invalid.rules[0].reviewDate="2025-01-01";invalid.rules[0].cases=QStringList{"invented-case"};invalid=parseConditionPack(QJsonDocument(conditionPackJson(invalid)).toJson());assert(runConditionPack(invalid,{"demo","model",{}},bindings,data,{0,1000},true,false)[0].ran);
  auto duplicate=conditionPackJson(p);auto rules=duplicate["conditions"].toArray();rules.append(rules[0]);duplicate["conditions"]=rules;bool duplicateId=false;try{parseConditionPack(QJsonDocument(duplicate).toJson());}catch(...){duplicateId=true;}assert(duplicateId);
  auto unknown=conditionPackJson(p);unknown["script"]="never-executed";bool rejected=false;try{parseConditionPack(QJsonDocument(unknown).toJson());}catch(...){rejected=true;}assert(rejected);
  const auto firstHash=conditionSnapshotHash(data.at("role0"));auto changed=data.at("role0");changed[0].value+=1;assert(firstHash!=conditionSnapshotHash(changed));assert(firstHash==conditionSnapshotHash(data.at("role0")));
