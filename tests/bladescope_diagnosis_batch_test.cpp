@@ -20,4 +20,8 @@ int main(){
  write(path,"TimeStamp,speed\n0,1\n2,2\n1,3\n");result=runBatchJob(job,pack,bindings,options,&cancel);assert(result.state==QString::fromUtf8("失败"));
  write(path,"TimeStamp,speed\n0,1\n1,2\n2,3\n");bindings["speed"].field="absent";result=runBatchJob(job,pack,bindings,options,&cancel);assert(result.state==QString::fromUtf8("数据不足/质量异常"));
  assert(filenameCenter("2025-02-08-22-11-13-777_demo.txt",options.time)==parseTime("2025-02-08T22:11:13.777",options.time));
+ options.outputDirectory.clear();bindings["speed"].field="speed";auto bad=job;bad.id="missing-file";bad.tr=dir.filePath("missing.csv");auto next=job;next.id="next-file";
+ auto queue=runBatchQueue({bad,next},pack,bindings,options,&cancel);assert(queue.size()==2&&queue[0].state==QString::fromUtf8("失败")&&queue[1].error.isEmpty());
+ queue=runBatchQueue({next,bad},pack,bindings,options,&cancel,[&](int,const BatchResult&){cancel=true;});assert(queue.size()==1);cancel=false;
+
 }
