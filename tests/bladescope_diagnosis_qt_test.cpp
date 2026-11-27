@@ -21,6 +21,23 @@ int main(int argc,char** argv){
  assert(bad.events.size()==1&&bad.errors.size()==2);
  std::atomic_bool cancelled{true};QString large="time,code\n";for(int i=0;i<10000;++i)large+="1,x\n";
  bool stopped=false;try{parseCsv(large,',',&cancelled);}catch(const std::runtime_error&){stopped=true;}assert(stopped);
+ // Shared SC / ActionList byte-level decoding and structural rejection.
+ const auto utf8=QString::fromUtf8("时间;代码;状态\n2025-02-08T12:00:00Z;故障A;1\n").toUtf8();
+ auto detected=detectCsv(utf8);
+ assert(detected.encoding=="UTF-8"&&detected.separator==';'&&detected.csv.headers[0]==QString::fromUtf8("时间"));
+ auto* gb=QTextCodec::codecForName("GB18030");
+ auto gbBytes=gb->fromUnicode(QString::fromUtf8("时间\t动作\n2025-02-08T12:00:00Z\t启动\n"));
+ assert(detectCsv(gbBytes).encoding=="GB18030");
+ auto* utf16=QTextCodec::codecForName("UTF-16LE");
+ auto utf16Bytes=QByteArray::fromHex("fffe")+utf16->fromUnicode(QString::fromUtf8("时间,代码\n2025-02-08T12:00:00Z,A\n"));
+ assert(detectCsv(utf16Bytes).csv.rows.size()==1);
+ bool wrongEncoding=false;try{detectCsv(utf8,"UTF-16LE");}catch(const std::runtime_error&){wrongEncoding=true;}assert(wrongEncoding);
+ auto preamble=parseCsv("metadata\ntime,code,\n1,A,\n2,B\n3,C,unexpected\n",',',nullptr,2,true);
+ assert(preamble.rows.size()==2&&preamble.errors.size()==1&&preamble.skippedPreamble==1);
+ assert(preamble.recordNumbers[0]==3&&preamble.recordNumbers[1]==4);
+ auto accounted=importEvents(preamble,ImportOptions{},"synthetic.csv","SC");
+ assert(accounted.events.size()==2&&accounted.errors.size()==1&&accounted.events[0].row==3);
+ bool single=false;try{detectCsv("entire header\none record\n");}catch(const std::runtime_error&){single=true;}assert(single);
  bool drew=false;
  Panel panel([]{return QStringList{"synthetic_signal"};},[&](QStringList names,double lo,double hi){
    assert(names==QStringList{"synthetic_signal"});assert(hi-lo==120);drew=true;
