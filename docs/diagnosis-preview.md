@@ -1,9 +1,21 @@
-# 本地故障分析预览 1
+# Local diagnosis preview 2 (3.17.0.19)
 
-基于 3.17.0.18；分支 feature/diagnosis-foundation，二进制版本 3.17.0.19，Releases 标签 v3.17.0.19-preview.1。
+Stable product baseline remains 3.17.0.18. This preview completes the shared event-import and evidence-navigation milestone, not the four automatic diagnostic algorithms.
 
-已实现：分析菜单独立入口、当前已加载录波选点、可选 SC 与 ActionList CSV/TXT 事件导入、用户确认列/编码/分隔符/时区/Unix 秒或毫秒、SC 手动偏移、事件窗口表与 CSV 导出、本地 SQLite 草稿包概览、返回已有录波视图查看证据。原始事件与对齐时间并列显示，状态原文不猜测触发/恢复。
+## Import workflow
+1. Analysis → Fault analysis (preview); choose SC or ActionList.
+2. Auto detection checks UTF-8/BOM, GB18030 and BOM/structured UTF-16, plus comma, tab and semicolon CSV structure. A successful character decode alone is not accepted as a valid import.
+3. Inspect the first 20 parsed rows in the bounded dialog. If necessary change encoding, delimiter or the 1-based **nonempty CSV record** containing the header, then regenerate the preview.
+4. Select distinct time and code/action columns; state and description are optional. Choose numeric seconds/milliseconds, timezone and custom text format explicitly. Confirmation requires a parseable preview event.
+5. Strict import is the default. The opt-in valid-only mode retains rejection reasons and original nonempty record numbers; malformed quotes always abort. Only surplus empty trailing fields may be trimmed. Nonempty extra fields are never merged.
+6. SC and ActionList keep separate local mapping preferences. Reimporting the same source and kind replaces its records; importing another file preserves existing sources.
 
-限制：只支持带表头的逗号或 Tab 事件文件，64 MiB 导入上限；不宣称兼容尚未读取的真实样本格式。主界面先加载录波；StatusCode/ActionList 非必需。证据查看会将录波窗口切到当前事件并关闭条件筛选，以保留故障过程。未实现自动规则启用、四类故障检测器、自动推荐测点、标记层、批量与网络任务。
+No actual user data or source paths are stored in the repository. Synthetic tests cover both dialogs and background event publication, encodings, delimiters, multiline quoted fields, invalid shape, wrong UTF-16, preamble records and rejection accounting.
 
-稳定版维持 3.17.0.18。该包为预览，不产生自动故障原因结论。真实样本始终不进入公开仓库或 CI。
+## Evidence navigation
+Previous/next event buttons use aligned event times. Evidence selections persist when revisiting the page. The recording view shows the selected center as a neutral marker, not as an inferred trigger or root cause. A collapsible coverage summary counts finite original samples, invalid values and largest adjacent valid-sample gaps within the requested window. Endpoint coverage is descriptive and does not establish uninterrupted coverage or sensor validity.
+
+## Remaining limitations
+Actual uploaded SC, ActionList and TR sample compatibility has not been verified because the execution environment is unavailable. Four-family automatic diagnosis, validated rule execution, automatic trigger/recovery interpretation, batch/network jobs and full immutable diagnostic snapshots are subsequent milestones. The event reader retains the 64 MiB file limit. User recordings/configuration tables are not included in CI or releases.
+
+Use the portable preview to compare against stable 3.17.0.18. The installer shares its application ID and installation directory with prior versions.

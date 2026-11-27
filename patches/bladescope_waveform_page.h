@@ -1049,6 +1049,9 @@ private:
 
   void resetAnalysisPanel()
   {
+    if(auto* detail=findChild<QLabel*>("bladeDiagnosticCoverage"))detail->hide();
+    if(auto* toggle=findChild<QPushButton*>("bladeDiagnosticCoverageToggle"))toggle->hide();
+    if(canvas)for(auto* item:canvas->itemList())if(item->rtti()==QwtPlotItem::Rtti_PlotMarker&&item->title().text()==QStringLiteral("诊断事件中心"))delete item;
     delete analysisPanel;
     analysisPanel = nullptr;
     if (plot) plot->setVisible(!shown->numeric.empty());
@@ -1651,9 +1654,6 @@ private:
     const double hi = endEnabled->isChecked() ? end->dateTime().toMSecsSinceEpoch()/1000. : infinity;
     if (lo > hi) { status->setText(QStringLiteral("开始时间不能晚于结束时间。")); return false; }
     resetAnalysisPanel();
-    if(auto* detail=findChild<QLabel*>("bladeDiagnosticCoverage"))detail->hide();
-    if(auto* toggle=findChild<QPushButton*>("bladeDiagnosticCoverageToggle"))toggle->hide();
-    if(canvas)for(auto* item:canvas->itemList())if(item->rtti()==QwtPlotItem::Rtti_PlotMarker&&item->title().text()==QStringLiteral("诊断事件中心"))delete item;
     if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->hide();plot->show();
     plot->removeAllCurves();
     shown->numeric.clear();

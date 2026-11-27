@@ -2,7 +2,7 @@ name: Windows x64 build (PlotJuggler 3.17.0)
 
 on:
   push:
-    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56, feature/analysis-ui-remediation, feature/shared-workspace-18, feature/diagnosis-foundation ]
+    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56, feature/analysis-ui-remediation, feature/shared-workspace-18, feature/diagnosis-foundation, feature/diagnosis-import-preview2 ]
     paths:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
@@ -76,6 +76,18 @@ jobs:
           arch: win64_msvc2019_64
           # Qt WebSockets is included in the Qt 5.15 desktop archive; avoid unavailable add-on packages.
           cache: true
+
+      - name: Verify SC and ActionList import dialogs before the full build
+        shell: pwsh
+        run: |
+          cmake -S customization/tests/diagnosis-qt -B diagnosis-qt-tests -A x64 -DQt5_DIR="$env:Qt5_DIR"
+          if ($LASTEXITCODE -ne 0) { throw "Event test configuration failed" }
+          cmake --build diagnosis-qt-tests --config Release
+          if ($LASTEXITCODE -ne 0) { throw "Event test compilation failed" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & diagnosis-qt-tests/Release/diagnosis-qt-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "SC / ActionList import regression failed" }
+          Remove-Item Env:QT_QPA_PLATFORM
 
       - name: Embed approved BladeScope icon in Windows EXE resources
         shell: pwsh
@@ -282,12 +294,12 @@ jobs:
           retention-days: 30
 
       - name: Publish local diagnosis preview after installed acceptance
-        if: github.ref_name == 'feature/diagnosis-foundation'
+        if: github.ref_name == 'feature/diagnosis-import-preview2'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $versionTag = "v3.17.0.19-preview.1"
+          $versionTag = "v3.17.0.19-preview.2"
           $portable = "BladeScope-3.17.0.19-win64-portable.zip"
           $installer = "customization/installer/BladeScope-3.17.0.19-win64-Setup.exe"
           $bundle = "BladeScope-3.17.0.19-win64.zip"
@@ -298,8 +310,9 @@ jobs:
 
           新增“分析 → 故障分析（预览）”：使用当前已加载录波，导入可选 SC / ActionList CSV，明确列、编码、时区与时间单位，手动 SC 对时，查看和导出事件窗口，选择测点返回录波视图查看证据。
           支持检查本地 SQLite 草稿规则包。未启用四类自动诊断、自动故障结论、批量诊断或自动 SC 状态解释。
-          合成解析测试及 Windows 安装界面检查通过；用户真实故障样本尚未验证。不包含用户上传的配置表、机组台账或录波。
+          新增 SC / ActionList 共用编码与分隔符识别、受限尺寸的导入预览、前置记录选择、逐条拒绝原因、可选说明列及分别保存映射。新增前后事件导航、原始录波窗口覆盖详情和事件中心标记。
+          合成解析与导入对话框测试及 Windows 安装界面检查通过；用户真实故障样本尚未验证。不包含用户上传的配置表、机组台账或录波。
           安装包和便携版用于预览反馈。需导入已有中文点表。
           '@ | Set-Content -LiteralPath $notes -Encoding UTF8
-          gh release create $versionTag $installer $portable $bundle --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "BladeScope 3.17.0.19 诊断基础预览 1" --notes-file $notes --prerelease
+          gh release create $versionTag $installer $portable $bundle --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "BladeScope 3.17.0.19 事件导入与证据预览 2" --notes-file $notes --prerelease
           if ($LASTEXITCODE -ne 0) { throw "Release publication failed; existing releases are not overwritten" }
