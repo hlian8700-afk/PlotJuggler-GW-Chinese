@@ -54,9 +54,9 @@ class Panel final:public QWidget {
     sep.addItems({"自动","逗号","Tab","分号"});
     enc.setCurrentText(settings.value(prefix+"encoding","自动").toString());
     sep.setCurrentIndex(settings.value(prefix+"separator",0).toInt());
-    QSpinBox header;header.setRange(1,10000);header.setValue(settings.value(prefix+"header",1).toInt());
+    QSpinBox header;header.setRange(0,10000);header.setSpecialValueText("自动定位表头");header.setValue(settings.value(prefix+"header",0).toInt()==1?0:settings.value(prefix+"header",0).toInt());
     QCheckBox validOnly("仅导入有效记录（保留全部拒绝原因）");
-    f->addRow("编码",&enc);f->addRow("分隔符",&sep);f->addRow("表头：第几个非空 CSV 记录",&header);f->addRow(&validOnly);
+    f->addRow("编码",&enc);f->addRow("分隔符",&sep);f->addRow("表头：0 自动 / 非空行号",&header);f->addRow(&validOnly);
     QComboBox times,codes,states,descriptions;
     for(auto* combo:{&times,&codes,&states,&descriptions}){
       combo->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -113,14 +113,20 @@ class Panel final:public QWidget {
         const int i=combo.findText(settings.value(prefix+key).toString());combo.setCurrentIndex(i>=0?i:fallback);
         for(int j=0;j<combo.count();++j)combo.setItemData(j,combo.itemText(j),Qt::ToolTipRole);
       };
-      restore(times,"time",0);restore(codes,"code",1);restore(states,"state",0);restore(descriptions,"description",0);
+      int timeDefault=0,codeDefault=1;
+      for(int i=0;i<csv.headers.size();++i){
+        const auto name=csv.headers[i].toLower();
+        if(name=="sttriggertime"||name=="strtriggertime"||name=="triggertime"||name=="timestamp"||name=="时间")timeDefault=i;
+        if(name=="stdescription"||name=="strdescription"||name=="errorcode"||name=="faultcode"||name=="actionname"||name=="actioncode")codeDefault=i;
+      }
+      restore(times,"time",timeDefault);restore(codes,"code",codeDefault);restore(states,"state",0);restore(descriptions,"description",0);
       preview.setColumnCount(csv.headers.size());preview.setHorizontalHeaderLabels(csv.headers);
       preview.setRowCount(qMin(20,csv.rows.size()));
       for(int i=0;i<preview.rowCount();++i)for(int j=0;j<csv.headers.size();++j){
         auto* item=new QTableWidgetItem(csv.rows[i][j]);item->setToolTip(item->text());preview.setItem(i,j,item);
       }
-      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；表头记录号不等同于物理行号，多行引号字段视为一条记录。")
-        .arg(result->value.encoding).arg(result->value.separator=='\t'?"Tab":QString(result->value.separator)));
+      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；表头记录号不等同于物理行号，已跳过前置说明 %3 行和结束标记 %4 条。DT# 时间自动识别，时区仍须确认。")
+        .arg(result->value.encoding).arg(result->value.separator=='\t'?"Tab":QString(result->value.separator)).arg(csv.skippedPreamble).arg(csv.skippedFooter));
       ready=true;validate();
     };
     connect(&retry,&QPushButton::clicked,&d,rebuild);

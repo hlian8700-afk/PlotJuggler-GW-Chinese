@@ -41,6 +41,29 @@ int main(int argc,char** argv){
  ImportOptions desc;desc.descriptionColumn=2;
  auto explained=importEvents(parseCsv("time,code,description\n1,A,detail\n"),desc,"synthetic.csv","ActionList");
  assert(explained.events[0].description=="detail");
+
+ // Vendor metadata is deliberately not CSV (including an unmatched quote).
+ const auto vendorText=QString::fromUtf8(
+   "SeqNo,WindParkName: DEMO\nWindTurbineNumber: 9\nTurbineStyle: Demo\nProgramVersion: \"legacy\n"
+   "ParameterVersion: Demo\nErrorCodeVersion: Demo\nController: Demo\n"
+   "SeqNo,stTriggerTime,stDescription,iOperation\n"
+   "1,DT#2025-02-08-14:10:43.778,DEMO_FAULT,14\n"
+   "2,DT#2025-02-08-14:10:44.000,DEMO_EVENT,1\n//END\n");
+ auto vendorCsv=detectCsv(vendorText.toUtf8()).csv;
+ assert(vendorCsv.skippedPreamble==7&&vendorCsv.skippedFooter==1&&vendorCsv.rows.size()==2);
+ assert(vendorCsv.recordNumbers[0]==9);
+ auto manualVendor=parseCsv(vendorText,',',nullptr,8);assert(manualVendor.rows==vendorCsv.rows);
+ ImportOptions vendorOptions;vendorOptions.timeColumn=1;vendorOptions.codeColumn=2;vendorOptions.utcOffsetSeconds=28800;
+ auto vendorEvents=importEvents(vendorCsv,vendorOptions,"synthetic.csv","SC");
+ assert(vendorEvents.errors.empty()&&vendorEvents.events.size()==2);
+ assert(iso(vendorEvents.events[0].original)=="2025-02-08 06:10:43.778");
+ assert(parseTime("DT#2025-2-8-14:10:43.7",vendorOptions)==parseTime("2025-02-08T06:10:43.700Z",vendorOptions));
+ assert(parseTime("DATE_AND_TIME#2025-02-08-14:10:43.778_000_000+08:00",vendorOptions)==vendorEvents.events[0].original);
+ bool precision=false;try{parseTime("DT#2025-02-08-14:10:43.778001",vendorOptions);}catch(...){precision=true;}assert(precision);
+ bool afterFooter=false;try{parseCsv("time,code\n1,A\n//END\n2,B\n");}catch(...){afterFooter=true;}assert(afterFooter);
+ auto quotedEnd=parseCsv("time,code\n1,\"first\n//END\nlast\"\n");
+ assert(quotedEnd.rows.size()==1&&quotedEnd.rows[0][1].contains("//END")&&quotedEnd.skippedFooter==0);
+
  bool drew=false;
  Panel panel([]{return QStringList{"synthetic_signal"};},[&](QStringList names,double lo,double hi){
    assert(names==QStringList{"synthetic_signal"});assert(hi-lo==120);drew=true;
@@ -51,20 +74,20 @@ int main(int argc,char** argv){
  assert(drew);assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->columnCount()==8);
  // Exercise the real bounded mapping dialog and asynchronous publication for both file kinds.
  for(const auto& kind:QStringList{"SC","ActionList"}){
-   QTemporaryFile input;assert(input.open());input.write("time;code;description\n2025-02-08T12:00:00Z;A;detail\n");input.flush();
+   QTemporaryFile input;assert(input.open());input.write(vendorText.toUtf8());input.flush();
    bool accepted=false;QTimer confirm;confirm.setInterval(20);
    QObject::connect(&confirm,&QTimer::timeout,&panel,[&]{
      auto* dialog=panel.findChild<QDialog*>("diagnosisImportDialog");if(!dialog)return;
      auto* preview=dialog->findChild<QTableWidget*>("diagnosisImportPreview");
      auto* buttons=dialog->findChild<QDialogButtonBox*>();
-     if(!preview||preview->rowCount()!=1||!buttons||!buttons->button(QDialogButtonBox::Ok)->isEnabled())return;
+     if(!preview||preview->rowCount()!=2||!buttons||!buttons->button(QDialogButtonBox::Ok)->isEnabled())return;
      assert(dialog->width()<=QGuiApplication::primaryScreen()->availableGeometry().width());
      accepted=true;confirm.stop();buttons->button(QDialogButtonBox::Ok)->click();
    });
    QTimer::singleShot(10000,&confirm,[&]{confirm.stop();for(auto* d:panel.findChildren<QDialog*>())d->reject();});
    confirm.start();panel.importEventFile(input.fileName(),kind);assert(accepted);
    QEventLoop waiting;QTimer check;check.setInterval(20);
-   const int expected=kind=="SC"?1:2;
+   const int expected=kind=="SC"?2:4;
    QObject::connect(&check,&QTimer::timeout,&waiting,[&]{if(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected)waiting.quit();});
    QTimer::singleShot(10000,&waiting,&QEventLoop::quit);check.start();waiting.exec();
    assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected);

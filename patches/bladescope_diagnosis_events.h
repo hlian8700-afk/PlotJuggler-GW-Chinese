@@ -6,15 +6,53 @@
 #include "bladescope_diagnosis_core.h"
 
 namespace BladeDiagnosisUI {
-struct Csv {QStringList headers;QVector<QStringList> rows;QVector<int> recordNumbers;QStringList errors;int skippedPreamble=0,trimmedTrailing=0;};
+struct Csv {QStringList headers;QVector<QStringList> rows;QVector<int> recordNumbers;QStringList errors;int skippedPreamble=0,trimmedTrailing=0,skippedFooter=0;};
 inline Csv parseCsv(QString text,QChar separator=QChar(','),const std::atomic_bool* cancel=nullptr,int headerRecord=1,bool validOnly=false) {
   if(text.startsWith(QChar(0xfeff)))text.remove(0,1);
-  QVector<QStringList> records;QStringList row;QString cell;
+  // Preamble is line-oriented vendor metadata, not CSV. Skip it before quote validation.
+  if(headerRecord<0)throw std::runtime_error("表头记录号不能为负数");
+  if(headerRecord==0){
+    int nonempty=0;bool found=false;
+    const auto lines=text.split(QRegularExpression("\\r\\n|\\n|\\r"));
+    for(const auto& line:lines){
+      if(line.trimmed().isEmpty())continue;
+      if(++nonempty>256)break;
+      QStringList names=line.split(separator);
+      bool time=false,code=false;
+      for(auto name:names){
+        name=name.trimmed();if(name.startsWith('"')&&name.endsWith('"'))name=name.mid(1,name.size()-2);
+        const auto key=name.toLower();
+        time=time||QRegularExpression("^(st|str)?(trigger(time)?|timestamp|datetime|time)$").match(key).hasMatch()||key=="时间"||key=="触发时间";
+        code=code||QRegularExpression("^(st|str)?(description|code|errorcode|faultcode|action|actionname|actioncode)$").match(key).hasMatch()||key=="代码"||key=="故障代码"||key=="动作";
+      }
+      if(time&&code){headerRecord=nonempty;found=true;break;}
+    }
+    if(!found)throw std::runtime_error("未自动找到时间与代码/动作表头，请手动指定表头非空行号");
+  }
+  const int preamble=headerRecord-1;
+  int skipped=0,begin=0;
+  while(skipped<preamble&&begin<text.size()){
+    int end=begin;while(end<text.size()&&text[end]!='\r'&&text[end]!='\n')++end;
+    if(!text.mid(begin,end-begin).trimmed().isEmpty())++skipped;
+    if(end<text.size()&&text[end]=='\r'&&end+1<text.size()&&text[end+1]=='\n')++end;
+    begin=end<text.size()?end+1:end;
+  }
+  if(skipped!=preamble||begin>=text.size())throw std::runtime_error("表头记录号超出文件范围");
+  text=text.mid(begin);
+  QVector<QStringList> records;QStringList row;QString cell;int footer=0;
   bool quoted=false,closed=false;qsizetype progress=0;
   for(int i=0;i<text.size();++i){
     if((++progress%8192)==0&&cancel&&cancel->load())throw std::runtime_error("已取消");
     const auto c=text[i];
     if(quoted){if(c=='"'){if(i+1<text.size()&&text[i+1]=='"'){cell+='"';++i;}else{quoted=false;closed=true;}}else cell+=c;continue;}
+    if(row.isEmpty()&&cell.isEmpty()&&!closed&&c=='/'){
+      int end=i;while(end<text.size()&&text[end]!='\r'&&text[end]!='\n')++end;
+      const auto line=text.mid(i,end-i).trimmed();
+      if(QRegularExpression("^//END[;,\\t ]*$").match(line).hasMatch()){
+        if(!text.mid(end).trimmed().isEmpty())throw std::runtime_error("//END 之后仍有内容，请检查文件边界");
+        footer=1;break;
+      }
+    }
     if(c=='"'){if(!cell.isEmpty()||closed)throw std::runtime_error("CSV 引号位置无效");quoted=true;continue;}
     if(c==separator){row<<cell;cell.clear();closed=false;continue;}
     if(c=='\r'||c=='\n'){
@@ -28,9 +66,7 @@ inline Csv parseCsv(QString text,QChar separator=QChar(','),const std::atomic_bo
   if(quoted)throw std::runtime_error("CSV 引号未闭合");
   row<<cell;if(std::any_of(row.begin(),row.end(),[](const QString& v){return !v.trimmed().isEmpty();}))records<<row;
   if(records.empty())throw std::runtime_error("CSV 没有表头");
-  if(headerRecord<1||headerRecord>records.size())throw std::runtime_error("表头记录号超出文件范围");
-  Csv out;out.skippedPreamble=headerRecord-1;
-  for(int i=1;i<headerRecord;++i)records.removeFirst();
+  Csv out;out.skippedPreamble=preamble;out.skippedFooter=footer;
   out.headers=records.takeFirst();
   while(!out.headers.empty()&&out.headers.last().trimmed().isEmpty()){out.headers.removeLast();++out.trimmedTrailing;}
   if(out.headers.size()<2)throw std::runtime_error("未识别出至少两列；请检查编码、分隔符和表头记录号");
@@ -72,7 +108,23 @@ struct ImportOptions {
   QString dateFormat="yyyy-MM-dd HH:mm:ss.zzz";
 };
 inline qint64 parseTime(QString value,const ImportOptions& o) {
-  value=value.trimmed();bool numeric=false;double number=value.toDouble(&numeric);
+  value=value.trimmed();
+  const bool iec=value.startsWith("DT#",Qt::CaseInsensitive)||value.startsWith("DATE_AND_TIME#",Qt::CaseInsensitive);
+  if(iec){
+    value=value.mid(value.indexOf('#')+1);
+    // IEC date/time uses a hyphen between the date and clock, with an optional fractional second.
+    const auto match=QRegularExpression("^(\\d{4}-\\d{1,2}-\\d{1,2})[- T](\\d{1,2}:\\d{2}:\\d{2})(?:[.,](\\d{1,9}(?:_\\d{3}){0,2}))?(Z|[+-]\\d{2}:?\\d{2})?$",QRegularExpression::CaseInsensitiveOption).match(value);
+    if(!match.hasMatch())throw std::runtime_error("DT# 时间格式不支持，请检查完整时间值");
+    const auto date=QDate::fromString(match.captured(1),"yyyy-M-d");
+    const auto time=QTime::fromString(match.captured(2),"H:mm:ss");
+    if(!date.isValid()||!time.isValid())throw std::runtime_error("DT# 日期或时间无效");
+    auto fraction=match.captured(3);fraction.remove('_');
+    if(fraction.size()>9)throw std::runtime_error("DT# 小数秒超过支持精度");
+    if(fraction.size()>3&&fraction.mid(3).contains(QRegularExpression("[1-9]")))
+      throw std::runtime_error("DT# 小数秒超过毫秒精度，拒绝静默截断");
+    value=date.toString("yyyy-MM-dd")+"T"+time.toString("HH:mm:ss")+"."+fraction.left(3).leftJustified(3,'0')+match.captured(4).toUpper();
+  }
+  bool numeric=false;double number=value.toDouble(&numeric);
   if(numeric){
     const long double ms=static_cast<long double>(number)*(o.numericMilliseconds?1.L:1000.L);
     if(!std::isfinite(number)||ms<-62135596800000.L||ms>253402300799999.L)
@@ -89,7 +141,7 @@ inline qint64 parseTime(QString value,const ImportOptions& o) {
   return date.toUTC().toMSecsSinceEpoch();
 }
 struct CsvDetection {Csv csv;QString encoding;QChar separator;};
-inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动",QChar separator=QChar(),int headerRecord=1,bool validOnly=false,const std::atomic_bool* cancel=nullptr){
+inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动",QChar separator=QChar(),int headerRecord=0,bool validOnly=false,const std::atomic_bool* cancel=nullptr){
   QStringList encodings;
   if(requested!="自动")encodings<<requested;
   else if(bytes.startsWith(QByteArray::fromHex("fffe")))encodings<<"UTF-16LE";
