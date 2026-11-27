@@ -39,6 +39,13 @@ class ImportTests(unittest.TestCase):
             with self.assertRaises(ValueError):m.import_package(archive,output)
             self.assertFalse(output.exists())
 
+    def test_unrecognised_archive_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=pathlib.Path(folder);archive=root/"wrong.zip";output=root/"rules.sqlite"
+            with zipfile.ZipFile(archive,"w") as z:z.writestr("recording.txt","not configuration")
+            with self.assertRaises(ValueError):m.import_package(archive,output)
+            self.assertFalse(output.exists())
+
     def test_csv_newlines(self):
         rows=list(m.csv_rows('code,note\nx,"line1\nline2"\n'.encode("utf-8-sig")))
         self.assertEqual(rows[1][2][1],"line1\nline2")

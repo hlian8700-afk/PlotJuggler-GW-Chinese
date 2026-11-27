@@ -111,6 +111,7 @@ def import_package(archive,output):
                 if name not in EXPECTED:continue
                 if name in members:raise ValueError("Duplicate configuration basename: "+name)
                 members[name]=item
+            if not members:raise ValueError("No recognised configuration files in archive")
             for name in sorted(EXPECTED-set(members)):
                 db.execute("INSERT INTO issues VALUES(?,?,?,?,?)",(name,"",0,"missing_file","Expected configuration file is missing"))
             for name,item in sorted(members.items()):
@@ -158,7 +159,9 @@ def import_package(archive,output):
                 db.execute("INSERT INTO issues VALUES(?,?,?,?,?)",("", "",0,"code_conflict",
                   json.dumps({"model":model,"code":code},ensure_ascii=False)))
         count=db.execute("SELECT count(*) FROM records").fetchone()[0]
-        db.commit();db.close();db=None;os.replace(temporary,output)
+        db.commit();db.close();db=None
+        os.link(temporary,output)  # Atomic no-clobber publication on the same filesystem.
+        os.unlink(temporary)
         return count
     except BaseException:
         if db is not None:db.close()
