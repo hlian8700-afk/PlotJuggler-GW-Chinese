@@ -664,7 +664,7 @@ class Panel : public QWidget
   QVector<QStringList> yawMetadata() const
   {
     QVector<QStringList> rows{{"元信息","值"},{"版本","3.17.0.16"},{"当前视图",yawView->currentText()},
-      {"单位",yawUnit->currentText()},{"风速段",yawWind->currentText()}};
+      {"残差显示单位",yawUnit->currentText()},{"配对指标单位","kW"},{"风速段",yawWind->currentText()}};
     if(!yawActive)return rows;
     const auto& r=*yawActive;const auto& c=r.config;
     rows.append({"基线来源",c.baselineMode?"标准曲线参考":"实测零附近角度基线"});
@@ -1194,6 +1194,7 @@ public:
     plotSplit=new QSplitter(Qt::Vertical);layout->addWidget(plotSplit,1);
     plot=new AnalysisPlot(shown,this);plot->qwtPlot()->setObjectName("bladeFitPlot");plotSplit->addWidget(plot);plot->activateGrid(true);plot->activateLegend(true);
     yawDifference=new AnalysisPlot(yawDifferenceData,this);plotSplit->addWidget(yawDifference);yawDifference->hide();
+    QMetaObject::invokeMethod(yawDifference,"setModeXY",Qt::DirectConnection,Q_ARG(bool,true));
     yawDifference->activateGrid(true);yawDifference->setContextMenuEnabled(false);plotSplit->setStretchFactor(0,3);plotSplit->setStretchFactor(1,1);
     plot->setContextMenuEnabled(false);plot->qwtPlot()->setAcceptDrops(false);
     canvas=plot->qwtPlot()->canvas();rubber=new SelectionGuide(canvas);
