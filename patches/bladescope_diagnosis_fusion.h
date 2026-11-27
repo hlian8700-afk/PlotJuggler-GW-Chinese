@@ -11,6 +11,10 @@ inline bool matchesCode(const CodeRequirement& requirement,const EventRow& event
   if(requirement.mode=="action_token"){for(const auto& token:code.split(';'))if(token.trimmed()==requirement.code)return true;}
   return false;
 }
+inline QString eventSnapshotHash(const QVector<EventRow>& events,const std::atomic_bool* cancelled=nullptr){
+  QCryptographicHash hash(QCryptographicHash::Sha256);hash.addData("bladescope-events-json-v1\n");
+  for(const auto& event:events){if(BladeDiagnosis::trialCancelled(cancelled))return {};const QJsonObject row{{"kind",event.kind},{"code",event.code},{"source",event.source},{"record",event.row},{"original_ms",double(event.original)},{"aligned_ms",double(event.aligned)},{"original_time_text",event.originalTimeText},{"state",event.state},{"description",event.description}};hash.addData(QJsonDocument(row).toJson(QJsonDocument::Compact));hash.addData("\n");}return QString::fromLatin1(hash.result().toHex());
+}
 inline QVector<CandidateResult> runCandidateFusion(const ConditionPack& pack,const BladeDiagnosis::Scope& actual,
              const QVector<ConditionResult>& calculations,const QString& calculationHash,const QVector<EventRow>& events,
              BladeDiagnosis::Interval window,bool includePending,bool eventsConfirmed,bool scComplete,bool actionsComplete,const std::atomic_bool* cancel=nullptr){

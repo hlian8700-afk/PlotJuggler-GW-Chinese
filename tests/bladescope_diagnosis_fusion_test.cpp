@@ -7,6 +7,7 @@ int main(){auto p=sample();ConditionResult good;good.id="wave";good.ran=true;goo
  assert(run(logs,true,false)[0].truth==Truth::Yes);
  assert(run(logs,false,false)[0].truth==Truth::Unknown);
  assert(run({},true,false)[0].truth==Truth::Unknown);assert(run({},true,true)[0].truth==Truth::No);
+ const auto logHash=eventSnapshotHash(logs);auto shifted=logs;shifted[0].aligned+=1;assert(logHash!=eventSnapshotHash(shifted));
  auto outside=logs;outside[0].aligned=1001;assert(run(outside,true,false)[0].truth==Truth::Unknown);
  auto prefix=logs;prefix[0].code="01000101_SC_DEMO";assert(run(prefix,true,false)[0].truth==Truth::Unknown);
  assert(runCandidateFusion(p,scope,values,hash,logs,{0,1000},false,true,false,false)[0].status==QString::fromUtf8("待验证未执行"));
