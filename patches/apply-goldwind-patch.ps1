@@ -1836,10 +1836,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.17"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.18"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.17") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.18") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2127,6 +2127,9 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
     }
     auto* scroll = qobject_cast<QScrollArea*>(panel->parentWidget()->parentWidget());
     if (scroll) ui->widgetStack->setCurrentWidget(scroll);
+    if(qApp->property("bladePendingCurveConfig").isValid()){static_cast<BladeFitUI::Panel*>(panel)->restoreWorkspaceConfiguration(qApp->property("bladePendingCurveConfig").toJsonObject());qApp->setProperty("bladePendingCurveConfig",QVariant());}
+    auto* tags=ui->widgetStack->findChild<QWidget*>("bladeWaveformPage");
+    if(tags)static_cast<BladeFitUI::Panel*>(panel)->setWorkspaceContext(static_cast<BladeWaveform::Page*>(tags)->workspaceState());
     static_cast<BladeFitUI::Panel*>(panel)->enter();
   };
   auto* curveAnalysisAction = ui->menuTools->addAction(QStringLiteral("曲线分析"));
@@ -2146,8 +2149,16 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
   ui->leftLayout->removeWidget(_curvelist_widget);
   _curvelist_widget->hide();
   ui->leftLayout->insertWidget(labelIndex, sharedTags, 1);
+  waveform->activateRecording=[this,waveform]{ui->widgetStack->setCurrentWidget(waveform);waveform->setMode(true,true);};
+  const auto currentFit=[this]() -> BladeFitUI::Panel* {auto* widget=ui->widgetStack->findChild<QWidget*>("bladeFitPanel");return widget?static_cast<BladeFitUI::Panel*>(widget):nullptr;};
+  waveform->curvePlot=[currentFit](QJsonObject state){if(auto* fit=currentFit())fit->plotWorkspace(state);};
+  waveform->curveStatistics=[currentFit]{if(auto* fit=currentFit())fit->showWorkspaceStatistics();};
+  waveform->associateField=[currentFit](QString field,int role){if(auto* fit=currentFit())fit->associateWorkspaceField(field,role);};
+  waveform->curveConfiguration=[currentFit]{auto* fit=currentFit();return fit?fit->workspaceConfiguration():qApp->property("bladePendingCurveConfig").toJsonObject();};
+  waveform->restoreCurveConfiguration=[currentFit](QJsonObject config){if(config.isEmpty())return;if(auto* fit=currentFit())fit->restoreWorkspaceConfiguration(config);else qApp->setProperty("bladePendingCurveConfig",config);};
   waveform->setMode(false, true);
   connect(ui->widgetStack, &QStackedWidget::currentChanged, waveform, [this, waveform](int index) {
+    waveform->setCurveMode(ui->widgetStack->currentWidget()->findChild<QWidget*>("bladeFitPanel")!=nullptr);
     waveform->setMode(ui->widgetStack->currentWidget() == waveform,
                       index == 0 || ui->widgetStack->currentWidget() == waveform);
   });

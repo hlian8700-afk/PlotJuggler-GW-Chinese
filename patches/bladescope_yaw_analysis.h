@@ -167,7 +167,7 @@ template<class Day> Result analyze(const Channels& channels,const Params& p,cons
     if(i%4096==0)canceled(stop);
     ++r.input;
     const auto anchor=channels[Wind][i];const double t=anchor.x;
-    if(!std::isfinite(t)||t<p.start||t>p.end||excluded.count({Wind,i})){++r.rejected[Time];continue;}
+    if(!std::isfinite(t)||t<p.start||t>p.end||excluded.count({Wind,i})||!passesWorkspaceFilters(p,t)){++r.rejected[Time];continue;}
     auto read=[&](int role){return role==Wind?anchor.y:match(channels[role],cursors[role],t,p.tolerance,role>=Status);};
     auto aligned=[&](int role){
       read(role);size_t n=cursors[role];const auto& ch=channels[role];

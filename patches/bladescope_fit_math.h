@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <set>
 #include <stdexcept>
@@ -107,6 +108,7 @@ enum Role { Wind, Power, Rotor, Generator, Pitch, Direction, Yaw, TorquePct,
 enum Kind { M01,M02,M03,M05,M06,M11,M12,M21,M22,M23,M35,M41,M32,M34,M33,
             M51,M52,M53,M55, NKind };
 enum TorqueUnit { Percent, NewtonMetre, KiloNewtonMetre };
+struct WorkspaceFilter { std::shared_ptr<Points> samples; int operation=0; double threshold=0; };
 struct Params
 {
   double rated=0, diameter=0, rho=1.225, ratio=1, rpm=0, cutIn=3, cutOut=25,
@@ -116,10 +118,24 @@ struct Params
   bool filterState=false, generator=false, absoluteYaw=true, excludeNegative=true, rejectFlags=true;
   int torqueUnit=Percent;
   double ratedTorque=0, rpmWidth=0, torqueFitMin=0, powerFitMinRpm=0, powerFitMinPower=0;
-  bool torqueNonnegative=true;
+  bool torqueNonnegative=true, powerSmooth=true;
+  int powerSmoothWindow=11, powerMinBinSamples=3;
+  std::vector<WorkspaceFilter> workspaceFilters;
   std::map<int,std::pair<double,double>> limits;
   Points reference;
 };
+inline bool passesWorkspaceFilters(const Params& p,double t)
+{
+  for(const auto& f:p.workspaceFilters){
+    const auto& series=*f.samples;if(series.empty())return false;
+    auto it=std::lower_bound(series.begin(),series.end(),t,[](Point a,double b){return a.x<b;});
+    if(it==series.end() || (it!=series.begin() && t-(it-1)->x<=it->x-t))--it;
+    if(!std::isfinite(it->y)||std::abs(it->x-t)>p.tolerance)return false;
+    const double y=it->y,v=f.threshold;
+    if(!(f.operation==0?y>=v:f.operation==1?y<=v:f.operation==2?y>v:y<v))return false;
+  }
+  return true;
+}
 using Channels=std::array<Points,NRoles>;
 using SeriesRow=std::array<double,NRoles>;
 inline int speedRole(const Params& p) { return p.generator ? Generator : Rotor; }
@@ -209,6 +225,27 @@ inline double fittedValue(const Result& r,double x)
     if(x>=segment.front().x && x<=segment.back().x) return interpolate(segment,x);
   return missing();
 }
+inline Points shapePreserving(const Points& p)
+{
+  if(p.size()<3)return p;
+  const size_t n=p.size();std::vector<double> slope(n-1),d(n);
+  for(size_t i=0;i+1<n;++i)slope[i]=(p[i+1].y-p[i].y)/(p[i+1].x-p[i].x);
+  auto endpoint=[](double h0,double h1,double s0,double s1){
+    double v=((2*h0+h1)*s0-h0*s1)/(h0+h1);
+    if(v*s0<=0)return 0.;if(s0*s1<=0&&std::abs(v)>3*std::abs(s0))return 3*s0;return v;};
+  d[0]=endpoint(p[1].x-p[0].x,p[2].x-p[1].x,slope[0],slope[1]);
+  d[n-1]=endpoint(p[n-1].x-p[n-2].x,p[n-2].x-p[n-3].x,slope[n-2],slope[n-3]);
+  for(size_t i=1;i+1<n;++i){
+    if(slope[i-1]*slope[i]<=0)d[i]=0;
+    else{double a=p[i].x-p[i-1].x,b=p[i+1].x-p[i].x;d[i]=(3*(a+b))/((2*b+a)/slope[i-1]+(b+2*a)/slope[i]);}
+  }
+  Points out;out.reserve((n-1)*8+1);
+  for(size_t i=0;i+1<n;++i)for(int k=0;k<8;++k){
+    const double u=k/8.,h=p[i+1].x-p[i].x,u2=u*u,u3=u2*u;
+    out.push_back({p[i].x+u*h,(2*u3-3*u2+1)*p[i].y+(u3-2*u2+u)*h*d[i]+(-2*u3+3*u2)*p[i+1].y+(u3-u2)*h*d[i+1]});
+  }
+  out.push_back(p.back());return out;
+}
 inline double torqueReference(const Params& p)
 {
   return p.ratedTorque>0?p.ratedTorque:
@@ -269,18 +306,35 @@ inline void curves(int kind,const Params& p,Result& r)
   {
     std::map<long long,Bin> fitBins;
     for(const auto& point:r.raw)if(point.x>=p.powerFitMinRpm && point.y>=p.powerFitMinPower){
-      ++r.fitSamples;fitBins[static_cast<long long>(std::floor(point.x/binWidth(kind,p)))].add(point.x,point.y);
+      fitBins[static_cast<long long>(std::floor(point.x/binWidth(kind,p)))].add(point.x,point.y);
     }
     // Piecewise linear interpolation is shape preserving and cannot overshoot bin means.
     // Missing bins and fit-domain boundaries never receive invented observations.
-    Points segment;
+    Points segment;std::vector<size_t> counts;
     auto finish=[&]{if(segment.empty())return;
-      r.fitSegments.push_back(segment);r.fit.insert(r.fit.end(),segment.begin(),segment.end());
-      r.models.push_back({segment.front().x,segment.back().x,0,1,"piecewise linear interpolation of measured bin means",{}});segment.clear();};
-    long long previous=0;bool first=true;
+      Points knots=segment;
+      if(p.powerSmooth && knots.size()>2){
+        const size_t half=size_t(p.powerSmoothWindow/2);
+        for(size_t i=1;i+1<knots.size();++i){
+          long double sum=0,weight=0;
+          for(size_t j=i>half?i-half:0;j<std::min(knots.size(),i+half+1);++j){
+            const double w=double(counts[j])*(half+1-std::abs(double(i)-double(j)));sum+=w*segment[j].y;weight+=w;}
+          knots[i].y=double(sum/weight);
+        }
+      }
+      auto path=p.powerSmooth?shapePreserving(knots):knots;
+      r.fitSegments.push_back(path);r.fit.insert(r.fit.end(),path.begin(),path.end());
+      r.models.push_back({path.front().x,path.back().x,0,1,p.powerSmooth?
+        "sample-weighted local smoothing + shape-preserving Hermite interpolation":"piecewise linear interpolation of measured bin means",{}});
+      segment.clear();counts.clear();};
+    long long previous=0;bool first=true;int previousState=0;
+    const double idleLimit=std::max(1.,p.rated*.002);
     for(const auto& entry:fitBins){
-      if(!first && entry.first>previous+1)finish();
-      segment.push_back({entry.second.x,entry.second.y});previous=entry.first;first=false;
+      if(entry.second.n<size_t(p.powerMinBinSamples)){finish();first=true;continue;}
+      r.fitSamples+=entry.second.n;
+      const int state=entry.second.y<=idleLimit?0:entry.second.x>=p.rpm?2:1;
+      if(!first && (entry.first>previous+1 || (p.powerSmooth&&state!=previousState)))finish();
+      segment.push_back({entry.second.x,entry.second.y});counts.push_back(entry.second.n);previous=entry.first;previousState=state;first=false;
     }
     finish();return;
   }
@@ -421,6 +475,8 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     throw std::runtime_error("请检查分箱宽度、时间范围和匹配容差");
   if(!std::isfinite(p.rpmWidth)||p.rpmWidth<0 || !std::isfinite(p.torqueFitMin)||p.torqueFitMin<0)
     throw std::runtime_error("请检查转速分箱宽度和转矩拟合最低转速");
+  if(kind==M32 && (p.powerMinBinSamples<1||p.powerSmoothWindow<1||p.powerSmoothWindow>101||p.powerSmoothWindow%2==0))
+    throw std::runtime_error("M32 平滑窗口应为 1～101 的奇数，最低箱样本数至少为 1");
   if(kind==M32 && (!std::isfinite(p.powerFitMinRpm)||p.powerFitMinRpm<0||!std::isfinite(p.powerFitMinPower)||p.powerFitMinPower<0))
     throw std::runtime_error("M32 拟合阈值必须为非负有限数值");
   if(kind==M33||kind==M34){
@@ -461,6 +517,7 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     if((i%8192)==0 && stop && stop->load()) throw std::runtime_error("计算已取消");
     const double t=anchor[i].x;
     if(t<p.start||t>p.end) continue;
+    if(!passesWorkspaceFilters(p,t)){++out.rejected;continue;}
     SeriesRow row;
     row.fill(missing());
     auto read=[&](int role){return role==anchorRole?anchor[i].y:match(channels[role],cursors[role],t,p.tolerance,role==Status || role>=FaultFlag);};

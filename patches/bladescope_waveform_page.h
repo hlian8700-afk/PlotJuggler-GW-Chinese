@@ -1,5 +1,6 @@
 #pragma once
 #include "bladescope_analysis.h"
+#include "bladescope_fit_panel.h"
 #include "plotwidget.h"
 #include "bladescope_plot_theme.h"
 #include "bladescope_time_display.h"
@@ -113,6 +114,8 @@ public:
       connect(button, &QPushButton::clicked, this, [this, i] {
         if (analysisMode == i) return;
         analysisMode = i;
+        resetAnalysisPanel();plot->removeAllCurves();plot->hide();lastDrawSignature.clear();
+        if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty")){hint->setText(QStringLiteral("模式已切换，请点击作图更新"));hint->show();}
         refreshAnalysisParameters();
         if (i == 0)
         {
@@ -124,8 +127,15 @@ public:
         status->setText(QStringLiteral("请在左栏勾选测点，再点击「作图」。"));
       });
     }
+    auto* fitData=new QPushButton(QStringLiteral("适应数据"),this);header->addWidget(fitData);
+    auto* fullTime=new QPushButton(QStringLiteral("全量时间"),this);header->addWidget(fullTime);
+    connect(fitData,&QPushButton::clicked,this,[this]{focusTime(false);});
+    connect(fullTime,&QPushButton::clicked,this,[this]{focusTime(true);});
     header->addStretch();
     parameters = new QWidget(this);
+    parameterToggle=new QToolButton(this);parameterToggle->setText(QStringLiteral("分析参数 ▾"));parameterToggle->setCheckable(true);parameterToggle->setChecked(true);
+    header->addWidget(parameterToggle);connect(parameterToggle,&QToolButton::toggled,this,[this](bool on){parameters->setVisible(on&&analysisMode!=0);});
+    parameterSummary=new QLabel(this);parameterSummary->setWordWrap(true);root->addWidget(parameterSummary);
     root->addWidget(parameters);
     parameterForm = new QFormLayout(parameters);
     parameters->hide();
@@ -205,7 +215,7 @@ public:
     connect(openProject, &QPushButton::clicked, this, [this] { openWaveformProject(); });
     side->addWidget(analysisControls);
     connect(filter, &QPushButton::clicked, this, [this] { editConditions(); });
-    connect(statistics, &QPushButton::clicked, this, [this] { showStatistics(); });
+    connect(statistics, &QPushButton::clicked, this, [this] { if(curveMode&&curveStatistics)curveStatistics();else showStatistics(); });
     plot = new PlotWidget(*shown, this);
     connect(plot, &QObject::destroyed, [hold = shown] {});
     auto* emptyHint=new QLabel(QStringLiteral("请选择测点并点击「作图」"),this);
@@ -218,7 +228,7 @@ public:
       canvas->canvas()->setMouseTracking(true);
       canvas->canvas()->installEventFilter(this);
     }
-    connect(groups, QOverload<int>::of(&QComboBox::activated), this, [this](int) { refreshTags(); });
+    connect(groups, QOverload<int>::of(&QComboBox::activated), this, [this](int) { refreshTags(true); });
     connect(search, &QLineEdit::textChanged, this, [this](const QString& value) {
       Q_UNUSED(value);
       filterTags();
@@ -228,6 +238,8 @@ public:
       refreshGroups();
     });
     connect(generate, &QPushButton::clicked, this, [this, timePlot] {
+      if(curveMode&&curvePlot){curvePlot(workspaceState());return;}
+      if(!tags->waveform&&activateRecording)activateRecording();
       const auto fields = checkedFields();
       if (tags->waveform) { draw(fields); return; }
       if (fields.isEmpty() || fields.size() > 16)
@@ -254,16 +266,51 @@ public:
       applyStyle();
       QToolTip::hideText();
     });
-    connect(tags, &QListWidget::itemChanged, this, [this] { refreshAnalysisParameters(); });
+    connect(tags, &QListWidget::itemChanged, this, [this] { refreshAnalysisParameters();status->setText(QStringLiteral("勾选已修改，请点击作图更新")); });
+    tags->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tags,&QWidget::customContextMenuRequested,this,[this](QPoint pos){
+      if(!curveMode||!associateField)return;auto* item=tags->itemAt(pos);if(!item)return;
+      QMenu menu;for(int role=0;role<BladeFit::NRoles;++role){
+        auto* action=menu.addAction(QStringLiteral("关联为：")+BladeFitUI::roles()[role]);
+        connect(action,&QAction::triggered,this,[this,item,role]{associateField(item->data(Qt::UserRole).toString(),role);});}
+      menu.exec(tags->mapToGlobal(pos));
+    });
     refreshGroups();
     if (parent && qEnvironmentVariableIsSet("BLADESCOPE_FIT_ACCEPTANCE_OUTPUT"))
       verifyWorkspace();
   }
 
+  std::function<void(QJsonObject)> curvePlot;
+  std::function<void()> curveStatistics,activateRecording;
+  std::function<void(QString,int)> associateField;
+  std::function<QJsonObject()> curveConfiguration;
+  std::function<void(QJsonObject)> restoreCurveConfiguration;
+  QStringList availableFields()const {QStringList names;for(const auto& entry:source.numeric)names<<QString::fromStdString(entry.first);return names;}
+  QJsonObject workspaceState()const {
+    QJsonArray filters;for(const auto& c:conditions)filters.append(QJsonObject{{"channel",c.channel},{"operation",c.operation},{"threshold",c.threshold},{"enabled",c.enabled}});
+    QJsonObject state{{"conditions",filters},{"filterEnabled",filterEnabled},{"tolerance",matchTolerance}};
+    if(startEnabled->isChecked())state["start"]=start->dateTime().toMSecsSinceEpoch()/1000.;
+    if(endEnabled->isChecked())state["end"]=end->dateTime().toMSecsSinceEpoch()/1000.;
+    return state;
+  }
+  void setCurveMode(bool on){curveMode=on;updateTimeControls();}
+  void focusTime(bool all){
+    double lo=std::numeric_limits<double>::infinity(),hi=-lo;
+    const auto& data=all?source:*shown;
+    for(const auto& item:data.numeric){if(!all&&!summaries.contains(QString::fromStdString(item.first)))continue;
+      const auto& s=item.second;if(s.size()){lo=std::min(lo,s.front().x);hi=std::max(hi,s.back().x);}}
+    if(!std::isfinite(lo)||!std::isfinite(hi))return;
+    if(lo==hi){lo-=.5;hi+=.5;}
+    for(auto* target:findChildren<PlotWidget*>()){
+      if(target->isXYPlot()||target->isHidden())continue;
+      auto rect=target->currentBoundingRect();rect.setLeft(lo-target->timeOffset());rect.setRight(hi-target->timeOffset());
+      target->setZoomRectangle(rect,false);target->replot();
+    }
+  }
   void setMode(bool waveform, bool plotting)
   {
     tags->waveform = waveform;
-    generate->setVisible(plotting);
+    Q_UNUSED(plotting);generate->setVisible(true);
     updateTimeControls();
   }
 
@@ -393,7 +440,7 @@ private:
       const auto title = label.isEmpty() || labelMode->currentIndex() == 0 ? name :
                          labelMode->currentIndex() == 1 ? label : label + QStringLiteral("（") + name + QStringLiteral("）");
       auto* item = new QListWidgetItem(title, tags);
-      item->setData(Qt::UserRole, name);
+      item->setData(Qt::UserRole, name);item->setToolTip(name);
       item->setCheckState(checked.contains(name) ? Qt::Checked : Qt::Unchecked);
       item->setData(Qt::UserRole + 1, label);
       const auto category = systems.value(name, name.section('.', 0, 0)).toString();
@@ -422,7 +469,7 @@ private:
 
   void updateTimeControls()
   {
-    const bool showTime = tags->waveform && tags->count() > 0;
+    const bool showTime = true;
     if (!showTime && tags->count() == 0)
     {
       startEnabled->setChecked(false);
@@ -433,23 +480,24 @@ private:
     start->setVisible(showTime);
     end->setVisible(showTime);
     rollControls->setVisible(showTime);
-    analysisControls->setVisible(tags->waveform);
+    analysisControls->setVisible(true);
     analysisControls->setEnabled(tags->count() > 0);
-    previous->setEnabled(!plottedFields.isEmpty());
-    next->setEnabled(!plottedFields.isEmpty());
-    style->setVisible(tags->waveform);
+    previous->setEnabled(curveMode||!plottedFields.isEmpty());
+    next->setEnabled(curveMode||!plottedFields.isEmpty());
+    style->setVisible(true);style->setEnabled(!curveMode);
+    style->setToolTip(curveMode?QStringLiteral("曲线分析的图形类型由当前分析项决定"):QString());
     generate->setEnabled(tags->count() > 0);
   }
 
   void rollWindow(int direction)
   {
-    if (plottedFields.isEmpty() || !canvas) return;
+    if ((!curveMode&&plottedFields.isEmpty()) || !canvas) return;
     const auto scale = canvas->axisScaleDiv(QwtPlot::xBottom);
-    double first = scale.lowerBound();
-    double last = scale.upperBound();
+    double first = curveMode?start->dateTime().toMSecsSinceEpoch()/1000.:scale.lowerBound();
+    double last = curveMode?end->dateTime().toMSecsSinceEpoch()/1000.:scale.upperBound();
     double minimum = std::numeric_limits<double>::infinity();
     double maximum = -minimum;
-    for (const auto& field : plottedFields)
+    for (const auto& field : (curveMode?availableFields():plottedFields))
     {
       const auto entry = source.numeric.find(field.toStdString());
       if (entry == source.numeric.end() || !entry->second.size()) continue;
@@ -466,7 +514,7 @@ private:
     end->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(last * 1000), Qt::UTC));
     startEnabled->setChecked(true);
     endEnabled->setChecked(true);
-    draw(plottedFields);
+    if(curveMode&&curvePlot)curvePlot(workspaceState());else draw(plottedFields);
   }
 
   struct Condition
@@ -496,7 +544,12 @@ private:
       filters.append(QJsonObject{{QStringLiteral("channel"), condition.channel}, {QStringLiteral("operation"), condition.operation},
                                 {QStringLiteral("threshold"), condition.threshold}, {QStringLiteral("enabled"), condition.enabled}});
     const QJsonObject document{
+      {"analysisMode",analysisMode},{"comparisonLayout",comparisonLayout},{"xyX",xyX},{"xyY",xyY},{"xyTolerance",xyTolerance},
+      {"trendField",trendField},{"trendModel",trendModel},{"trendDegree",trendDegree},{"trendWindow",trendWindow},{"trendRange",trendRange},
+      {"curveConfiguration",curveConfiguration?curveConfiguration():QJsonObject()},
+      {"comparisonAxes",QJsonObject::fromVariantMap([&]{QVariantMap m;for(auto it=comparisonAxes.begin();it!=comparisonAxes.end();++it)m[it.key()]=it.value();return m;}())},
       {QStringLiteral("format"), QStringLiteral("BladeScopeWaveformProject")}, {QStringLiteral("version"), 1},
+      {"group",groups->currentData().toString()},{"search",search->text()},{"labelMode",labelMode->currentIndex()},{"system",system->currentData().toString()},
       {QStringLiteral("fields"), QJsonArray::fromStringList(fields)}, {QStringLiteral("view"), view->currentIndex()},
       {QStringLiteral("style"), style->currentIndex()}, {QStringLiteral("filterEnabled"), filterEnabled},
       {QStringLiteral("tolerance"), matchTolerance}, {QStringLiteral("conditions"), filters},
@@ -592,6 +645,16 @@ private:
       return;
     }
 
+    const int mode=document.value("analysisMode").toInt(0);
+    if(mode<0||mode>3||document.value("trendModel").toInt(0)<0||document.value("trendModel").toInt(0)>1||
+       document.value("trendDegree").toInt(1)<1||document.value("trendDegree").toInt(1)>6||document.value("trendWindow").toInt(11)<1){fail(QStringLiteral("工程分析参数无效"));return;}
+    analysisMode=mode;modes->button(mode)->setChecked(true);
+    comparisonLayout=document.value("comparisonLayout").toInt(0);comparisonAxes.clear();
+    const auto axes=document.value("comparisonAxes").toObject();for(auto it=axes.begin();it!=axes.end();++it)comparisonAxes[it.key()]=it.value().toInt();
+    xyX=document.value("xyX").toString();xyY=document.value("xyY").toString();xyTolerance=document.value("xyTolerance").toString();
+    trendField=document.value("trendField").toString();trendModel=document.value("trendModel").toInt(0);trendDegree=document.value("trendDegree").toInt(1);
+    trendWindow=document.value("trendWindow").toInt(11);trendRange=document.value("trendRange").toInt(0);
+    if(restoreCurveConfiguration&&document.value("curveConfiguration").isObject())restoreCurveConfiguration(document.value("curveConfiguration").toObject());
     const QSignalBlocker blockView(view), blockStyle(style);
     view->setCurrentIndex(viewIndex);
     style->setCurrentIndex(styleIndex);
@@ -602,14 +665,16 @@ private:
     conditions = std::move(restored);
     matchTolerance = tolerance;
     filterEnabled = filtering;
-    groups->setCurrentIndex(0);
-    refreshTags();
+    groups->setCurrentIndex(std::max(0,groups->findData(document.value("group").toString())));
+    {QSignalBlocker block(labelMode);labelMode->setCurrentIndex(std::clamp(document.value("labelMode").toInt(0),0,2));}
+    refreshTags();search->setText(document.value("search").toString());
+    system->setCurrentIndex(std::max(0,system->findData(document.value("system").toString())));
     for (int i = 0; i < tags->count(); ++i)
     {
       auto* item = tags->item(i);
       item->setCheckState(fields.contains(item->data(Qt::UserRole).toString()) ? Qt::Checked : Qt::Unchecked);
     }
-    draw(fields);
+    if(curveMode&&curvePlot)curvePlot(workspaceState());else draw(fields);
   }
 
   struct Summary
@@ -752,7 +817,7 @@ private:
     conditions = result;
     matchTolerance = tolerance;
     filterEnabled = global->isChecked();
-    if (!plottedFields.isEmpty()) draw(plottedFields);
+    status->setText(QStringLiteral("条件已修改，请点击作图更新"));
   }
 
   static void verifyWorkspace()
@@ -762,8 +827,8 @@ private:
     auto& torque = recording.addNumeric("torque")->second;
     for (int i = 0; i < 32; ++i)
     {
-      speed.pushBack({double(i), 100.0 + i});
-      torque.pushBack({double(i), 20.0 + 2 * i});
+      speed.pushBack({1790000000.+double(i), 100.0 + i});
+      torque.pushBack({1790000000.+double(i), 20.0 + 2 * i});
     }
     QAction analysis(nullptr);
     QWidget sidebar;
@@ -780,9 +845,14 @@ private:
     page.generate->click();
     require(page.plot->curveList().size() == 2, "time plot did not draw the checked measurements");
 
+    const auto timeRange=page.canvas->axisScaleDiv(QwtPlot::xBottom);
+    require(timeRange.upperBound()-timeRange.lowerBound()<40 && timeRange.lowerBound()>=1790000000.,"absolute recording time was stretched into empty years");
+    page.setMode(false,false);page.setCurveMode(true);
+    require(!page.generate->isHidden()&&!page.startEnabled->isHidden()&&!page.analysisControls->isHidden(),"shared sidebar controls disappeared in curve mode");
+    page.setCurveMode(false);page.setMode(true,true);
     page.modes->button(1)->click();
     require(page.checkedFields().size() == 2 && page.parameterForm->rowCount() > 1 &&
-            !page.plot->isHidden() && !page.analysisPanel, "comparison setup changed the current plot");
+            page.plot->isHidden() && !page.analysisPanel, "comparison switch retained an obsolete plot");
     auto* layout = qobject_cast<QComboBox*>(page.parameterForm->itemAt(0, QFormLayout::FieldRole)->widget());
     require(layout != nullptr, "comparison layout control missing");
     layout->setCurrentIndex(1);
@@ -793,13 +863,13 @@ private:
     require(charts.size() == 2, "stacked comparison does not have two charts");
     auto* upper = charts.at(0);
     auto* lower = charts.at(1);
-    upper->setAxisScale(QwtPlot::xBottom, 5.0, 12.0);
+    upper->setAxisScale(QwtPlot::xBottom, 1790000005.0, 1790000012.0);
     upper->replot();
     require(upper->axisScaleDiv(QwtPlot::xBottom) == lower->axisScaleDiv(QwtPlot::xBottom),
             "stacked charts do not share the time scale");
 
     page.modes->button(2)->click();
-    require(page.checkedFields().size() == 2 && page.parameterForm->rowCount() == 3 && page.analysisPanel,
+    require(page.checkedFields().size() == 2 && page.parameterForm->rowCount() == 3 && !page.analysisPanel,
             "XY setup did not preserve selection or show parameters");
     page.generate->click();
     require(page.analysisPanel && !page.analysisPanel->isWindow(), "XY chart is outside the workspace");
@@ -808,7 +878,7 @@ private:
 
     page.modes->button(3)->click();
     page.tags->item(1)->setCheckState(Qt::Unchecked);
-    require(page.parameterForm->rowCount() == 4 && page.analysisPanel,
+    require(page.parameterForm->rowCount() == 4 && !page.analysisPanel,
             "trend setup did not preserve the existing plot");
     page.generate->click();
     require(page.analysisPanel && page.analysisPanel->parentWidget() == &page && !page.plot->isHidden(),
@@ -842,7 +912,9 @@ private:
 
   void refreshAnalysisParameters()
   {
-    parameters->setVisible(analysisMode != 0);
+    parameters->setVisible(analysisMode != 0 && parameterToggle->isChecked());
+    parameterToggle->setVisible(analysisMode!=0);
+    parameterSummary->setText(analysisMode==3?QStringLiteral("趋势拟合：调整参数后点击左栏作图；当前可见范围在点击时锁定"):QString());
     while (parameterForm->rowCount()) parameterForm->removeRow(0);
     if (analysisMode == 0) return;
     const auto fields = checkedFields();
@@ -911,8 +983,10 @@ private:
     auto* model = addChoice(QStringLiteral("模型"),
         {QStringLiteral("多项式"), QStringLiteral("滑动平均")}, trendModel);
     auto* size = new QSpinBox(parameters);
-    parameterForm->addRow(QStringLiteral("阶数 / 窗口点数"), size);
-    const auto setModel = [this, size](int index) {
+    auto* sizeLabel=new QLabel(parameters);parameterForm->addRow(sizeLabel,size);
+    const auto setModel = [this, size,sizeLabel](int index) {
+      sizeLabel->setText(index==0?QStringLiteral("多项式阶数"):QStringLiteral("窗口点数（点）"));
+      size->setToolTip(index==0?QStringLiteral("1 阶为线性趋势；需要足够的不同时间点"):QStringLiteral("按有效样本点数滑动平均，不等同于固定秒数"));
       trendModel = index;
       const QSignalBlocker block(size);
       size->setRange(1, index == 0 ? 6 : 10000000);
@@ -972,22 +1046,26 @@ private:
         data->push_back({point.x, point.y});
       }
       const auto visible = canvas->axisScaleDiv(QwtPlot::xBottom);
-      const double lo = trendRange ? visible.lowerBound() + plot->timeOffset() : data->front().x;
-      const double hi = trendRange ? visible.upperBound() + plot->timeOffset() : data->back().x;
+      const double lo = trendRange && std::isfinite(fitVisibleLow) ? fitVisibleLow : data->front().x;
+      const double hi = trendRange && std::isfinite(fitVisibleHigh) ? fitVisibleHigh : data->back().x;
       const int mode = trendModel, order = trendDegree, window = trendWindow;
       summary->setText(QStringLiteral("正在拟合…"));
       BladeTrend::background<BladeTrend::Trend>(controls, [=] {
         return BladeTrend::calculate(*data, mode, order, window, lo, hi);
       }, [=](BladeTrend::Trend result, const QString& error) {
-        summary->setText(error.isEmpty() ? result.summary : error);
+        summary->setText(error.isEmpty()?result.summary+QStringLiteral("；时间范围 %1 ～ %2 UTC").arg(
+          BladeTimeDisplay::format(lo,true,true,true,3,Qt::UTC),BladeTimeDisplay::format(hi,true,true,true,3,Qt::UTC)):error);
         if (!error.isEmpty() || result.points.empty()) return;
         const auto base = name + "/Trend";
         auto curveName = base;
         for (int n = 2; shown->getAllNames().count(curveName); ++n) curveName = base + std::to_string(n);
         auto& target = shown->addNumeric(curveName)->second;
         for (const auto point : result.points) target.pushBack({point.x, point.y});
-        if (auto* curve = plot->addCurve(curveName, QColor(226, 88, 40)))
-          curve->curve->setStyle(QwtPlotCurve::Lines);
+        if (auto* curve = plot->addCurve(curveName, QColor(226, 88, 40))){
+          curve->curve->setStyle(QwtPlotCurve::Lines);curve->curve->setPen(QPen(QColor(226,88,40),2,Qt::DashLine));
+          curve->curve->setTitle(QString::fromStdString(name)+QStringLiteral("｜趋势：")+(mode==0?QStringLiteral("多项式 %1 阶").arg(order):QStringLiteral("滑动平均 %1 点").arg(window)));
+        }
+        parameterToggle->setChecked(false);
         emit plot->curveListChanged();
         plot->replot();
       });
@@ -1290,7 +1368,7 @@ private:
     auto* root = new QVBoxLayout(panel);
     const bool stacked = comparisonLayout == 1;
     auto* difference = new QPushButton(QStringLiteral("差值统计"), panel);
-    root->addWidget(difference, 0, Qt::AlignLeft);
+
     auto* differencePanel = new QWidget(panel);
     auto* differenceRow = new QHBoxLayout(differencePanel);
     auto* x = new QComboBox(differencePanel);
@@ -1313,7 +1391,8 @@ private:
     connect(upper, &QObject::destroyed, [hold = shown] {});
     connect(lower, &QObject::destroyed, [hold = shown] {});
     root->addWidget(upper, 1);
-    root->addWidget(lower, 1);
+    root->addWidget(lower, 1);root->addWidget(difference,0,Qt::AlignLeft);
+    upper->on_changeTimeOffset(0);lower->on_changeTimeOffset(0);
     auto* upperPlot = upper->findChild<QwtPlot*>();
     auto* lowerPlot = lower->findChild<QwtPlot*>();
     if (!upperPlot || !lowerPlot) return;
@@ -1520,6 +1599,10 @@ private:
         return false;
       }
     }
+    const auto signature=QJsonDocument(QJsonObject{{"state",workspaceState()},{"fields",QJsonArray::fromStringList(fields)},{"mode",analysisMode}}).toJson(QJsonDocument::Compact);
+    const bool keepView=signature==lastDrawSignature && !shown->numeric.empty();
+    const auto previousView=plot->currentBoundingRect();
+    if(analysisMode==3&&trendRange&&canvas){const auto s=canvas->axisScaleDiv(QwtPlot::xBottom);fitVisibleLow=s.lowerBound()+plot->timeOffset();fitVisibleHigh=s.upperBound()+plot->timeOffset();}
     const double infinity = std::numeric_limits<double>::infinity();
     const double lo = startEnabled->isChecked() ? start->dateTime().toMSecsSinceEpoch()/1000. : -infinity;
     const double hi = endEnabled->isChecked() ? end->dateTime().toMSecsSinceEpoch()/1000. : infinity;
@@ -1528,13 +1611,15 @@ private:
     if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->hide();plot->show();
     plot->removeAllCurves();
     shown->numeric.clear();
+    QMetaObject::invokeMethod(plot,"setModeXY",Qt::DirectConnection,Q_ARG(bool,false));plot->on_changeTimeOffset(0);
     auto aliases = qApp->property("bladeScopeTagAliases").toMap();
     const auto recordingAliases = qApp->property("bladeScopeRecordingAliases").toMap();
     for (auto it = recordingAliases.cbegin(); it != recordingAliases.cend(); ++it)
       aliases.insert(it.key(), it.value());
     summaries.clear();
     size_t count = 0;
-    double firstPlottedTime = std::numeric_limits<double>::infinity();
+    double firstPlottedTime = std::numeric_limits<double>::infinity(),lastPlottedTime=-firstPlottedTime;
+    size_t invalidTimes=0;
     for (const auto& name : fields)
     {
       const auto key = name.toStdString();
@@ -1544,7 +1629,7 @@ private:
       const auto stop = BladeAnalysis::boundary(series, hi, true);
       const auto begin = BladeAnalysis::boundary(series, lo);
       if (begin >= stop) continue;
-      firstPlottedTime = std::min(firstPlottedTime, series.at(begin).x);
+
       auto& summary = summaries[name];
       for (size_t i = begin; i < stop; ++i)
         if (std::isfinite(series.at(i).y)) ++summary.source.count;
@@ -1552,6 +1637,7 @@ private:
       forEachDisplayIndex(begin, stop, view->currentIndex() == 1,
                          [&](size_t i) { return series.at(i).y; }, [&](size_t i) {
         const auto sample = series.at(i);
+        if (!std::isfinite(sample.x)){++invalidTimes;return;}
         if (!std::isfinite(sample.y)) return;
         ++summary.sampled;
         for (const auto& condition : conditions)
@@ -1581,11 +1667,12 @@ private:
       if (retained.empty()) continue;
       auto& points = shown->addNumeric(key)->second;
       for (const auto& sample : retained) points.pushBack({sample.first, sample.second});
+      firstPlottedTime=std::min(firstPlottedTime,retained.front().first);lastPlottedTime=std::max(lastPlottedTime,retained.back().first);
       count += retained.size();
       if (auto* curve = plot->addCurve(key))
       {
         const auto alias = aliases.value(name).toString();
-        if (!alias.isEmpty()) curve->curve->setTitle(alias);
+        curve->curve->setTitle((alias.isEmpty()?name:alias)+QStringLiteral("｜原始"));
       }
     }
     if (canvas)
@@ -1596,8 +1683,14 @@ private:
     }
     emit plot->curveListChanged();
     plot->zoomOut(false);
-    if (canvas && lo < hi && std::isfinite(lo) && std::isfinite(hi))
-      canvas->setAxisScale(QwtPlot::xBottom, lo, hi);
+    if(canvas&&count){
+      double left=std::isfinite(lo)?lo:firstPlottedTime,right=std::isfinite(hi)?hi:lastPlottedTime;
+      if(left==right){left-=.5;right+=.5;}
+      auto rect=plot->currentBoundingRect();rect.setLeft(left);rect.setRight(right);
+      if(keepView)rect=previousView;
+      plot->setZoomRectangle(rect,false);plot->replot();
+    }
+    lastDrawSignature=signature;
     applyStyle();
     if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty")){
       hint->setText(QStringLiteral("筛选后无有效样本，请检查测点、时间窗口与条件筛选"));hint->setVisible(count==0);
@@ -1607,6 +1700,7 @@ private:
         .arg(qulonglong(plot->curveList().size())).arg(qulonglong(count)));
     QToolTip::hideText();
     plottedFields = fields;
+    if(invalidTimes)status->setText(status->text()+QStringLiteral("；无效时间戳 %1").arg(qulonglong(invalidTimes)));
     updateTimeControls();
     if (count && analysisMode == 3) showTrend();
     if (analysisMode == 1 || analysisMode == 2)
@@ -1692,6 +1786,11 @@ private:
   QWidget* analysisPanel = nullptr;
   QWidget* parameters = nullptr;
   QFormLayout* parameterForm = nullptr;
+  bool curveMode=false;
+  QToolButton* parameterToggle=nullptr;
+  QLabel* parameterSummary=nullptr;
+  QByteArray lastDrawSignature;
+  double fitVisibleLow=std::numeric_limits<double>::quiet_NaN(),fitVisibleHigh=fitVisibleLow;
   int analysisMode = 0;
   int comparisonLayout = 0;
   QMap<QString, int> comparisonAxes;

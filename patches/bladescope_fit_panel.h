@@ -212,6 +212,7 @@ class Panel : public QWidget
   QToolButton* poolMenu;
   QMenu* compareMenu;
   QJsonObject config;
+  QJsonObject workspaceContext;
   std::shared_ptr<Snapshot> current;
   std::vector<std::shared_ptr<Snapshot>> pool;
   std::shared_ptr<const Result> active;
@@ -266,6 +267,8 @@ class Panel : public QWidget
     p.torqueDegree=int(n("torqueDegree",2));p.normal=int(n("normal",0));p.filterState=config.value("filterState").toBool();
     p.torqueUnit=config.value("torqueUnit").toInt(Percent);
     p.ratedTorque=n("ratedTorque",0);p.rpmWidth=n("rpmWidth",0);p.torqueFitMin=n("torqueFitMin",0);
+    p.powerSmooth=config.value("powerSmooth").toBool(true);
+    p.powerSmoothWindow=int(n("powerSmoothWindow",11));p.powerMinBinSamples=int(n("powerMinBinSamples",3));
     p.powerFitMinRpm=n("powerFitMinRpm",0);p.powerFitMinPower=n("powerFitMinPower",0);
     p.torqueNonnegative=config.value("torqueNonnegative").toBool(true);
     p.rejectFlags=config.value("rejectFlags").toBool(true);
@@ -374,6 +377,8 @@ class Panel : public QWidget
     parameter("efficiency","发电机效率 (0–1)","1");parameter("width","横轴分箱宽度（风速为 m/s）","0.5");
     parameter("rpmWidth","转速分箱宽度 (rpm，留空沿用原宽度)","");
     parameter("ratedTorque","发电机额定转矩 (N·m，留空按功率/效率/额定转速计算)","");
+    parameter("powerSmoothWindow","M32 平滑窗口（奇数箱数 1～101）","11");
+    parameter("powerMinBinSamples","M32 每箱最低样本数","3");
     parameter("powerFitMinRpm","M32 拟合最低转速 (rpm，仅影响拟合)","0");
     parameter("powerFitMinPower","M32 拟合最低功率 (kW，仅影响拟合)","0");
     parameter("torqueFitMin","M33 / M34 拟合最低发电机转速 (rpm)","0");
@@ -381,6 +386,8 @@ class Panel : public QWidget
     parameter("torqueDegree","M33 / M34 转矩拟合阶数 (2–3)","2");
     parameter("start","起始时间（原始秒，可留空）","");parameter("end","结束时间（原始秒，可留空）","");
     parameter("normal","正常运行状态码","0");
+    auto* powerSmooth=new QCheckBox(QStringLiteral("M32 平滑趋势拟合（取消则使用分箱插值）"));
+    powerSmooth->setChecked(config.value("powerSmooth").toBool(true));f->addRow(powerSmooth);
     auto* state=new QCheckBox(QStringLiteral("仅保留正常运行状态"));state->setChecked(config.value("filterState").toBool());f->addRow(state);
     auto* nonnegative=new QCheckBox(QStringLiteral("M33 / M34 拟合输出下限为 0（保留原始散点）"));
     nonnegative->setChecked(config.value("torqueNonnegative").toBool(true));f->addRow(nonnegative);
@@ -390,7 +397,7 @@ class Panel : public QWidget
     auto* abs=new QCheckBox(QStringLiteral("M23 使用对风偏差绝对值"));abs->setChecked(config.value("absoluteYaw").toBool(true));f->addRow(abs);
     auto* sectors=new QComboBox;sectors->addItems({"16","24"});sectors->setCurrentText(QString::number(config.value("sectors").toInt(16)));f->addRow(QStringLiteral("风玫瑰扇区"),sectors);
     QMap<QString,QPair<QCheckBox*,bool>> toggles{
-      {"generator",{gen,false}}, {"absoluteYaw",{abs,true}}, {"rejectFlags",{flags,true}},
+      {"powerSmooth",{powerSmooth,true}}, {"generator",{gen,false}}, {"absoluteYaw",{abs,true}}, {"rejectFlags",{flags,true}},
       {"filterState",{state,false}}, {"torqueNonnegative",{nonnegative,true}}};
     auto captureMapping = [&] {
       QJsonObject values;
@@ -597,6 +604,9 @@ class Panel : public QWidget
   void reload()
   {
     auto snap=std::make_shared<Snapshot>();snap->params=parameters();
+    if(!workspaceContext.isEmpty())snap->params.start=workspaceContext.contains("start")?workspaceContext.value("start").toDouble():-std::numeric_limits<double>::infinity();
+    if(!workspaceContext.isEmpty())snap->params.end=workspaceContext.contains("end")?workspaceContext.value("end").toDouble():std::numeric_limits<double>::infinity();
+    if(workspaceContext.contains("tolerance"))snap->params.tolerance=workspaceContext.value("tolerance").toDouble();
     snap->yawConfig=config.value("m56_config").toObject();snap->analysisConfig=config;
     auto channels=std::make_shared<Channels>();const auto names=available();
     const auto aliases=qApp->property("bladeScopeTagAliases").toMap();
@@ -606,24 +616,29 @@ class Panel : public QWidget
     dirty=false;
     setProperty("bladeFitResultsReady",false);active.reset();current.reset();comparisons.clear();stats.clear();report.clear();clearPlot();plot->replot();
     status->setText(QStringLiteral("正在准备测点…"));
-    struct CopyState {std::array<std::string,NRoles> names;int role=0;size_t offset=0;};
+    struct CopyState {std::vector<std::string> names;int role=0;size_t offset=0;};
     auto copying=std::make_shared<CopyState>();
-    for(int i=0;i<NRoles;++i)copying->names[i]=resolve(i,names,aliases).toStdString();
+    for(int i=0;i<NRoles;++i)copying->names.push_back(resolve(i,names,aliases).toStdString());
+    if(workspaceContext.value("filterEnabled").toBool(true))for(const auto& v:workspaceContext.value("conditions").toArray()){
+      const auto f=v.toObject();if(!f.value("enabled").toBool(true))continue;
+      snap->params.workspaceFilters.push_back({std::make_shared<Points>(),f.value("operation").toInt(),f.value("threshold").toDouble()});
+      copying->names.push_back(f.value("channel").toString().toStdString());
+    }
     auto* timer=new QTimer(this);
     connect(timer,&QTimer::timeout,this,[this,ticket,timer,copying,channels,snap]{
       if(ticket!=loadGeneration){timer->stop();timer->deleteLater();return;}
       QElapsedTimer clock;clock.start();
-      while(copying->role<NRoles && clock.elapsed()<5){
+      while(copying->role<int(copying->names.size()) && clock.elapsed()<5){
         int i=copying->role;const auto it=source.numeric.find(copying->names[i]);
         if(it==source.numeric.end()){++copying->role;copying->offset=0;continue;}
-        const auto& curve=it->second;auto& data=(*channels)[i];
+        const auto& curve=it->second;auto& data=i<NRoles?(*channels)[i]:*snap->params.workspaceFilters[size_t(i-NRoles)].samples;
         if(!copying->offset)data.reserve(curve.size());
         const size_t end=std::min<size_t>(curve.size(),copying->offset+8192);
         for(;copying->offset<end;++copying->offset){auto pt=curve.at(copying->offset);
           if(std::isfinite(pt.x)||kind->currentIndex()==M56)data.push_back({pt.x,pt.y});}
         if(copying->offset>=curve.size()){++copying->role;copying->offset=0;}
       }
-      if(copying->role==NRoles){
+      if(copying->role==int(copying->names.size())){
         timer->stop();timer->deleteLater();snap->channels=channels;snap->name=QStringLiteral("当前数据");
         current=snap;undoStack.clear();refreshKinds();calculate();
       }
@@ -677,7 +692,7 @@ class Panel : public QWidget
   }
   QVector<QStringList> yawMetadata() const
   {
-    QVector<QStringList> rows{{"元信息","值"},{"版本","3.17.0.17"},{"当前视图",yawView->currentText()},
+    QVector<QStringList> rows{{"元信息","值"},{"版本","3.17.0.18"},{"共享左栏条件",QString::fromUtf8(QJsonDocument(workspaceContext).toJson(QJsonDocument::Compact))},{"当前视图",yawView->currentText()},
       {"残差显示单位",yawUnit->currentText()},{"配对指标单位","kW"},{"风速段",yawWind->currentText()}};
     if(!yawActive)return rows;
     const auto& r=*yawActive;const auto& c=r.config;
@@ -984,8 +999,8 @@ class Panel : public QWidget
     }
     plot->setKeepRatioXY(k==M11);plot->zoomOut(false);plot->replot();
     QString summary=QStringLiteral("有效 %1　已筛除 %2　标注 %3").arg(qulonglong(r.raw.size())).arg(qulonglong(r.rejected)).arg(qulonglong(markedCount));
-    if(k==M32)summary+=QStringLiteral("　实测分箱插值　拟合样本 %1　最低转速 %2 rpm / 最低功率 %3 kW（仅筛拟合）")
-      .arg(qulonglong(r.fitSamples)).arg(num(p.powerFitMinRpm),num(p.powerFitMinPower));
+    if(k==M32)summary+=QStringLiteral("　%4　拟合样本 %1　最低转速 %2 rpm / 最低功率 %3 kW（仅筛拟合）")
+      .arg(qulonglong(r.fitSamples)).arg(num(p.powerFitMinRpm),num(p.powerFitMinPower)).arg(p.powerSmooth?QStringLiteral("平滑趋势拟合"):QStringLiteral("分箱插值"));
     if(k==M33)summary+=QStringLiteral("　来源：有功功率 ÷ 效率 ÷ 角速度；内部计算 N·m，转矩测点单位不适用");
     if(r.raw.empty())summary=QStringLiteral("筛选后无有效样本，请检查时间范围、测点关联和筛选条件。");
     if(k==M02)summary+=std::isfinite(r.shape)?QStringLiteral("　Weibull k=%1，A=%2 m/s").arg(num(r.shape),num(r.scale)):QStringLiteral("　样本不足以估计 Weibull 参数");
@@ -1000,7 +1015,10 @@ class Panel : public QWidget
     }
     if(k==M33||k==M34)summary+=QStringLiteral("　显示/导出 %1").arg(torqueOutput->currentText());
     if(k==M11)summary+=QStringLiteral("　正北向上，顺时针　风速分级 <4 / 4–8 / 8–12 / ≥12 m/s");
-    if(k==M01)summary+=energySummary();
+    if(k==M01){summary+=energySummary();
+      bool decline=false;for(size_t i=1;i<p.reference.size();++i)if(p.reference[i].x>=p.ratedWind&&p.reference[i].y<p.reference[i-1].y)decline=true;
+      if(decline)summary+=QStringLiteral("　注意：导入标准曲线含高风速下降段，已按原值显示");}
+    if(!workspaceContext.isEmpty())summary+=QStringLiteral("　已应用左栏时间/条件筛选");
     makeTables();status->setText(summary);setProperty("bladeFitResultsReady",true);
   }
   static double powerAt(const Result& r,const Params& p,double x)
@@ -1255,9 +1273,7 @@ public:
     connect(reset,&QAction::triggered,this,[this]{for(auto* a:compareMenu->actions())if(a->isCheckable())delete a;pool.clear();calculate();});
     compareMenu->addSeparator();
     plotSplit=new QSplitter(Qt::Vertical);layout->addWidget(plotSplit,1);
-    plot=new AnalysisPlot(shown,this);plot->qwtPlot()->setObjectName("bladeFitPlot");plotSplit->addWidget(plot);plot->activateGrid(true);plot->activateLegend(false);
-    auto* externalLegend=new QwtLegend;externalLegend->setMaxColumns(4);
-    plot->qwtPlot()->insertLegend(externalLegend,QwtPlot::BottomLegend);
+    plot=new AnalysisPlot(shown,this);plot->qwtPlot()->setObjectName("bladeFitPlot");plotSplit->addWidget(plot);plot->activateGrid(true);plot->activateLegend(true);
     yawDifference=new AnalysisPlot(yawDifferenceData,this);plotSplit->addWidget(yawDifference);yawDifference->hide();
     QMetaObject::invokeMethod(yawDifference,"setModeXY",Qt::DirectConnection,Q_ARG(bool,true));
     yawDifference->activateGrid(true);yawDifference->setContextMenuEnabled(false);plotSplit->setStretchFactor(0,3);plotSplit->setStretchFactor(1,1);
@@ -1277,7 +1293,7 @@ public:
     toolsScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);toolsScroll->setMaximumHeight(60);
     toolsScroll->setWidget(toolsWidget);layout->addWidget(toolsScroll);
     auto* legendToggle=new QCheckBox("图例");legendToggle->setChecked(true);tools->addWidget(legendToggle);
-    connect(legendToggle,&QCheckBox::toggled,this,[this,externalLegend](bool on){externalLegend->setVisible(on);plot->replot();});
+    connect(legendToggle,&QCheckBox::toggled,this,[this](bool on){plot->activateLegend(on);plot->replot();});
     select=new QComboBox;
     select->addItems({"浏览","框选排除","框选标注","上界线以上排除","下界线以下排除"});tools->addWidget(select);
     button(tools,"撤销",[this]{if(!current||undoStack.empty())return;
@@ -1354,6 +1370,17 @@ public:
     density->hide();roseMetric->hide();
     canvas->installEventFilter(this);
   }
+  void setWorkspaceContext(const QJsonObject& context){
+    if(workspaceContext==context)return;workspaceContext=context;dirty=true;
+    ++loadGeneration;++generation;if(stop)stop->store(true);
+    if(auto* reloadButton=findChild<QPushButton*>("bladeFitReload"))reloadButton->hide();
+    setProperty("bladeFitResultsReady",false);status->setText(QStringLiteral("左栏设置已修改，请点击作图"));
+  }
+  void plotWorkspace(const QJsonObject& context){setWorkspaceContext(context);reload();}
+  void showWorkspaceStatistics(){if(displayKind==M56){yawTables->show();yawTables->setCurrentIndex(2);}else showTable(stats,QStringLiteral("分箱统计"));}
+  QJsonObject workspaceConfiguration()const{return config;}
+  void restoreWorkspaceConfiguration(const QJsonObject& values){config=values;persist();dirty=true;refreshKinds();}
+  void associateWorkspaceField(QString name,int role){config["role"+QString::number(role)]=name;persist();refreshKinds();dirty=true;status->setText(QStringLiteral("已关联 %1，请点击作图").arg(roles().value(role)));}
   void invalidate(){dirty=true;++loadGeneration;++generation;if(stop)stop->store(true);if(isVisible())refreshTimer->start();}
   void enter(){refreshKinds();if(dirty||!current)reload();}
   ~Panel() override {if(stop)stop->store(true);for(auto* curve:yawDiffCurves){curve->detach();delete curve;}canvas->removeEventFilter(this);delete plot;delete yawDifference;}

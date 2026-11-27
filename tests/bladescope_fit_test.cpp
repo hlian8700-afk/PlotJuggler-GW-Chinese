@@ -86,7 +86,7 @@ int main(){
  assert(over.fit.front().y>100);
 
  // A measured idle segment remains zero; no origin-constrained cubic bridges the knee.
- Params power=p;power.rpmWidth=10;power.tolerance=0;Channels ramp;
+ Params power=p;power.powerMinBinSamples=1;power.powerSmooth=false;power.rpmWidth=10;power.tolerance=0;Channels ramp;
  for(int i=0;i<8;++i){const double n= i<4?900+i*10:1100+(i-4)*10;
    ramp[Generator].push_back({double(i),n});ramp[Power].push_back({double(i),i<4?0.:1000.+100*(i-4)});}
  auto empirical=analyze(M32,ramp,power,{},month);
@@ -103,5 +103,17 @@ int main(){
  torque.torqueUnit=NewtonMetre;auto convertedAgain=analyze(M33,nm,torque,{},month);
  assert(convertedAgain.raw.front().y==converted.raw.front().y);
  Params noRated;assert(!std::isfinite(torqueDisplayFactor(M33,Percent,noRated)));
+ // Shape-preserving interpolation stays within each pair of neighboring ordinates.
+ Points knots{{0,0},{1,1},{2,4},{3,4},{4,3}};auto smooth=shapePreserving(knots);
+ for(auto point:smooth){auto i=std::min(size_t(point.x),knots.size()-2);
+   assert(point.y>=std::min(knots[i].y,knots[i+1].y)-1e-10&&point.y<=std::max(knots[i].y,knots[i+1].y)+1e-10);}
+ power.powerSmooth=true;power.powerFitMinPower=0;auto smoothed=analyze(M32,ramp,power,{},month);
+ assert(fittedValue(smoothed,915)==0 && !std::isfinite(fittedValue(smoothed,1000)));
+ auto filter=std::make_shared<Points>();for(int i=0;i<8;++i)filter->push_back({double(i),double(i)});
+ power.workspaceFilters.push_back({filter,2,4});auto screened=analyze(M32,ramp,power,{},month);
+ assert(screened.raw.size()==3&&screened.rejected==5);
+ // Imported standard curves must retain intentional high-wind decline.
+ Params standard=p;standard.reference={{3,0},{12,2000},{20,1500}};
+ const auto reference=analyze(M01,c,standard,{},month);assert(reference.reference.back().y==1500);
  std::cout<<"19 analyses and torque conversion, operating range, gap and overload regressions passed\n";
 }
