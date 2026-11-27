@@ -9,7 +9,7 @@ struct ConditionRule {
   QStringList cases;int sourceRow=0;BladeDiagnosis::RuleState state=BladeDiagnosis::RuleState::Draft;
   BladeDiagnosis::TrialSpec spec;
 };
-struct ConditionPack {QString id,version,vendor,model,sourceHash;QVector<ConditionRule> rules;};
+struct ConditionPack {QString id,version,vendor,model,controller,sourceHash;QVector<ConditionRule> rules;};
 struct RoleBinding {QString field,unit;double scale=1;int axis=0;};
 struct ConditionResult {QString id,title,status,reason,primaryField,referenceField;BladeDiagnosis::TrialResult trial;bool ran=false;};
 inline QString packStateName(BladeDiagnosis::RuleState state){
@@ -34,13 +34,13 @@ inline QJsonObject conditionJson(const ConditionRule& r){
     {"reviewer",r.reviewer},{"review_date",r.reviewDate},{"case_ids",cases}};
 }
 inline QJsonObject conditionPackJson(const ConditionPack& pack){QJsonArray rules;for(const auto& r:pack.rules)rules.append(conditionJson(r));
-  return {{"format","bladescope.condition-pack.v1"},{"id",pack.id},{"version",pack.version},{"vendor",pack.vendor},{"model",pack.model},{"conditions",rules}};
+  return {{"format","bladescope.condition-pack.v1"},{"id",pack.id},{"version",pack.version},{"vendor",pack.vendor},{"model",pack.model},{"controller",pack.controller},{"conditions",rules}};
 }
 inline ConditionPack parseConditionPack(const QByteArray& bytes){
   packCheck(bytes.size()<=2*1024*1024,"规则包超过 2 MiB 上限");QJsonParseError error;auto document=QJsonDocument::fromJson(bytes,&error);
   packCheck(error.error==QJsonParseError::NoError&&document.isObject(),"规则包不是有效 JSON 对象");const auto root=document.object();
-  packKeys(root,{"format","id","version","vendor","model","conditions"});packCheck(root.value("format")=="bladescope.condition-pack.v1","规则包格式或版本不受支持");
-  ConditionPack pack;pack.id=packText(root,"id");pack.version=packText(root,"version");pack.vendor=packText(root,"vendor");pack.model=packText(root,"model");
+  packKeys(root,{"format","id","version","vendor","model","controller","conditions"});packCheck(root.value("format")=="bladescope.condition-pack.v1","规则包格式或版本不受支持");
+  ConditionPack pack;pack.id=packText(root,"id");pack.version=packText(root,"version");pack.vendor=packText(root,"vendor");pack.model=packText(root,"model");pack.controller=packText(root,"controller",false);
   packCheck(root.value("conditions").isArray(),"conditions 必须是数组");const auto list=root.value("conditions").toArray();packCheck(list.size()<=64,"每包最多 64 条条件");QSet<QString> ids;QMap<QString,QString> roleUnits;
   for(const auto& item:list){
     packCheck(item.isObject(),"条件必须是对象");const auto o=item.toObject();
@@ -104,7 +104,7 @@ inline QVector<ConditionResult> runConditionPack(const ConditionPack& pack,const
     if(BladeDiagnosis::trialCancelled(cancelled))break;
     ConditionResult item;item.id=r.id;item.title=r.title;
     auto add=[&](QString status,QString reason){item.status=status;item.reason=reason;results<<item;};
-    if(pack.vendor.toStdString()!=actual.vendor||pack.model.toStdString()!=actual.model){add("机型不适用","规则包厂商/机型与当前上下文不匹配");continue;}
+    if(pack.vendor.toStdString()!=actual.vendor||pack.model.toStdString()!=actual.model||(!pack.controller.isEmpty()&&pack.controller.toStdString()!=actual.controller)){add("机型不适用","规则包厂商/机型/控制器与当前上下文不匹配");continue;}
     if(r.state==BladeDiagnosis::RuleState::Disabled){add("已停用","条件未执行");continue;}
     if(r.state==BladeDiagnosis::RuleState::Draft){add("草稿未执行","请先补齐阈值与来源并标为待验证");continue;}
     if(r.state==BladeDiagnosis::RuleState::PendingValidation&&!includePending){add("待验证未执行","未勾选包含待验证条件（仅试跑）");continue;}
@@ -113,7 +113,7 @@ inline QVector<ConditionResult> runConditionPack(const ConditionPack& pack,const
       const auto primary=bindings.value(r.primaryRole);item.primaryField=primary.field;
       packCheck(!conflictingFields.contains(primary.field),"同一测点在多个角色中存在单位、倍率或轴号冲突");
       packCheck(!primary.field.isEmpty()&&data.count(primary.field),"主要角色未映射或测点缺失");
-      auto spec=r.spec;spec.scope={pack.vendor.toStdString(),pack.model.toStdString(),{}};spec.unitsConfirmed=true;
+      auto spec=r.spec;spec.scope={pack.vendor.toStdString(),pack.model.toStdString(),pack.controller.toStdString()};spec.unitsConfirmed=true;
       packCheck(std::isfinite(primary.scale)&&primary.scale>0,"测点倍率无效");spec.gain=conditionUnitGain(primary.unit,r.unit)*primary.scale;spec.primaryAxis=primary.axis;
       std::vector<BladeDiagnosis::RawSample> empty;const auto* reference=&empty;
       if(spec.family==BladeDiagnosis::TrialFamily::PitchFollowing){

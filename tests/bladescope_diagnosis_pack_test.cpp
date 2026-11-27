@@ -11,6 +11,7 @@ int main(){
  bindings["command"]={"command","deg",1,1};for(int i=0;i<=100;++i)data["command"].push_back({i*.01,140});
  auto results=runConditionPack(p,{"demo","model",{}},bindings,data,{0,1000},true,false);for(const auto& r:results)assert(!r.ran);
  results=runConditionPack(p,{"demo","model",{}},bindings,data,{0,1000},true,true);assert(results[0].trial.state==TrialState::Supported&&results[1].trial.state==TrialState::Supported&&results[2].trial.state==TrialState::NotSupported&&results[3].trial.state==TrialState::NotSupported);
+ auto firmware=p;firmware.controller="reviewed-firmware";assert(runConditionPack(firmware,{"demo","model",{}},bindings,data,{0,1000},true,true)[0].status==QString::fromUtf8("机型不适用"));assert(runConditionPack(firmware,{"demo","model","reviewed-firmware"},bindings,data,{0,1000},true,true)[0].ran);
  auto wrong=runConditionPack(p,{"other","model",{}},bindings,data,{0,1000},true,true);for(const auto& r:wrong)assert(!r.ran&&r.status==QString::fromUtf8("机型不适用"));
  auto missing=bindings;missing.remove("role0");assert(!runConditionPack(p,{"demo","model",{}},missing,data,{0,1000},true,true)[0].ran);
  auto mismatch=bindings;mismatch["command"].axis=2;assert(runConditionPack(p,{"demo","model",{}},mismatch,data,{0,1000},true,true)[1].trial.state==TrialState::Invalid);

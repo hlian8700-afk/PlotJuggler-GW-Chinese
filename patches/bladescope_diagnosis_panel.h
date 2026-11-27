@@ -16,7 +16,7 @@ class Panel final:public QWidget {
   QPlainTextEdit* eventDetails=nullptr;
   QDateTimeEdit* center;
   QSpinBox *offset,*before,*after,*maxGap;
-  QLineEdit *vendor,*model;
+  QLineEdit *vendor,*model,*controller;
   QListWidget* measurementList;
   std::function<QStringList()> available;
   std::function<void(QStringList,double,double)> evidence;
@@ -197,7 +197,7 @@ public:
     button("条件规则包",[this]{
       if(vendor->text().trimmed().isEmpty()||model->text().trimmed().isEmpty()){status->setText("请先在事件参数中填写当前厂商与机型，再配置规则包");return;}
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);
-      showConditionPack(this,available(),vendor->text().trimmed(),model->text().trimmed(),t-before->value(),t+after->value(),trialReader,evidence,QString("中心 UTC=%1；SC 偏移=%2 ms；当前窗口事件数=%3；状态含义未配置").arg(iso(qRound64(t*1000))).arg(offset->value()).arg(visible.size()));});
+      showConditionPack(this,available(),vendor->text().trimmed(),model->text().trimmed(),t-before->value(),t+after->value(),trialReader,evidence,QString("中心 UTC=%1；SC 偏移=%2 ms；当前窗口事件数=%3；状态含义未配置").arg(iso(qRound64(t*1000))).arg(offset->value()).arg(visible.size()),controller->text().trimmed());});
     auto navigate=[this](bool forward){
       const qint64 now=center->dateTime().toMSecsSinceEpoch();qint64 target=now;bool found=false;
       for(const auto& item:events){const auto t=BladeDiagnosis::alignedScTime(item.original,item.kind=="SC"?qint64(offset->value()):0);
@@ -207,8 +207,8 @@ public:
     };
     button("上一事件",[navigate]{navigate(false);});button("下一事件",[navigate]{navigate(true);});
     top->addStretch();
-    auto* optionsWidget=new QWidget;auto* options=new QFormLayout(optionsWidget);root->addWidget(optionsWidget);optionsWidget->hide();button("事件参数",[optionsWidget]{optionsWidget->setVisible(!optionsWidget->isVisible());});vendor=new QLineEdit;model=new QLineEdit;
-    vendor->setPlaceholderText("厂商，待确认");model->setPlaceholderText("机型，待确认");options->addRow("厂商 / 机型",vendor);options->addRow("机型",model);
+    auto* optionsWidget=new QWidget;auto* options=new QFormLayout(optionsWidget);root->addWidget(optionsWidget);optionsWidget->hide();button("事件参数",[optionsWidget]{optionsWidget->setVisible(!optionsWidget->isVisible());});vendor=new QLineEdit;model=new QLineEdit;controller=new QLineEdit;
+    vendor->setPlaceholderText("厂商，待确认");model->setPlaceholderText("机型，待确认");options->addRow("厂商 / 机型",vendor);options->addRow("机型",model);options->addRow("控制器/固件标识（可选）",controller);
     center=new QDateTimeEdit(QDateTime::currentDateTimeUtc());center->setTimeSpec(Qt::UTC);center->setDisplayFormat("yyyy-MM-dd HH:mm:ss.zzz");
     offset=new QSpinBox;offset->setRange(-86400000,86400000);offset->setSuffix(" ms");
     before=new QSpinBox;after=new QSpinBox;for(auto* spin:{before,after}){spin->setRange(0,3600);spin->setValue(60);spin->setSuffix(" s");}
