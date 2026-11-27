@@ -1,4 +1,4 @@
-# Local diagnosis preview 2 (3.17.0.19)
+# Vendor event format preview (3.17.0.20)
 
 Stable product baseline remains 3.17.0.18. This preview completes the shared event-import and evidence-navigation milestone, not the four automatic diagnostic algorithms.
 
@@ -19,3 +19,12 @@ Previous/next event buttons use aligned event times. Evidence selections persist
 Actual uploaded SC, ActionList and TR sample compatibility has not been verified because the execution environment is unavailable. Four-family automatic diagnosis, validated rule execution, automatic trigger/recovery interpretation, batch/network jobs and full immutable diagnostic snapshots are subsequent milestones. The event reader retains the 64 MiB file limit. User recordings/configuration tables are not included in CI or releases.
 
 Use the portable preview to compare against stable 3.17.0.18. The installer shares its application ID and installation directory with prior versions.
+
+## Vendor CSV compatibility update
+The header selector now defaults to 0 (automatic). A bounded scan recognizes explicit time and code/action column names. Vendor preamble lines are skipped **before** CSV quote parsing. Manual values identify the nonempty physical header line, so even metadata containing non-CSV quotes is supported. Multiline data fields still use strict CSV parsing.
+
+A terminal standalone //END marker is counted separately and not imported. Nonblank content after it is rejected; //END inside a quoted multiline field remains ordinary data. The preview shows the detected preamble and footer counts.
+
+IEC DT# and DATE_AND_TIME# timestamps accept a date/clock hyphen, single-digit date/hour fields, explicit zones and grouped fractional seconds such as .123_000_000. Only values representable exactly in milliseconds are admitted; finer nonzero precision produces a rejection instead of silent truncation. The selected timezone applies to zone-less text. Original time text is retained in the result and CSV export.
+
+Clicking an event displays its source, record number, original/UTC/aligned timestamps and unmodified status/description. This is evidence inspection, not an automatic root-cause verdict. Regression cases use invented metadata and events; the uploaded real files have not been byte-validated while the execution environment is unavailable.
