@@ -152,3 +152,33 @@ inline Coverage selectFiles(std::vector<FileSlice> files,Interval window) {
   result.complete=!result.slices.empty()&&result.gaps.empty();return result;
 }
 } // namespace BladeDiagnosis
+
+namespace BladeDiagnosis {
+struct RawSample {double time=0,value=0;}; // Absolute seconds; no rendering decimation.
+struct WindowQuality {
+  std::size_t finite=0,invalid=0,duplicates=0,backwards=0;
+  double maxGapSeconds=0;
+  bool boundsCovered=false,ready=false;
+};
+inline WindowQuality inspectWindow(const std::vector<RawSample>& samples,Interval window,std::int64_t maximumGapMs){
+  if(!window.valid()||maximumGapMs<=0)throw std::invalid_argument("invalid quality window or gap limit");
+  WindowQuality result;const double lo=window.begin/1000.,hi=window.end/1000.;
+  double first=std::numeric_limits<double>::infinity(),last=-first,previous=0;bool havePrevious=false;
+  for(const auto& sample:samples){
+    if(!std::isfinite(sample.time)){++result.invalid;continue;}
+    if(std::isfinite(sample.value)){first=std::min(first,sample.time);last=std::max(last,sample.time);}
+    if(sample.time<lo||sample.time>hi)continue;
+    if(havePrevious){const auto delta=sample.time-previous;
+      if(delta==0)++result.duplicates;else if(delta<0)++result.backwards;
+      else result.maxGapSeconds=std::max(result.maxGapSeconds,delta);
+    }
+    previous=sample.time;havePrevious=true;
+    if(!std::isfinite(sample.value)){++result.invalid;continue;}
+    ++result.finite;
+  }
+  result.boundsCovered=first<=lo&&last>=hi;
+  result.ready=result.finite>0&&result.boundsCovered&&!result.invalid&&!result.duplicates&&!result.backwards&&
+    result.maxGapSeconds<=maximumGapMs/1000.+1e-6;
+  return result;
+}
+}

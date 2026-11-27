@@ -6,6 +6,7 @@ on:
       - 'patches/bladescope_diagnosis_core.h'
       - 'tools/import_diagnosis_config.py'
       - 'tests/bladescope_diagnosis_test.cpp'
+      - 'tests/bladescope_diagnosis_quality_test.cpp'
       - 'tests/test_diagnosis_import.py'
       - '.github/workflows/diagnosis-foundation.yml'
       - 'patches/bladescope_diagnosis_events.h'
@@ -23,6 +24,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -pedantic -UNDEBUG -fsanitize=undefined,address -g -I patches tests/bladescope_diagnosis_test.cpp -o /tmp/diagnosis-test
           /tmp/diagnosis-test
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -UNDEBUG -I patches tests/bladescope_diagnosis_quality_test.cpp -o /tmp/quality-test
+          /tmp/quality-test
       - name: Verify draft configuration import
         run: python3 -m unittest discover -s tests -p 'test_diagnosis_import.py' -v
       - name: Verify existing analysis regressions

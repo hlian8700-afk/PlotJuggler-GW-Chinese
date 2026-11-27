@@ -99,10 +99,11 @@ int main(int argc,char** argv){
    QTimer::singleShot(10000,&confirm,[&]{confirm.stop();for(auto* d:panel.findChildren<QDialog*>())d->reject();});
    confirm.start();panel.importEventFile(input.fileName(),kind);assert(accepted);
    QEventLoop waiting;QTimer check;check.setInterval(20);
-   const int expected=kind=="SC"?2:4;
+   const int expected=2;
    QObject::connect(&check,&QTimer::timeout,&waiting,[&]{if(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected)waiting.quit();});
    QTimer::singleShot(10000,&waiting,&QEventLoop::quit);check.start();waiting.exec();
    assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected);
+   assert(panel.findChild<QLabel*>("diagnosisEventQuality")->text().contains(kind=="SC"?"已加载 2 条":"已加载 4 条"));
    QMetaObject::invokeMethod(panel.findChild<QTableWidget*>("diagnosisEventTable"),"cellClicked",Qt::DirectConnection,Q_ARG(int,0),Q_ARG(int,0));
    assert(panel.findChild<QPlainTextEdit*>("diagnosisSingleEventDetails")->toPlainText().contains("DT#"));
  }

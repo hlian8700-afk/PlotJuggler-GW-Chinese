@@ -13,7 +13,7 @@ class Panel final:public QWidget {
   QLabel *status,*quality;
   QPlainTextEdit* eventDetails=nullptr;
   QDateTimeEdit* center;
-  QSpinBox *offset,*before,*after;
+  QSpinBox *offset,*before,*after,*maxGap;
   QLineEdit *vendor,*model;
   QListWidget* measurementList;
   std::function<QStringList()> available;
@@ -156,7 +156,11 @@ class Panel final:public QWidget {
       const bool keepCenter=kind=="ActionList"&&!events.empty();
       events.erase(std::remove_if(events.begin(),events.end(),[&](const auto& e){return e.kind==kind&&e.source==result->events.front().source;}),events.end());
       events+=result->events;
-      const qint64 t=result->events.front().original+(kind=="SC"?qint64(offset->value()):0);
+      qint64 t=result->events.front().original+(kind=="SC"?qint64(offset->value()):0);
+      if(!keepCenter&&recordingRange){const auto range=recordingRange();
+        for(const auto& event:result->events){const auto aligned=event.original+(kind=="SC"?qint64(offset->value()):0);
+          if(aligned/1000.>=range.first&&aligned/1000.<=range.second){t=aligned;break;}}
+      }
       if(!keepCenter)center->setDateTime(QDateTime::fromMSecsSinceEpoch(t,Qt::UTC));refresh();
       status->setText(QString("导入 %1 条，拒绝 %2 条。当前仅事件核对，尚未启用自动故障结论。").arg(result->events.size()).arg(result->errors.size()));
       if(!result->errors.empty()){QMessageBox msg(QMessageBox::Warning,"部分记录被拒绝","展开详情查看错误；未静默忽略无效记录。",QMessageBox::Ok,this);
@@ -178,6 +182,8 @@ class Panel final:public QWidget {
     QSqlDatabase::removeDatabase(name);QMessageBox::information(this,"规则包检查",message);
   }
 public:
+  std::function<std::pair<double,double>()> recordingRange;
+  std::function<QStringList(QStringList,double,double,int)> inspectDataQuality;
   void importEventFile(const QString& path,const QString& kind){if(kind=="SC"||kind=="ActionList")load(kind,path);}
   Panel(std::function<QStringList()> names,std::function<void(QStringList,double,double)> draw,
         std::function<void()> back,QWidget* parent=nullptr):QWidget(parent),available(std::move(names)),evidence(std::move(draw)){
@@ -200,6 +206,7 @@ public:
     offset=new QSpinBox;offset->setRange(-86400000,86400000);offset->setSuffix(" ms");
     before=new QSpinBox;after=new QSpinBox;for(auto* spin:{before,after}){spin->setRange(0,3600);spin->setValue(60);spin->setSuffix(" s");}
     options->addRow("事件中心（UTC）",center);options->addRow("SC 手动对时偏移",offset);
+    maxGap=new QSpinBox;maxGap->setRange(1,3600000);maxGap->setValue(100);maxGap->setSuffix(" ms");options->addRow("允许的最大采样间隔",maxGap);
     options->addRow("前窗口",before);options->addRow("后窗口",after);
     table=new QTableWidget(0,8);table->setObjectName("diagnosisEventTable");table->setHorizontalHeaderLabels({"原始时间","对齐时间（UTC）","来源类别","代码/动作","状态原文","源文件","非空记录号","说明原文"});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->setSelectionBehavior(QAbstractItemView::SelectRows);table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);table->horizontalHeader()->setDefaultSectionSize(160);root->addWidget(table,2);
@@ -212,13 +219,24 @@ public:
         .arg(item.kind=="SC"?offset->value():0).arg(item.state).arg(item.description).arg(item.source).arg(item.row));
     });
     measurementList=new QListWidget;measurementList->setObjectName("diagnosisEvidenceSignals");measurementList->setMaximumHeight(150);measurementList->setSelectionMode(QAbstractItemView::ExtendedSelection);root->addWidget(measurementList);
-    quality=new QLabel;quality->setWordWrap(true);root->addWidget(quality);
+    quality=new QLabel;quality->setObjectName("diagnosisEventQuality");quality->setWordWrap(true);root->addWidget(quality);
     status=new QLabel("请先用主界面加载录波；SC 和动作清单均可选。当前为本地事件核对与证据查看基础界面，未启用自动诊断。");status->setWordWrap(true);root->addWidget(status);
     auto* bottom=new QHBoxLayout;root->addLayout(bottom);
     auto* show=new QPushButton("在录波视图查看所选证据");bottom->addWidget(show);
     connect(show,&QPushButton::clicked,this,[this]{QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();
       if(fields.empty()||fields.size()>16){status->setText("请选择 1～16 个证据测点");return;}
       const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);evidence(fields,t-before->value(),t+after->value());});
+    auto* checkQuality=new QPushButton("诊断前数据检查");bottom->addWidget(checkQuality);
+    connect(checkQuality,&QPushButton::clicked,this,[this]{
+      QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();
+      if(fields.empty()||fields.size()>16){status->setText("请选择 1～16 个证据测点");return;}
+      if(!inspectDataQuality){status->setText("当前数据源未提供完整原始样本检查接口");return;}
+      const double t=center->dateTime().toMSecsSinceEpoch()/1000.;
+      const auto report=inspectDataQuality(fields,t-before->value(),t+after->value(),maxGap->value());
+      QDialog dialog(this);dialog.setWindowTitle("诊断前数据质量（原始样本）");dialog.resize(850,450);
+      auto* layout=new QVBoxLayout(&dialog);auto* text=new QPlainTextEdit(report.join('\n'));text->setReadOnly(true);layout->addWidget(text);
+      auto* close=new QDialogButtonBox(QDialogButtonBox::Close);layout->addWidget(close);connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);dialog.exec();
+    });
     auto* exportButton=new QPushButton("导出当前事件窗口 CSV");bottom->addWidget(exportButton);
     connect(exportButton,&QPushButton::clicked,this,[this]{
       const auto path=QFileDialog::getSaveFileName(this,"导出事件窗口",{},"CSV (*.csv)");if(path.isEmpty())return;

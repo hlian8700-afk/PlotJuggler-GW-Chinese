@@ -2150,6 +2150,30 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
         waveform->plotDiagnosticEvidence(fields,lo,hi,diagnostics?diagnostics->property("diagnosisCenterUtc").toDouble():std::numeric_limits<double>::quiet_NaN());
       };
       auto* panel=new BladeDiagnosisUI::Panel(names,draw,[this]{ui->widgetStack->setCurrentIndex(0);});
+      panel->recordingRange=[this]{
+        double lo=std::numeric_limits<double>::infinity(),hi=-lo;
+        for(const auto& pair:_mapped_plot_data.numeric)if(pair.second.size()){
+          if(std::isfinite(pair.second.front().x))lo=std::min(lo,pair.second.front().x);
+          if(std::isfinite(pair.second.back().x))hi=std::max(hi,pair.second.back().x);}
+        return std::make_pair(lo,hi);
+      };
+      panel->inspectDataQuality=[this](QStringList fields,double lo,double hi,int maximumGap){
+        QStringList report;report<<QStringLiteral("检查原始样本，未使用绘图抽稀数据。通过数据检查不等于已证明无故障；不通过时不应生成确定性规则结论。");
+        for(const auto& field:fields){
+          const auto found=_mapped_plot_data.numeric.find(field.toStdString());
+          if(found==_mapped_plot_data.numeric.end()){report<<field+QStringLiteral("：数据不足，测点缺失");continue;}
+          const auto& raw=found->second;auto begin=BladeAnalysis::boundary(raw,lo),end=BladeAnalysis::boundary(raw,hi,true);
+          if(begin) --begin;if(end<raw.size())++end;
+          std::vector<BladeDiagnosis::RawSample> points;points.reserve(end-begin);
+          for(auto i=begin;i<end;++i)points.push_back({raw.at(i).x,raw.at(i).y});
+          const auto q=BladeDiagnosis::inspectWindow(points,{qRound64(lo*1000),qRound64(hi*1000)},maximumGap);
+          report<<QStringLiteral("%1：%2；有效 %3，无效 %4，重复时间 %5，倒序 %6，最大间隔 %7 ms，覆盖窗口 %8")
+            .arg(field).arg(q.ready?QStringLiteral("通过数据前置检查"):QStringLiteral("数据不足/质量异常"))
+            .arg(qulonglong(q.finite)).arg(qulonglong(q.invalid)).arg(qulonglong(q.duplicates)).arg(qulonglong(q.backwards))
+            .arg(q.maxGapSeconds*1000,0,'g',8).arg(q.boundsCovered?QStringLiteral("是"):QStringLiteral("否"));
+        }
+        return report;
+      };
       auto* scroll=new QScrollArea(ui->widgetStack);scroll->setWidgetResizable(true);scroll->setFrameShape(QFrame::NoFrame);scroll->setWidget(panel);
       ui->widgetStack->addWidget(scroll);widget=panel;
     }
