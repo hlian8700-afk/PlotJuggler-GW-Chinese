@@ -2,7 +2,7 @@ name: Windows x64 build (PlotJuggler 3.17.0)
 
 on:
   push:
-    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56, feature/analysis-ui-remediation, feature/shared-workspace-18, feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv ]
+    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56, feature/analysis-ui-remediation, feature/shared-workspace-18, feature/diagnosis-foundation, feature/diagnosis-import-preview2, feature/diagnosis-vendor-csv, feature/diagnosis-real-sample ]
     paths:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
@@ -200,7 +200,7 @@ jobs:
       - name: Package portable x64 build
         shell: pwsh
         run: |
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.20-win64-portable.zip" -Force
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.21-win64-portable.zip" -Force
 
       - name: Build Windows EXE installer
         shell: pwsh
@@ -211,14 +211,14 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
-          $setup = "customization/installer/BladeScope-3.17.0.20-win64-Setup.exe"
+          $setup = "customization/installer/BladeScope-3.17.0.21-win64-Setup.exe"
           if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
           Write-Host "Installer created: $setup"
 
       - name: Smoke test EXE installer and Chinese mapping
         shell: pwsh
         run: |
-          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.20-win64-Setup.exe"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.21-win64-Setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
@@ -286,23 +286,23 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.20-win64' || 'BladeScope-3.17.0.20-win64-demo' }}
+          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.21-win64' || 'BladeScope-3.17.0.21-win64-demo' }}
           path: |
-            BladeScope-3.17.0.20-win64-portable.zip
-            customization/installer/BladeScope-3.17.0.20-win64-Setup.exe
+            BladeScope-3.17.0.21-win64-portable.zip
+            customization/installer/BladeScope-3.17.0.21-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30
 
       - name: Publish local diagnosis preview after installed acceptance
-        if: github.ref_name == 'feature/diagnosis-vendor-csv'
+        if: github.ref_name == 'feature/diagnosis-real-sample'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $versionTag = "v3.17.0.20-preview.1"
-          $portable = "BladeScope-3.17.0.20-win64-portable.zip"
-          $installer = "customization/installer/BladeScope-3.17.0.20-win64-Setup.exe"
-          $bundle = "BladeScope-3.17.0.20-win64.zip"
+          $versionTag = "v3.17.0.21-preview.1"
+          $portable = "BladeScope-3.17.0.21-win64-portable.zip"
+          $installer = "customization/installer/BladeScope-3.17.0.21-win64-Setup.exe"
+          $bundle = "BladeScope-3.17.0.21-win64.zip"
           Compress-Archive -LiteralPath $portable, $installer -DestinationPath $bundle -CompressionLevel NoCompression
           $notes = Join-Path $env:RUNNER_TEMP "bladescope-release-notes.md"
           @'
@@ -310,9 +310,9 @@ jobs:
 
           新增“分析 → 故障分析（预览）”：使用当前已加载录波，导入可选 SC / ActionList CSV，明确列、编码、时区与时间单位，手动 SC 对时，查看和导出事件窗口，选择测点返回录波视图查看证据。
           支持检查本地 SQLite 草稿规则包。未启用四类自动诊断、自动故障结论、批量诊断或自动 SC 状态解释。
-          修复厂商 CSV 的前置机组说明、自动表头定位、DT# / DATE_AND_TIME# 时间及 //END 结束标记。新增单条事件来源详情，保留并导出原始时间文本。时区仍需用户明确确认。
-          合成解析与导入对话框测试及 Windows 安装界面检查通过；用户真实故障样本尚未验证。不包含用户上传的配置表、机组台账或录波。
+          补齐 stTriggerTimeStamp 列名、无表头四列 ActionList、单数字时分秒与原始时间保留。SC 优先定位到已加载录波内的事件；关联窗口外 ActionList 不改变事件中心。新增诊断前原始样本质量检查，报告缺测、时间重复/倒序和采样间隔，不将数据不足当作正常。
+          合成解析与导入对话框测试及 Windows 安装界面检查通过；真实样本已在本地核对结构、全部时间字段和时间覆盖，原始录波数据质量检查检出了重复时间戳。尚未完成原文件在 Windows 安装界面的端到端验证。不包含用户上传的配置表、机组台账或录波。
           安装包和便携版用于预览反馈。需导入已有中文点表。
           '@ | Set-Content -LiteralPath $notes -Encoding UTF8
-          gh release create $versionTag $installer $portable $bundle --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "BladeScope 3.17.0.20 厂商事件格式兼容预览 1" --notes-file $notes --prerelease
+          gh release create $versionTag $installer $portable $bundle --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "BladeScope 3.17.0.21 真实样本兼容与诊断前检查预览" --notes-file $notes --prerelease
           if ($LASTEXITCODE -ne 0) { throw "Release publication failed; existing releases are not overwritten" }
