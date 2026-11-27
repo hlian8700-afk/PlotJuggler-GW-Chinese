@@ -93,11 +93,11 @@ inline BatchResult runBatchJob(const BatchJob& job,const ConditionPack& pack,con
   }catch(const std::exception& e){result.error=QString::fromUtf8(e.what());result.state=BladeDiagnosis::trialCancelled(cancel)?"已取消":"失败";result.report={};}return result;
 }
 // A run owns immutable parameter copies. One file failure never stops later jobs.
-inline QVector<BatchResult> runBatchQueue(QVector<BatchJob> jobs,ConditionPack pack,QMap<QString,RoleBinding> bindings,BatchOptions options,const std::atomic_bool* cancel,const std::function<void(int,const BatchResult&)>& completed={}){
+inline QVector<BatchResult> runBatchQueue(QVector<BatchJob> jobs,ConditionPack pack,QMap<QString,RoleBinding> bindings,BatchOptions options,const std::atomic_bool* cancel,const std::function<void(int,const BatchResult&)>& completed={},const std::function<void(int)>& started={}){
   packCheck(jobs.size()<=200,"单批最多 200 个任务");QSet<QString> ids;
   for(const auto& job:jobs){packCheck(!ids.contains(job.id),"批量任务 ID 重复");ids.insert(job.id);}
   QVector<BatchResult> results;BatchRunCache cache;
-  for(int i=0;i<jobs.size();++i){if(BladeDiagnosis::trialCancelled(cancel))break;auto result=runBatchJob(jobs[i],pack,bindings,options,cancel,&cache);if(completed)completed(i,result);if(!result.reportPath.isEmpty())result.report={};results<<result;if(BladeDiagnosis::trialCancelled(cancel))break;}
+  for(int i=0;i<jobs.size();++i){if(BladeDiagnosis::trialCancelled(cancel))break;if(started)started(i);auto result=runBatchJob(jobs[i],pack,bindings,options,cancel,&cache);if(completed)completed(i,result);if(!result.reportPath.isEmpty())result.report={};results<<result;if(BladeDiagnosis::trialCancelled(cancel))break;}
   return results;
 }
 
