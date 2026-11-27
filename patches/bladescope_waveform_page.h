@@ -21,6 +21,7 @@
 #include <QToolTip>
 #include <qwt_plot.h>
 #include <qwt_plot_curve.h>
+#include <qwt_plot_marker.h>
 #include "bladescope_trend.h"
 
 namespace BladeWaveform
@@ -307,7 +308,7 @@ public:
       target->setZoomRectangle(rect,false);target->replot();
     }
   }
-  void plotDiagnosticEvidence(const QStringList& fields,double lo,double hi){
+  void plotDiagnosticEvidence(const QStringList& fields,double lo,double hi,double eventCenter=std::numeric_limits<double>::quiet_NaN()){
     setCurveMode(false);setMode(true,true);analysisMode=0;modes->button(0)->setChecked(true);
     groups->setCurrentIndex(0);refreshTags(true);
     for(int i=0;i<tags->count();++i)tags->item(i)->setCheckState(fields.contains(tags->item(i)->data(Qt::UserRole).toString())?Qt::Checked:Qt::Unchecked);
@@ -315,7 +316,39 @@ public:
     end->setDateTime(QDateTime::fromMSecsSinceEpoch(qRound64(hi*1000),Qt::UTC));
     startEnabled->setChecked(true);endEnabled->setChecked(true);filterEnabled=false;
     refreshAnalysisParameters();draw(fields);
-    status->setText(status->text()+QStringLiteral("；诊断证据窗口，条件筛选已关闭，未自动判断故障原因"));
+    QStringList coverage;
+    for(const auto& field:fields){
+      const auto entry=source.numeric.find(field.toStdString());
+      if(entry==source.numeric.end()){coverage<<field+QStringLiteral("：测点缺失");continue;}
+      const auto& raw=entry->second;
+      size_t count=0,invalid=0;double first=std::numeric_limits<double>::infinity(),last=-first,previous=-first,maxGap=0;bool monotonic=true;
+      for(size_t i=0;i<raw.size();++i){
+        const auto sample=raw.at(i);if(!std::isfinite(sample.x)){++invalid;continue;}
+        if(sample.x<lo||sample.x>hi)continue;
+        if(!std::isfinite(sample.y)){++invalid;continue;}
+        if(count){if(sample.x<=previous)monotonic=false;else maxGap=std::max(maxGap,sample.x-previous);}
+        first=std::min(first,sample.x);last=std::max(last,sample.x);previous=sample.x;++count;
+      }
+      coverage<<QStringLiteral("%1：原始有效 %2 点，无效 %3 点，最大相邻间隔 %4 s；%5；%6")
+        .arg(field).arg(qulonglong(count)).arg(qulonglong(invalid)).arg(maxGap,0,'g',6)
+        .arg(!count?QStringLiteral("窗口内无数据"):(first>lo||last<hi)?QStringLiteral("有效点未覆盖窗口端点"):QStringLiteral("有效点覆盖窗口端点"))
+        .arg(monotonic?QStringLiteral("有效点时间递增"):QStringLiteral("存在重复/倒序时间"));
+    }
+    if(canvas&&std::isfinite(eventCenter)&&eventCenter>=lo&&eventCenter<=hi){
+      auto* marker=new QwtPlotMarker;marker->setTitle(QStringLiteral("诊断事件中心"));
+      marker->setLineStyle(QwtPlotMarker::VLine);marker->setLinePen(QPen(QColor("#d97706"),1.5,Qt::DashLine));
+      marker->setXValue(eventCenter-plot->timeOffset());marker->setLabel(QwtText(QStringLiteral("事件中心（非根因判定）")));
+      marker->setLabelAlignment(Qt::AlignTop|Qt::AlignRight);marker->setItemAttribute(QwtPlotItem::Legend,false);marker->attach(canvas);canvas->replot();
+    }
+    status->setText(status->text()+QStringLiteral("；诊断证据窗口，条件筛选已关闭；原始数据覆盖详情见提示，未自动判断故障原因"));
+    status->setToolTip(coverage.join('\n'));
+    auto* detail=findChild<QLabel*>("bladeDiagnosticCoverage");
+    if(!detail){detail=new QLabel(this);detail->setObjectName("bladeDiagnosticCoverage");detail->setWordWrap(true);workspace->addWidget(detail);}
+    detail->setText(coverage.join('\n'));detail->hide();
+    auto* toggle=findChild<QPushButton*>("bladeDiagnosticCoverageToggle");
+    if(!toggle){toggle=new QPushButton(QStringLiteral("查看原始数据覆盖详情"),this);toggle->setObjectName("bladeDiagnosticCoverageToggle");workspace->addWidget(toggle);
+      connect(toggle,&QPushButton::clicked,detail,[detail]{detail->setVisible(!detail->isVisible());});}
+    toggle->show();
   }
   void setMode(bool waveform, bool plotting)
   {
@@ -1618,6 +1651,9 @@ private:
     const double hi = endEnabled->isChecked() ? end->dateTime().toMSecsSinceEpoch()/1000. : infinity;
     if (lo > hi) { status->setText(QStringLiteral("开始时间不能晚于结束时间。")); return false; }
     resetAnalysisPanel();
+    if(auto* detail=findChild<QLabel*>("bladeDiagnosticCoverage"))detail->hide();
+    if(auto* toggle=findChild<QPushButton*>("bladeDiagnosticCoverageToggle"))toggle->hide();
+    if(canvas)for(auto* item:canvas->itemList())if(item->rtti()==QwtPlotItem::Rtti_PlotMarker&&item->title().text()==QStringLiteral("诊断事件中心"))delete item;
     if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->hide();plot->show();
     plot->removeAllCurves();
     shown->numeric.clear();

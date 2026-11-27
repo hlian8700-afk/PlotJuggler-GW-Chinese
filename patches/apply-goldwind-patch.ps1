@@ -2146,7 +2146,8 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
       auto draw=[this](QStringList fields,double lo,double hi){
         auto* page=ui->widgetStack->findChild<QWidget*>("bladeWaveformPage");if(!page)return;
         auto* waveform=static_cast<BladeWaveform::Page*>(page);ui->widgetStack->setCurrentWidget(page);
-        waveform->plotDiagnosticEvidence(fields,lo,hi);
+        auto* diagnostics=ui->widgetStack->findChild<QWidget*>("bladeDiagnosisPanel");
+        waveform->plotDiagnosticEvidence(fields,lo,hi,diagnostics?diagnostics->property("diagnosisCenterUtc").toDouble():std::numeric_limits<double>::quiet_NaN());
       };
       auto* panel=new BladeDiagnosisUI::Panel(names,draw,[this]{ui->widgetStack->setCurrentIndex(0);});
       auto* scroll=new QScrollArea(ui->widgetStack);scroll->setWidgetResizable(true);scroll->setFrameShape(QFrame::NoFrame);scroll->setWidget(panel);

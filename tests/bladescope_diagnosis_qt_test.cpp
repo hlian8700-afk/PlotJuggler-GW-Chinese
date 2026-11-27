@@ -38,6 +38,9 @@ int main(int argc,char** argv){
  auto accounted=importEvents(preamble,ImportOptions{},"synthetic.csv","SC");
  assert(accounted.events.size()==2&&accounted.errors.size()==1&&accounted.events[0].row==3);
  bool single=false;try{detectCsv("entire header\none record\n");}catch(const std::runtime_error&){single=true;}assert(single);
+ ImportOptions desc;desc.descriptionColumn=2;
+ auto explained=importEvents(parseCsv("time,code,description\n1,A,detail\n"),desc,"synthetic.csv","ActionList");
+ assert(explained.events[0].description=="detail");
  bool drew=false;
  Panel panel([]{return QStringList{"synthetic_signal"};},[&](QStringList names,double lo,double hi){
    assert(names==QStringList{"synthetic_signal"});assert(hi-lo==120);drew=true;
@@ -45,6 +48,6 @@ int main(int argc,char** argv){
  panel.enter();auto* list=panel.findChild<QListWidget*>("diagnosisEvidenceSignals");
  assert(list&&list->count()==1);list->item(0)->setSelected(true);
  for(auto* b:panel.findChildren<QPushButton*>())if(b->text()=="在录波视图查看所选证据")b->click();
- assert(drew);assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->columnCount()==7);
+ assert(drew);assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->columnCount()==8);
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }

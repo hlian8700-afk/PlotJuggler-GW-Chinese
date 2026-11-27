@@ -31,7 +31,7 @@ class Panel final:public QWidget {
     std::stable_sort(visible.begin(),visible.end(),[](const auto& a,const auto& b){return a.aligned<b.aligned;});
     for(const auto& item:visible){
       const int row=table->rowCount();table->insertRow(row);
-      QStringList cells{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row)};
+      QStringList cells{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row),item.description};
       for(int col=0;col<cells.size();++col){auto* cell=new QTableWidgetItem(cells[col]);cell->setToolTip(cells[col]);table->setItem(row,col,cell);}
     }
     quality->setText(QStringLiteral("当前窗口 %1 条 / 已加载 %2 条；SC 对齐 = 原始时间 + %3 ms，TR 不移动。状态值保留原文，不猜测触发/恢复含义。")
@@ -57,14 +57,14 @@ class Panel final:public QWidget {
     QSpinBox header;header.setRange(1,10000);header.setValue(settings.value(prefix+"header",1).toInt());
     QCheckBox validOnly("仅导入有效记录（保留全部拒绝原因）");
     f->addRow("编码",&enc);f->addRow("分隔符",&sep);f->addRow("表头：第几个非空 CSV 记录",&header);f->addRow(&validOnly);
-    QComboBox times,codes,states;
-    for(auto* combo:{&times,&codes,&states}){
+    QComboBox times,codes,states,descriptions;
+    for(auto* combo:{&times,&codes,&states,&descriptions}){
       combo->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
       combo->setMinimumContentsLength(12);combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-      combo->setMaxVisibleItems(10);combo->view()->setTextElideMode(Qt::ElideRight);
+      combo->setMaxVisibleItems(10);combo->view()->setTextElideMode(Qt::ElideRight);combo->view()->setMaximumWidth(qMin(800,screen.width()-80));
       connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),&d,[combo]{combo->setToolTip(combo->currentText());});
     }
-    f->addRow("时间列",&times);f->addRow("代码/动作列",&codes);f->addRow("状态列（可选）",&states);
+    f->addRow("时间列",&times);f->addRow("代码/动作列",&codes);f->addRow("状态列（可选）",&states);f->addRow("说明列（可选）",&descriptions);
     QComboBox unit,zone;unit.addItems({"数字时间：Unix 秒","数字时间：Unix 毫秒"});zone.addItems({"无时区文本按 UTC","无时区文本按 UTC+08:00"});
     unit.setCurrentIndex(settings.value(prefix+"unit",0).toInt());zone.setCurrentIndex(settings.value(prefix+"zone",0).toInt());
     QLineEdit format(settings.value(prefix+"format","yyyy-MM-dd HH:mm:ss.zzz").toString());
@@ -81,7 +81,7 @@ class Panel final:public QWidget {
     Csv csv;ImportOptions o;bool ready=false;
     auto invalidate=[&]{ready=false;buttons.button(QDialogButtonBox::Ok)->setEnabled(false);};
     auto validate=[&]{
-      o.timeColumn=times.currentIndex();o.codeColumn=codes.currentIndex();o.stateColumn=states.currentIndex()-1;
+      o.timeColumn=times.currentIndex();o.codeColumn=codes.currentIndex();o.stateColumn=states.currentIndex()-1;o.descriptionColumn=descriptions.currentIndex()-1;
       o.numericMilliseconds=unit.currentIndex()==1;o.utcOffsetSeconds=zone.currentIndex()?28800:0;o.dateFormat=format.text();
       int good=0;
       if(ready&&o.timeColumn>=0&&o.codeColumn>=0&&o.timeColumn!=o.codeColumn)
@@ -92,7 +92,7 @@ class Panel final:public QWidget {
         .arg(good?"":"请修正时间列、代码列或时间格式。"):"请重新预览。");
     };
     auto rebuild=[&]{
-      invalidate();times.clear();codes.clear();states.clear();preview.clear();preview.setRowCount(0);
+      invalidate();times.clear();codes.clear();states.clear();descriptions.clear();preview.clear();preview.setRowCount(0);
       struct Parsed {CsvDetection value;QString error;};auto result=std::make_shared<Parsed>();
       auto cancelled=std::make_shared<std::atomic_bool>(false);
       const QString encodingName=enc.currentText();
@@ -108,12 +108,12 @@ class Panel final:public QWidget {
       if(!result->error.isEmpty()){summary.setText(result->error);return;}
       csv=std::move(result->value.csv);
       for(auto* combo:{&times,&codes})combo->addItems(csv.headers);
-      states.addItem("未提供");states.addItems(csv.headers);
+      states.addItem("未提供");states.addItems(csv.headers);descriptions.addItem("未提供");descriptions.addItems(csv.headers);
       auto restore=[&](QComboBox& combo,QString key,int fallback){
         const int i=combo.findText(settings.value(prefix+key).toString());combo.setCurrentIndex(i>=0?i:fallback);
         for(int j=0;j<combo.count();++j)combo.setItemData(j,combo.itemText(j),Qt::ToolTipRole);
       };
-      restore(times,"time",0);restore(codes,"code",1);restore(states,"state",0);
+      restore(times,"time",0);restore(codes,"code",1);restore(states,"state",0);restore(descriptions,"description",0);
       preview.setColumnCount(csv.headers.size());preview.setHorizontalHeaderLabels(csv.headers);
       preview.setRowCount(qMin(20,csv.rows.size()));
       for(int i=0;i<preview.rowCount();++i)for(int j=0;j<csv.headers.size();++j){
@@ -126,7 +126,7 @@ class Panel final:public QWidget {
     connect(&retry,&QPushButton::clicked,&d,rebuild);
     for(auto* combo:{&enc,&sep})connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),&d,invalidate);
     connect(&header,qOverload<int>(&QSpinBox::valueChanged),&d,invalidate);connect(&validOnly,&QCheckBox::toggled,&d,invalidate);
-    for(auto* combo:{&times,&codes,&states,&unit,&zone})connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),&d,validate);
+    for(auto* combo:{&times,&codes,&states,&descriptions,&unit,&zone})connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),&d,validate);
     connect(&format,&QLineEdit::textChanged,&d,validate);
     connect(&buttons,&QDialogButtonBox::accepted,&d,&QDialog::accept);connect(&buttons,&QDialogButtonBox::rejected,&d,&QDialog::reject);
     QTimer::singleShot(0,&d,rebuild);
@@ -134,7 +134,7 @@ class Panel final:public QWidget {
     validate();if(!buttons.button(QDialogButtonBox::Ok)->isEnabled())return;
     settings.setValue(prefix+"encoding",enc.currentText());settings.setValue(prefix+"separator",sep.currentIndex());
     settings.setValue(prefix+"header",header.value());settings.setValue(prefix+"time",times.currentText());
-    settings.setValue(prefix+"code",codes.currentText());settings.setValue(prefix+"state",states.currentText());
+    settings.setValue(prefix+"code",codes.currentText());settings.setValue(prefix+"state",states.currentText());settings.setValue(prefix+"description",descriptions.currentText());
     settings.setValue(prefix+"unit",unit.currentIndex());settings.setValue(prefix+"zone",zone.currentIndex());settings.setValue(prefix+"format",format.text());
     if(cancellation)cancellation->store(true);cancellation=std::make_shared<std::atomic_bool>(false);const auto cancel=cancellation;const int ticket=++generation;
     auto result=std::make_shared<Imported>();auto error=std::make_shared<QString>();
@@ -190,8 +190,8 @@ public:
     before=new QSpinBox;after=new QSpinBox;for(auto* spin:{before,after}){spin->setRange(0,3600);spin->setValue(60);spin->setSuffix(" s");}
     options->addRow("事件中心（UTC）",center);options->addRow("SC 手动对时偏移",offset);
     options->addRow("前窗口",before);options->addRow("后窗口",after);
-    table=new QTableWidget(0,7);table->setObjectName("diagnosisEventTable");table->setHorizontalHeaderLabels({"原始时间","对齐时间（UTC）","来源类别","代码/动作","状态原文","源文件","数据记录号"});
-    table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->setSelectionBehavior(QAbstractItemView::SelectRows);table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);root->addWidget(table,2);
+    table=new QTableWidget(0,8);table->setObjectName("diagnosisEventTable");table->setHorizontalHeaderLabels({"原始时间","对齐时间（UTC）","来源类别","代码/动作","状态原文","源文件","非空记录号","说明原文"});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->setSelectionBehavior(QAbstractItemView::SelectRows);table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);table->horizontalHeader()->setDefaultSectionSize(160);root->addWidget(table,2);
     measurementList=new QListWidget;measurementList->setObjectName("diagnosisEvidenceSignals");measurementList->setMaximumHeight(150);measurementList->setSelectionMode(QAbstractItemView::ExtendedSelection);root->addWidget(measurementList);
     quality=new QLabel;quality->setWordWrap(true);root->addWidget(quality);
     status=new QLabel("请先用主界面加载录波；SC 和动作清单均可选。当前为本地事件核对与证据查看基础界面，未启用自动诊断。");status->setWordWrap(true);root->addWidget(status);
@@ -199,12 +199,12 @@ public:
     auto* show=new QPushButton("在录波视图查看所选证据");bottom->addWidget(show);
     connect(show,&QPushButton::clicked,this,[this]{QStringList fields;for(auto* item:measurementList->selectedItems())fields<<item->text();
       if(fields.empty()||fields.size()>16){status->setText("请选择 1～16 个证据测点");return;}
-      const double t=center->dateTime().toMSecsSinceEpoch()/1000.;evidence(fields,t-before->value(),t+after->value());});
+      const double t=center->dateTime().toMSecsSinceEpoch()/1000.;setProperty("diagnosisCenterUtc",t);evidence(fields,t-before->value(),t+after->value());});
     auto* exportButton=new QPushButton("导出当前事件窗口 CSV");bottom->addWidget(exportButton);
     connect(exportButton,&QPushButton::clicked,this,[this]{
       const auto path=QFileDialog::getSaveFileName(this,"导出事件窗口",{},"CSV (*.csv)");if(path.isEmpty())return;
-      QByteArray bytes("\xEF\xBB\xBF");bytes+="original_utc,aligned_utc,kind,code,state,source,record,offset_ms,vendor,model\n";
-      for(const auto& item:visible){QStringList row{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row),QString::number(item.kind=="SC"?offset->value():0),vendor->text(),model->text()};
+      QByteArray bytes("\xEF\xBB\xBF");bytes+="original_utc,aligned_utc,kind,code,state,source,record,offset_ms,vendor,model,description\n";
+      for(const auto& item:visible){QStringList row{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row),QString::number(item.kind=="SC"?offset->value():0),vendor->text(),model->text(),item.description};
         for(auto& value:row)value=csvCell(value);bytes+=row.join(',').toUtf8()+'\n';}
       QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())QMessageBox::warning(this,"导出失败",file.errorString());
     });

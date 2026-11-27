@@ -66,7 +66,7 @@ inline QString decodeCsv(const QByteArray& bytes,QString encoding) {
   return text;
 }
 struct ImportOptions {
-  int timeColumn=0,codeColumn=1,stateColumn=-1;
+  int timeColumn=0,codeColumn=1,stateColumn=-1,descriptionColumn=-1;
   bool numericMilliseconds=false;
   int utcOffsetSeconds=0;
   QString dateFormat="yyyy-MM-dd HH:mm:ss.zzz";
@@ -112,19 +112,19 @@ inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动"
   }
   throw std::runtime_error(QString("无法可靠识别文件；请检查编码、分隔符、表头记录号。\n%1").arg(failures.join('\n').left(2000)).toUtf8().constData());
 }
-struct EventRow {qint64 original=0,aligned=0;QString code,state,source,kind;int row=0;};
+struct EventRow {qint64 original=0,aligned=0;QString code,state,source,kind;int row=0;QString description;};
 struct Imported {QVector<EventRow> events;QStringList errors;};
 inline Imported importEvents(const Csv& csv,const ImportOptions& o,QString source,QString kind,
                              const std::atomic_bool* cancel=nullptr){
   if(o.timeColumn<0||o.codeColumn<0||o.timeColumn>=csv.headers.size()||o.codeColumn>=csv.headers.size()||
-     o.stateColumn< -1||o.stateColumn>=csv.headers.size()||o.timeColumn==o.codeColumn)throw std::runtime_error("时间和代码列必须分别指定");
+     o.stateColumn< -1||o.stateColumn>=csv.headers.size()||o.descriptionColumn< -1||o.descriptionColumn>=csv.headers.size()||o.timeColumn==o.codeColumn)throw std::runtime_error("时间和代码列必须分别指定");
   Imported out;out.errors=csv.errors;int index=0;int row=1;
   for(const auto& values:csv.rows){
     if((index%8192)==0&&cancel&&cancel->load())throw std::runtime_error("已取消");row=csv.recordNumbers.value(index,index+2);++index;
     try{
       const auto code=values[o.codeColumn].trimmed();if(code.isEmpty())throw std::runtime_error("故障/动作代码为空");
       const auto t=parseTime(values[o.timeColumn],o);
-      out.events.push_back({t,t,code,o.stateColumn>=0?values[o.stateColumn]:QStringLiteral("未提供"),source,kind,row});
+      out.events.push_back({t,t,code,o.stateColumn>=0?values[o.stateColumn]:QStringLiteral("未提供"),source,kind,row,o.descriptionColumn>=0?values[o.descriptionColumn]:QString()});
     }catch(const std::exception& e){out.errors<<QString("非空记录 %1：%2").arg(row).arg(QString::fromUtf8(e.what()));}
   }
   std::stable_sort(out.events.begin(),out.events.end(),[](const EventRow& a,const EventRow& b){return a.original<b.original;});
