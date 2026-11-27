@@ -84,5 +84,24 @@ int main(){
  for(int i=0;i<6;++i){overload[Generator].push_back({double(i),1600.+i*20});overload[TorquePct].push_back({double(i),120.+i});}
  const auto over=analyze(M34,overload,torque,{},month);
  assert(over.fit.front().y>100);
+
+ // A measured idle segment remains zero; no origin-constrained cubic bridges the knee.
+ Params power=p;power.rpmWidth=10;power.tolerance=0;Channels ramp;
+ for(int i=0;i<8;++i){const double n= i<4?900+i*10:1100+(i-4)*10;
+   ramp[Generator].push_back({double(i),n});ramp[Power].push_back({double(i),i<4?0.:1000.+100*(i-4)});}
+ auto empirical=analyze(M32,ramp,power,{},month);
+ assert(empirical.fitSegments.size()==2 && empirical.fitSamples==8);
+ assert(fittedValue(empirical,915)==0 && !std::isfinite(fittedValue(empirical,1000)));
+ assert(std::abs(fittedValue(empirical,1115)-1150)<1e-9);
+ power.powerFitMinPower=1050;auto generating=analyze(M32,ramp,power,{},month);
+ assert(generating.raw.size()==8 && generating.fitSamples==3);
+ assert(!std::isfinite(fittedValue(generating,915)));
+ // Canonical results remain untouched when only the presentation unit changes.
+ assert(torqueDisplayFactor(M33,KiloNewtonMetre,torque)==.001);
+ assert(std::abs(torqueDisplayFactor(M34,NewtonMetre,torque)-300)<1e-12);
+ assert(std::abs(torqueDisplayFactor(M33,Percent,torque)*30000-100)<1e-12);
+ torque.torqueUnit=NewtonMetre;auto convertedAgain=analyze(M33,nm,torque,{},month);
+ assert(convertedAgain.raw.front().y==converted.raw.front().y);
+ Params noRated;assert(!std::isfinite(torqueDisplayFactor(M33,Percent,noRated)));
  std::cout<<"19 analyses and torque conversion, operating range, gap and overload regressions passed\n";
 }

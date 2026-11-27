@@ -10,6 +10,34 @@
 
 namespace BladeFitUI
 {
+inline void verifyTorqueProjection(QWidget* window,const QString& output,std::function<void(QString)> fail)
+{
+  auto data=std::make_shared<PJ::PlotDataMapRef>();
+  for(int i=0;i<12;++i){
+    data->addNumeric("unit_speed")->second.pushBack({double(i),1000.+i*10});
+    data->addNumeric("unit_power")->second.pushBack({double(i),1000.+i*20});
+  }
+  QSettings saved;const auto key=QStringLiteral("BladeScope/curveAnalysis");const auto previous=saved.value(key);const bool existed=saved.contains(key);
+  QJsonObject cfg{{"role1","unit_power"},{"role3","unit_speed"},{"rated",6250},{"rpm",1677},{"rpmWidth",10},{"rejectFlags",false}};
+  saved.setValue(key,QJsonDocument(cfg).toJson());auto* panel=new Panel(*data,[]{},window);panel->resize(1000,650);panel->show();
+  if(existed)saved.setValue(key,previous);else saved.remove(key);
+  auto* kind=panel->findChild<QComboBox*>("bladeFitKind");kind->setCurrentIndex(M33);panel->enter();
+  auto* timer=new QTimer(panel);auto elapsed=std::make_shared<QElapsedTimer>();elapsed->start();
+  QObject::connect(timer,&QTimer::timeout,panel,[=]{
+    (void)data;
+    if(!panel->property("bladeFitResultsReady").toBool()){if(elapsed->elapsed()>15000){timer->stop();fail("M33 UI computation timeout");}return;}
+    timer->stop();auto* unit=panel->findChild<QComboBox*>("bladeTorqueOutput");auto* chart=panel->findChild<QwtPlot*>("bladeFitPlot");
+    if(!unit||!chart||unit->currentIndex()!=NewtonMetre){fail("M33 default output unit");return;}
+    auto ordinate=[&]{for(auto* item:chart->itemList())if(auto* curve=dynamic_cast<QwtPlotCurve*>(item))
+      if(curve->title().text()==QStringLiteral("分箱均值")&&curve->dataSize())return curve->sample(0).y();return -1.;};
+    const double before=ordinate();unit->setCurrentIndex(KiloNewtonMetre);QMetaObject::invokeMethod(unit,"activated",Qt::DirectConnection,Q_ARG(int,KiloNewtonMetre));
+    if(before<=0||std::abs(ordinate()*1000-before)>1e-7||!chart->axisTitle(QwtPlot::yLeft).text().contains("kN")){fail("M33 UI output projection");return;}
+    panel->grab().save(QDir(output).filePath("m33-unit-projection.png"));panel->hide();panel->deleteLater();
+    if(existed)QSettings().setValue(key,previous);else QSettings().remove(key);
+    QCoreApplication::exit(0);
+  });timer->start(25);
+}
+
 inline void verifyYaw(QWidget* window,const QString& output,std::function<void(QString)> fail)
 {
   auto data=std::make_shared<PJ::PlotDataMapRef>();
@@ -42,7 +70,7 @@ inline void verifyYaw(QWidget* window,const QString& output,std::function<void(Q
     QTextStream stream(&file);stream.setCodec("UTF-8");
     for(int row=0;row<pairs->rowCount();++row){QStringList values;for(int col=0;col<pairs->columnCount();++col)values<<pairs->item(row,col)->text();stream<<values.join(',')<<'\n';}
     stream.flush();file.close();panel->grab().save(QDir(output).filePath("m56-pair-view.png"));
-    panel->hide();panel->deleteLater();QCoreApplication::exit(0);
+    panel->hide();panel->deleteLater();verifyTorqueProjection(window,output,fail);
   });timer->start(25);
 }
 

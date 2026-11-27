@@ -78,8 +78,11 @@ public:
     setObjectName(QStringLiteral("bladeWaveformPage"));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(4, 4, 4, 4);
-    auto* header = new QHBoxLayout;
-    root->addLayout(header);
+    auto* headerWidget=new QWidget;BladeUI::toolbar(headerWidget);
+    auto* header = new QHBoxLayout(headerWidget);header->setContentsMargins(0,0,0,0);header->setSpacing(6);
+    auto* headerScroll=new QScrollArea;headerScroll->setWidgetResizable(true);headerScroll->setFrameShape(QFrame::NoFrame);
+    headerScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);headerScroll->setMaximumHeight(60);
+    headerScroll->setWidget(headerWidget);root->addWidget(headerScroll);
     auto* returnButton = new QPushButton(QStringLiteral("时序图"), this);
     connect(returnButton, &QPushButton::clicked, this, std::move(back));
     header->addWidget(returnButton);
@@ -129,10 +132,14 @@ public:
     workspace = new QVBoxLayout;
     root->addLayout(workspace, 1);
 
-    auto* side = new QVBoxLayout(sidebar);
+    auto* outerSide = new QVBoxLayout(sidebar);outerSide->setContentsMargins(0,0,0,0);
+    auto* sideScroll=new QScrollArea(sidebar);sideScroll->setWidgetResizable(true);
+    sideScroll->setFrameShape(QFrame::NoFrame);outerSide->addWidget(sideScroll);
+    auto* sideBody=new QWidget;sideScroll->setWidget(sideBody);
+    auto* side = new QVBoxLayout(sideBody);
     status = new QLabel(sidebar);
     side->setContentsMargins(0, 0, 0, 0);
-    groups = new QComboBox(sidebar);
+    groups = new BladeUI::GroupCombo(sidebar);
     auto* manage = new QPushButton(QStringLiteral("管理测点组"), sidebar);
     side->addWidget(groups);
     side->addWidget(manage);
@@ -150,7 +157,7 @@ public:
     system = new QComboBox(sidebar);
     side->addWidget(system);
     connect(system, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) { filterTags(); });
-    side->addWidget(tags, 1);
+    tags->setMinimumHeight(100);side->addWidget(tags, 1);
     side->addWidget(status);
     startEnabled = new QCheckBox(QStringLiteral("开始时间（UTC）"), sidebar);
     endEnabled = new QCheckBox(QStringLiteral("结束时间（UTC）"), sidebar);
@@ -201,7 +208,9 @@ public:
     connect(statistics, &QPushButton::clicked, this, [this] { showStatistics(); });
     plot = new PlotWidget(*shown, this);
     connect(plot, &QObject::destroyed, [hold = shown] {});
-    workspace->addWidget(plot, 1);
+    auto* emptyHint=new QLabel(QStringLiteral("请选择测点并点击「作图」"),this);
+    emptyHint->setObjectName("bladeWaveformEmpty");emptyHint->setAlignment(Qt::AlignCenter);
+    workspace->addWidget(emptyHint);workspace->addWidget(plot, 1);plot->hide();
     canvas = plot->findChild<QwtPlot*>();
     if (canvas)
     {
@@ -272,7 +281,8 @@ public:
     conditions.clear();
     summaries.clear();
     plot->removeAllCurves();
-    shown->numeric.clear();
+    shown->numeric.clear();plot->hide();
+    if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty")){hint->setText(QStringLiteral("请选择测点并点击「作图」"));hint->show();}
     plot->replot();
     refreshTags();
   }
@@ -1513,6 +1523,7 @@ private:
     const double hi = endEnabled->isChecked() ? end->dateTime().toMSecsSinceEpoch()/1000. : infinity;
     if (lo > hi) { status->setText(QStringLiteral("开始时间不能晚于结束时间。")); return false; }
     resetAnalysisPanel();
+    if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty"))hint->hide();plot->show();
     plot->removeAllCurves();
     shown->numeric.clear();
     auto aliases = qApp->property("bladeScopeTagAliases").toMap();
@@ -1586,6 +1597,10 @@ private:
     if (canvas && lo < hi && std::isfinite(lo) && std::isfinite(hi))
       canvas->setAxisScale(QwtPlot::xBottom, lo, hi);
     applyStyle();
+    if(auto* hint=findChild<QLabel*>("bladeWaveformEmpty")){
+      hint->setText(QStringLiteral("筛选后无有效样本，请检查测点、时间窗口与条件筛选"));hint->setVisible(count==0);
+    }
+    plot->setVisible(count>0);
     status->setText(QStringLiteral("%1 条曲线，%2 个取样点")
         .arg(qulonglong(plot->curveList().size())).arg(qulonglong(count)));
     QToolTip::hideText();

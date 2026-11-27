@@ -2,7 +2,7 @@ name: Windows x64 build (PlotJuggler 3.17.0)
 
 on:
   push:
-    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56 ]
+    branches: [ main, feature/plot-theme-palette, feature/waveform-stage1, feature/torque-analysis-224, feature/yaw-analysis-m56, feature/analysis-ui-remediation ]
     paths:
       - 'patches/**'
       - '.github/workflows/windows-build.yml'
@@ -186,7 +186,7 @@ jobs:
       - name: Package portable x64 build
         shell: pwsh
         run: |
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.16-win64-portable.zip" -Force
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\stage\*" -DestinationPath "$env:GITHUB_WORKSPACE\BladeScope-3.17.0.17-win64-portable.zip" -Force
 
       - name: Build Windows EXE installer
         shell: pwsh
@@ -197,14 +197,14 @@ jobs:
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           & $iscc "/DStageDir=$env:GITHUB_WORKSPACE\stage" "customization/installer/goldwind.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed." }
-          $setup = "customization/installer/BladeScope-3.17.0.16-win64-Setup.exe"
+          $setup = "customization/installer/BladeScope-3.17.0.17-win64-Setup.exe"
           if (!(Test-Path $setup)) { throw "Expected installer EXE not found." }
           Write-Host "Installer created: $setup"
 
       - name: Smoke test EXE installer and Chinese mapping
         shell: pwsh
         run: |
-          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.16-win64-Setup.exe"
+          $setup = Join-Path $env:GITHUB_WORKSPACE "customization/installer/BladeScope-3.17.0.17-win64-Setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest"
           $proc = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target") -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
@@ -234,22 +234,26 @@ jobs:
           }
           Write-Host "Installer silent install and $expectedRows mapping checks passed."
 
-      - name: Verify M01 tables, coefficients and CSV inside the installed Qt application
+      - name: Verify M01, M33 and M56 inside the installed Qt application
         shell: pwsh
         run: |
           $exe = Join-Path $env:RUNNER_TEMP "BladeScope-SmokeTest/bin/BladeScope.exe"
           $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT = Join-Path $env:RUNNER_TEMP "BladeScope-FitAcceptance"
           New-Item -ItemType Directory -Force $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT | Out-Null
-          $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
-          if (!$app.WaitForExit(60000)) {
-            Stop-Process -Id $app.Id -Force
-            throw "Qt curve analysis acceptance did not exit within 60 seconds"
+          foreach ($scale in @("1", "1.25", "1.5", "2")) {
+            $env:QT_SCALE_FACTOR = $scale
+            $app = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            if (!$app.WaitForExit(60000)) {
+              Stop-Process -Id $app.Id -Force
+              throw "Qt analysis acceptance timed out at scale $scale"
+            }
+            if ($app.ExitCode -ne 0) {
+              $log = Join-Path $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT "failure.txt"
+              if (Test-Path $log) { Get-Content -Encoding UTF8 $log }
+              throw "Qt analysis acceptance failed at scale $scale with exit $($app.ExitCode)"
+            }
           }
-          if ($app.ExitCode -ne 0) {
-            $log = Join-Path $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT "failure.txt"
-            if (Test-Path $log) { Get-Content -Encoding UTF8 $log }
-            throw "Qt curve analysis acceptance exited with code $($app.ExitCode)"
-          }
+          Remove-Item Env:QT_SCALE_FACTOR
           $csv = Join-Path $env:BLADESCOPE_FIT_ACCEPTANCE_OUTPUT "m01-bins.csv"
           if (!(Test-Path $csv) -or @(Import-Csv -LiteralPath $csv -Encoding UTF8).Count -ne 3) {
             throw "Expected a CSV with three M01 bins"
@@ -267,9 +271,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.16-win64' || 'BladeScope-3.17.0.16-win64-demo' }}
+          name: ${{ github.event.repository.private && 'BladeScope-3.17.0.17-win64' || 'BladeScope-3.17.0.17-win64-demo' }}
           path: |
-            BladeScope-3.17.0.16-win64-portable.zip
-            customization/installer/BladeScope-3.17.0.16-win64-Setup.exe
+            BladeScope-3.17.0.17-win64-portable.zip
+            customization/installer/BladeScope-3.17.0.17-win64-Setup.exe
           if-no-files-found: error
           retention-days: 30

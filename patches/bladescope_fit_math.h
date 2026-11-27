@@ -115,7 +115,7 @@ struct Params
   int degree=4, torqueDegree=2, sectors=16, normal=0;
   bool filterState=false, generator=false, absoluteYaw=true, excludeNegative=true, rejectFlags=true;
   int torqueUnit=Percent;
-  double ratedTorque=0, rpmWidth=0, torqueFitMin=0;
+  double ratedTorque=0, rpmWidth=0, torqueFitMin=0, powerFitMinRpm=0, powerFitMinPower=0;
   bool torqueNonnegative=true;
   std::map<int,std::pair<double,double>> limits;
   Points reference;
@@ -214,6 +214,14 @@ inline double torqueReference(const Params& p)
   return p.ratedTorque>0?p.ratedTorque:
     (p.rated>0 && p.rpm>0 && p.efficiency>0 ? p.rated*1000*60/(2*pi*p.rpm*p.efficiency):missing());
 }
+inline double torqueDisplayFactor(int kind,int outputUnit,const Params& p)
+{
+  if(kind!=M33 && kind!=M34)return 1.;
+  const double reference=torqueReference(p);
+  if(outputUnit==Percent)return kind==M34?1.:(std::isfinite(reference)?100./reference:missing());
+  const double nm=kind==M33?1.:(std::isfinite(reference)?reference/100.:missing());
+  return outputUnit==KiloNewtonMetre?nm/1000.:nm;
+}
 inline double binWidth(int kind,const Params& p)
 {
   return (kind==M32||kind==M33||kind==M34||kind==M35||kind==M41) && p.rpmWidth>0 ? p.rpmWidth:p.width;
@@ -257,6 +265,25 @@ inline void curves(int kind,const Params& p,Result& r)
     return;
   }
   if(kind==M55) {r.fit=bins;return;}
+  if(kind==M32)
+  {
+    std::map<long long,Bin> fitBins;
+    for(const auto& point:r.raw)if(point.x>=p.powerFitMinRpm && point.y>=p.powerFitMinPower){
+      ++r.fitSamples;fitBins[static_cast<long long>(std::floor(point.x/binWidth(kind,p)))].add(point.x,point.y);
+    }
+    // Piecewise linear interpolation is shape preserving and cannot overshoot bin means.
+    // Missing bins and fit-domain boundaries never receive invented observations.
+    Points segment;
+    auto finish=[&]{if(segment.empty())return;
+      r.fitSegments.push_back(segment);r.fit.insert(r.fit.end(),segment.begin(),segment.end());
+      r.models.push_back({segment.front().x,segment.back().x,0,1,"piecewise linear interpolation of measured bin means",{}});segment.clear();};
+    long long previous=0;bool first=true;
+    for(const auto& entry:fitBins){
+      if(!first && entry.first>previous+1)finish();
+      segment.push_back({entry.second.x,entry.second.y});previous=entry.first;first=false;
+    }
+    finish();return;
+  }
   if(kind==M33 || kind==M34)
   {
     // Fit the measured operating region; keep reference models in a separate layer.
@@ -335,15 +362,7 @@ inline void curves(int kind,const Params& p,Result& r)
   };
 
   if(kind==M01) segment(startup,2,[&](double x,const Polynomial& pol){return std::clamp(pol(x),0.,p.rated);});
-  if(kind==M32 && !lower.empty()){
-    long double a=0,b=0;
-    for(auto v:lower){double q=v.x*v.x*v.x;a+=q*v.y;b+=q*q;}
-    if(b>0){
-      r.models.push_back({lower.front().x,lower.back().x,0,1,"y=clamp(k*x^3,0,P_rated)",{double(a/b)}});
-      r.fit=sample(lower.front().x,lower.back().x,[&](double x){return std::clamp(double(a/b)*x*x*x,0.,p.rated);});
-    }
-  }
-  else {
+  {
     int degree=kind==M01?5:kind==M22||kind==M33?0:kind==M21||kind==M06?1:
                kind==M03?p.degree:kind==M34?p.torqueDegree:kind==M23?2:3;
     segment(lower,degree,[&](double x,const Polynomial& pol){
@@ -402,6 +421,8 @@ template<class Month> Result analyze(int kind,const Channels& channels,const Par
     throw std::runtime_error("请检查分箱宽度、时间范围和匹配容差");
   if(!std::isfinite(p.rpmWidth)||p.rpmWidth<0 || !std::isfinite(p.torqueFitMin)||p.torqueFitMin<0)
     throw std::runtime_error("请检查转速分箱宽度和转矩拟合最低转速");
+  if(kind==M32 && (!std::isfinite(p.powerFitMinRpm)||p.powerFitMinRpm<0||!std::isfinite(p.powerFitMinPower)||p.powerFitMinPower<0))
+    throw std::runtime_error("M32 拟合阈值必须为非负有限数值");
   if(kind==M33||kind==M34){
     if(p.torqueDegree<2||p.torqueDegree>3 || !(p.efficiency>0&&p.efficiency<=1))
       throw std::runtime_error("请检查转矩拟合阶数和发电机效率");

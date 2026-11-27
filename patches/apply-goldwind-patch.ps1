@@ -1836,10 +1836,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 )
 
 Update-BladeThemeSource "plotjuggler_app/main.cpp" @(
-  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.16"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
+  @{ Old = '  app.setApplicationVersion(VERSION_STRING);'; New = '  app.setApplicationVersion(QStringLiteral("3.17.0.17"));' + "`n" + '  app.setApplicationDisplayName(QStringLiteral("BladeScope"));' }
 )
 Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
-  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.16") : title);' }
+  @{ Old = '      setWindowTitle(title);'; New = '      setWindowTitle(_skin_path == QStringLiteral("://resources/skin") ? QStringLiteral("BladeScope 3.17.0.17") : title);' }
 )
 
 # Replace the FFT layout while retaining the upstream controls and signals.
@@ -2088,7 +2088,10 @@ Update-BladeThemeSource "plotjuggler_app/mainwindow.cpp" @(
 '@ }
 )
 
-foreach ($fitHeader in @("bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
+Update-BladeThemeSource "plotjuggler_app/plotwidget.cpp" @(
+  @{ Old = '  _show_point_marker->setSymbol(sym);'; New = "  _show_point_marker->setSymbol(sym);`n  _show_point_marker->setVisible(false);" }
+)
+foreach ($fitHeader in @("bladescope_ui_shared.h", "bladescope_fit_math.h", "bladescope_fit_panel.h", "bladescope_yaw_analysis.h", "bladescope_yaw_ui.h", "bladescope_trend.h", "bladescope_fit_acceptance.h", "bladescope_fit_xlsx.h", "bladescope_label_xlsx.h", "bladescope_waveform_page.h", "bladescope_waveform_sampling.h")) {
   $fitSource = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot $fitHeader)
   Set-Content -Path (Join-Path "plotjuggler_app" $fitHeader) -Value $fitSource -Encoding UTF8BOM
 }

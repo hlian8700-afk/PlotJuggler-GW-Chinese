@@ -1,6 +1,7 @@
 #pragma once
 #include "PlotJuggler/plotdata.h"
 #include <QtWidgets>
+#include "bladescope_ui_shared.h"
 #include <QMap>
 #include "bladescope_fit_xlsx.h"
 #include <QJsonArray>
@@ -228,6 +229,8 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
         QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("测点组「%1」含有无效数据。").arg(it.key()));
         return;
       }
+      bool identical=false;for(const auto& name:merged.keys())if(merged.value(name)==it.value()){identical=true;break;}
+      if(identical)continue;
       auto name = base;
       for (int suffix = 2; merged.contains(name) && merged.value(name) != it.value(); ++suffix)
         name = QStringLiteral("%1 (%2)").arg(base).arg(suffix);
@@ -284,6 +287,20 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
   };
   button(memberRow, "上移", [&] { reorder(-1); });
   button(memberRow, "下移", [&] { reorder(1); });
+  auto* cleanupRow=new QHBoxLayout;layout->addLayout(cleanupRow);
+  button(cleanupRow, "整理重复组", [&] {
+    QMap<QByteArray,QString> first;QMap<QString,QString> duplicates;
+    for(const auto& name:groups.keys()){
+      const auto signature=QJsonDocument(groups.value(name).toArray()).toJson(QJsonDocument::Compact);
+      if(first.contains(signature))duplicates.insert(name,first.value(signature));else first.insert(signature,name);
+    }
+    if(duplicates.isEmpty()){QMessageBox::information(&dialog,dialog.windowTitle(),QStringLiteral("没有内容和顺序完全相同的重复组。"));return;}
+    QStringList preview;for(auto it=duplicates.begin();it!=duplicates.end();++it)preview<<it.key()+QStringLiteral(" → ")+it.value();
+    QMessageBox ask(QMessageBox::Question,QStringLiteral("合并预览"),QStringLiteral("发现 %1 个完全重复组。展开详情查看保留关系。原配置会自动备份。").arg(duplicates.size()),QMessageBox::Yes|QMessageBox::No,&dialog);
+    ask.setDetailedText(preview.join('\n'));if(ask.exec()!=QMessageBox::Yes)return;
+    QSettings().setValue("BladeScope/measurementGroupsBeforeMerge",QJsonDocument(groups).toJson());
+    for(auto it=duplicates.begin();it!=duplicates.end();++it)groups.remove(it.key());commit({});
+  });
   button(groupRow, "导出配置", [&] {
     auto path = QFileDialog::getSaveFileName(&dialog, QString::fromUtf8("导出测点组"),
                                              "measurement-groups.json", "JSON (*.json)");
@@ -376,6 +393,9 @@ inline void manageGroups(QWidget* parent, const QStringList& available, QJsonObj
     QString firstImported;
     for (auto it = imported.begin(); it != imported.end(); ++it)
     {
+      bool identical=false;
+      for(const auto& existing:groups.keys())if(groups.value(existing)==it.value()){identical=true;break;}
+      if(identical)continue;
       QString name = it.key();
       for (int suffix = 2; groups.contains(name); ++suffix)
         name = QStringLiteral("%1 (%2)").arg(it.key()).arg(suffix);
