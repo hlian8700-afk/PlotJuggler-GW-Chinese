@@ -166,15 +166,15 @@ inline WindowQuality inspectWindow(const std::vector<RawSample>& samples,Interva
   double first=std::numeric_limits<double>::infinity(),last=-first,previous=0;bool havePrevious=false;
   for(const auto& sample:samples){
     if(!std::isfinite(sample.time)){++result.invalid;continue;}
-    if(std::isfinite(sample.value)){first=std::min(first,sample.time);last=std::max(last,sample.time);}
-    if(sample.time<lo||sample.time>hi)continue;
+    const bool inside=sample.time>=lo&&sample.time<=hi;
+    if(!std::isfinite(sample.value)){if(inside)++result.invalid;continue;}
+    first=std::min(first,sample.time);last=std::max(last,sample.time);
     if(havePrevious){const auto delta=sample.time-previous;
-      if(delta==0)++result.duplicates;else if(delta<0)++result.backwards;
-      else result.maxGapSeconds=std::max(result.maxGapSeconds,delta);
+      if(delta==0&&inside)++result.duplicates;
+      else if(delta<0&&std::max(previous,sample.time)>=lo&&std::min(previous,sample.time)<=hi)++result.backwards;
+      else if(delta>0&&previous<hi&&sample.time>lo)result.maxGapSeconds=std::max(result.maxGapSeconds,delta);
     }
-    previous=sample.time;havePrevious=true;
-    if(!std::isfinite(sample.value)){++result.invalid;continue;}
-    ++result.finite;
+    previous=sample.time;havePrevious=true;if(inside)++result.finite;
   }
   result.boundsCovered=first<=lo&&last>=hi;
   result.ready=result.finite>0&&result.boundsCovered&&!result.invalid&&!result.duplicates&&!result.backwards&&

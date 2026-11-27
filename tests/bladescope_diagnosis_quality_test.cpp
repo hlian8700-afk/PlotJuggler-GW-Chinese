@@ -10,5 +10,7 @@ int main(){
  s={{0,1},{.1,2}};assert(!inspectWindow(s,{0,100},20).ready);
  assert(!inspectWindow(s,{-100,100},200).boundsCovered);
  assert(inspectWindow({{-1,1},{0,2},{.01,3},{1,4}},{0,10},20).ready);
+ assert(!inspectWindow({{-100,1},{5,1},{6,1},{100,1}},{0,10000},2000).ready);
+ assert(!inspectWindow({{-.1,1},{.01,1},{.02,1},{.03,1}},{0,20},20).ready);
  bool rejected=false;try{inspectWindow(s,{0,100},0);}catch(...){rejected=true;}assert(rejected);
 }
