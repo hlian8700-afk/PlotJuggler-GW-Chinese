@@ -13,8 +13,9 @@ inline Csv parseCsv(QString text,QChar separator=QChar(','),const std::atomic_bo
   if(headerRecord<0)throw std::runtime_error("表头记录号不能为负数");
   if(headerRecord==0){
     int nonempty=0;bool found=false;
-    const auto lines=text.split(QRegularExpression("\\r\\n|\\n|\\r"));
-    for(const auto& line:lines){
+    QTextStream stream(&text,QIODevice::ReadOnly);
+    while(!stream.atEnd()){
+      const auto line=stream.readLine();
       if(line.trimmed().isEmpty())continue;
       if(++nonempty>256)break;
       QStringList names=line.split(separator);
@@ -164,7 +165,7 @@ inline CsvDetection detectCsv(const QByteArray& bytes,QString requested="自动"
   }
   throw std::runtime_error(QString("无法可靠识别文件；请检查编码、分隔符、表头记录号。\n%1").arg(failures.join('\n').left(2000)).toUtf8().constData());
 }
-struct EventRow {qint64 original=0,aligned=0;QString code,state,source,kind;int row=0;QString description;};
+struct EventRow {qint64 original=0,aligned=0;QString code,state,source,kind;int row=0;QString description,originalTimeText;};
 struct Imported {QVector<EventRow> events;QStringList errors;};
 inline Imported importEvents(const Csv& csv,const ImportOptions& o,QString source,QString kind,
                              const std::atomic_bool* cancel=nullptr){
@@ -176,7 +177,7 @@ inline Imported importEvents(const Csv& csv,const ImportOptions& o,QString sourc
     try{
       const auto code=values[o.codeColumn].trimmed();if(code.isEmpty())throw std::runtime_error("故障/动作代码为空");
       const auto t=parseTime(values[o.timeColumn],o);
-      out.events.push_back({t,t,code,o.stateColumn>=0?values[o.stateColumn]:QStringLiteral("未提供"),source,kind,row,o.descriptionColumn>=0?values[o.descriptionColumn]:QString()});
+      out.events.push_back({t,t,code,o.stateColumn>=0?values[o.stateColumn]:QStringLiteral("未提供"),source,kind,row,o.descriptionColumn>=0?values[o.descriptionColumn]:QString(),values[o.timeColumn]});
     }catch(const std::exception& e){out.errors<<QString("非空记录 %1：%2").arg(row).arg(QString::fromUtf8(e.what()));}
   }
   std::stable_sort(out.events.begin(),out.events.end(),[](const EventRow& a,const EventRow& b){return a.original<b.original;});

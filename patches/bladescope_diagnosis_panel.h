@@ -11,6 +11,7 @@ class Panel final:public QWidget {
   QVector<EventRow> events;
   QTableWidget* table;
   QLabel *status,*quality;
+  QPlainTextEdit* eventDetails=nullptr;
   QDateTimeEdit* center;
   QSpinBox *offset,*before,*after;
   QLineEdit *vendor,*model;
@@ -21,7 +22,7 @@ class Panel final:public QWidget {
   int generation=0;
   QVector<EventRow> visible;
   void refresh(){
-    visible.clear();table->setRowCount(0);
+    visible.clear();table->setRowCount(0);if(eventDetails)eventDetails->clear();
     const qint64 t=center->dateTime().toMSecsSinceEpoch();
     for(auto item:events){
       item.aligned=BladeDiagnosis::alignedScTime(item.original,item.kind=="SC"?qint64(offset->value()):0);
@@ -125,7 +126,7 @@ class Panel final:public QWidget {
       for(int i=0;i<preview.rowCount();++i)for(int j=0;j<csv.headers.size();++j){
         auto* item=new QTableWidgetItem(csv.rows[i][j]);item->setToolTip(item->text());preview.setItem(i,j,item);
       }
-      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；表头记录号不等同于物理行号，已跳过前置说明 %3 行和结束标记 %4 条。DT# 时间自动识别，时区仍须确认。")
+      notice.setText(QString("当前识别：%1 / %2。请确认预览可读；已跳过前置说明 %3 行和结束标记 %4 条。DT# 时间自动识别，时区仍须确认。")
         .arg(result->value.encoding).arg(result->value.separator=='\t'?"Tab":QString(result->value.separator)).arg(csv.skippedPreamble).arg(csv.skippedFooter));
       ready=true;validate();
     };
@@ -199,6 +200,14 @@ public:
     options->addRow("前窗口",before);options->addRow("后窗口",after);
     table=new QTableWidget(0,8);table->setObjectName("diagnosisEventTable");table->setHorizontalHeaderLabels({"原始时间","对齐时间（UTC）","来源类别","代码/动作","状态原文","源文件","非空记录号","说明原文"});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->setSelectionBehavior(QAbstractItemView::SelectRows);table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);table->horizontalHeader()->setDefaultSectionSize(160);root->addWidget(table,2);
+    eventDetails=new QPlainTextEdit;eventDetails->setObjectName("diagnosisSingleEventDetails");eventDetails->setReadOnly(true);eventDetails->setMaximumHeight(140);
+    eventDetails->setPlaceholderText("点击事件行查看原始时间、对时定义与来源；双击将其设为事件中心。");root->addWidget(eventDetails);
+    connect(table,&QTableWidget::cellClicked,this,[this](int row,int){
+      if(row<0||row>=visible.size())return;const auto& item=visible[row];
+      eventDetails->setPlainText(QString("类别：%1\n代码/动作：%2\n原始时间文本：%3\n原始时间（UTC）：%4\n对齐时间（UTC）：%5；偏移 %6 ms\n状态原文：%7；说明：%8\n来源：%9；非空记录号：%10\n当前只核对事件证据，不将首触代码当作根因；状态含义尚未配置。")
+        .arg(item.kind).arg(item.code).arg(item.originalTimeText).arg(iso(item.original)).arg(iso(item.aligned))
+        .arg(item.kind=="SC"?offset->value():0).arg(item.state).arg(item.description).arg(item.source).arg(item.row));
+    });
     measurementList=new QListWidget;measurementList->setObjectName("diagnosisEvidenceSignals");measurementList->setMaximumHeight(150);measurementList->setSelectionMode(QAbstractItemView::ExtendedSelection);root->addWidget(measurementList);
     quality=new QLabel;quality->setWordWrap(true);root->addWidget(quality);
     status=new QLabel("请先用主界面加载录波；SC 和动作清单均可选。当前为本地事件核对与证据查看基础界面，未启用自动诊断。");status->setWordWrap(true);root->addWidget(status);
@@ -210,8 +219,8 @@ public:
     auto* exportButton=new QPushButton("导出当前事件窗口 CSV");bottom->addWidget(exportButton);
     connect(exportButton,&QPushButton::clicked,this,[this]{
       const auto path=QFileDialog::getSaveFileName(this,"导出事件窗口",{},"CSV (*.csv)");if(path.isEmpty())return;
-      QByteArray bytes("\xEF\xBB\xBF");bytes+="original_utc,aligned_utc,kind,code,state,source,record,offset_ms,vendor,model,description\n";
-      for(const auto& item:visible){QStringList row{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row),QString::number(item.kind=="SC"?offset->value():0),vendor->text(),model->text(),item.description};
+      QByteArray bytes("\xEF\xBB\xBF");bytes+="original_utc,aligned_utc,kind,code,state,source,record,offset_ms,vendor,model,description,original_time_text\n";
+      for(const auto& item:visible){QStringList row{iso(item.original),iso(item.aligned),item.kind,item.code,item.state,item.source,QString::number(item.row),QString::number(item.kind=="SC"?offset->value():0),vendor->text(),model->text(),item.description,item.originalTimeText};
         for(auto& value:row)value=csvCell(value);bytes+=row.join(',').toUtf8()+'\n';}
       QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())QMessageBox::warning(this,"导出失败",file.errorString());
     });

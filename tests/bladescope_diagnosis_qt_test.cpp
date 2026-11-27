@@ -56,6 +56,7 @@ int main(int argc,char** argv){
  ImportOptions vendorOptions;vendorOptions.timeColumn=1;vendorOptions.codeColumn=2;vendorOptions.utcOffsetSeconds=28800;
  auto vendorEvents=importEvents(vendorCsv,vendorOptions,"synthetic.csv","SC");
  assert(vendorEvents.errors.empty()&&vendorEvents.events.size()==2);
+ assert(vendorEvents.events[0].originalTimeText=="DT#2025-02-08-14:10:43.778");
  assert(iso(vendorEvents.events[0].original)=="2025-02-08 06:10:43.778");
  assert(parseTime("DT#2025-2-8-14:10:43.7",vendorOptions)==parseTime("2025-02-08T06:10:43.700Z",vendorOptions));
  assert(parseTime("DATE_AND_TIME#2025-02-08-14:10:43.778_000_000+08:00",vendorOptions)==vendorEvents.events[0].original);
@@ -91,6 +92,8 @@ int main(int argc,char** argv){
    QObject::connect(&check,&QTimer::timeout,&waiting,[&]{if(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected)waiting.quit();});
    QTimer::singleShot(10000,&waiting,&QEventLoop::quit);check.start();waiting.exec();
    assert(panel.findChild<QTableWidget*>("diagnosisEventTable")->rowCount()==expected);
+   QMetaObject::invokeMethod(panel.findChild<QTableWidget*>("diagnosisEventTable"),"cellClicked",Qt::DirectConnection,Q_ARG(int,0),Q_ARG(int,0));
+   assert(panel.findChild<QPlainTextEdit*>("diagnosisSingleEventDetails")->toPlainText().contains("DT#"));
  }
  std::cout<<"CSV quoting, explicit units/time zones, rejection accounting, cancellation and diagnosis workspace passed\n";
 }
