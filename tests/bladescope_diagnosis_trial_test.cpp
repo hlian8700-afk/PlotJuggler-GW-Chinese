@@ -18,6 +18,7 @@ int main(){
  a.clear();for(int i=0;i<=1000;++i)a.push_back({i*.01,100+3*std::sin(i*.01*6.283185307179586)});
  spec.family=TrialFamily::VibrationAC;spec.threshold=1;r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::Supported&&r.metric>2.1&&r.metric<2.13);
  spec.family=TrialFamily::SpeedOscillation;spec.threshold=1;spec.minimumCycles=3;r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::Supported&&r.cycles>=8);
+ std::vector<RawSample> shortWave;for(int i=40;i<=110;++i)shortWave.push_back(a[i]);spec.minimumCycles=1;r=runTrial(spec,scope,{400,1100},shortWave);assert(r.state==TrialState::NotSupported&&r.cycles==0);
  for(auto& s:a)s.value=100+20*s.time;
  r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::NotSupported&&r.metric<1e-10);
  assert(runTrial(spec,scope,{-1000,10000},a).state==TrialState::Unknown);

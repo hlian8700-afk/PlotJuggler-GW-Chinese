@@ -96,7 +96,7 @@ inline TrialResult runTrial(const TrialSpec& spec,const Scope& actual,Interval w
       const int sign=residual>deadband?1:residual< -deadband?-1:0;
       if(sign){if(previousSign&&sign!=previousSign)++crossings;previousSign=sign;}
     }
-    out.metric=std::sqrt(static_cast<double>(sum/samples.size()));out.cycles=crossings/2;
+    out.metric=std::sqrt(static_cast<double>(sum/samples.size()));out.cycles=crossings>0?(crossings-1)/2:0;
     if(!std::isfinite(out.metric)){out.reason="RMS calculation overflow";return out;}
     const bool supported=out.metric>spec.threshold&&(spec.family!=TrialFamily::SpeedOscillation||out.cycles>=spec.minimumCycles);
     out.state=supported?TrialState::Supported:TrialState::NotSupported;
