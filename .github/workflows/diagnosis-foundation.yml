@@ -1,0 +1,30 @@
+name: Diagnosis foundation validation
+on:
+  push:
+    branches: [feature/diagnosis-foundation]
+    paths:
+      - 'patches/bladescope_diagnosis_core.h'
+      - 'tools/import_diagnosis_config.py'
+      - 'tests/bladescope_diagnosis_test.cpp'
+      - 'tests/test_diagnosis_import.py'
+      - '.github/workflows/diagnosis-foundation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify isolated C++ diagnosis semantics
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -UNDEBUG -fsanitize=undefined,address -g -I patches tests/bladescope_diagnosis_test.cpp -o /tmp/diagnosis-test
+          /tmp/diagnosis-test
+      - name: Verify draft configuration import
+        run: python3 -m unittest discover -s tests -p 'test_diagnosis_import.py' -v
+      - name: Verify existing analysis regressions
+        run: |
+          g++ -std=c++17 -O2 -UNDEBUG -I patches tests/bladescope_fit_test.cpp -o /tmp/fit-test
+          /tmp/fit-test
+          g++ -std=c++17 -O2 -UNDEBUG -I patches tests/bladescope_yaw_test.cpp -o /tmp/yaw-test
+          /tmp/yaw-test

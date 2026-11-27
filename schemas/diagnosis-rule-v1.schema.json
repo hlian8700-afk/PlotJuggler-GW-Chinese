@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BladeScope diagnosis rule v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "state",
+    "scope",
+    "origin",
+    "category",
+    "candidate",
+    "predicates"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "draft",
+        "pending_validation",
+        "validated",
+        "disabled"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vendor"
+      ],
+      "properties": {
+        "vendor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "controller": {
+          "type": "string"
+        }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sheet",
+        "row",
+        "version",
+        "sha256"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sheet": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "category": {
+      "enum": [
+        "pitch",
+        "overspeed",
+        "vibration",
+        "speed_oscillation"
+      ]
+    },
+    "candidate": {
+      "type": "string",
+      "minLength": 1
+    },
+    "advice": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "integer"
+    },
+    "predicates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "same_axis"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "code",
+              "feature"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "same_axis": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
