@@ -12,6 +12,21 @@ inline QString trialStateName(BladeDiagnosis::TrialState state){
     case S::Unknown:return "数据不足 / 质量异常";case S::NotApplicable:return "机型不适用";case S::Invalid:return "参数未确认或无效";}
   return "未知";
 }
+inline QString trialReasonName(const std::string& reason){
+  const QMap<QString,QString> messages{
+    {"Vendor/model scope is missing or does not match","缺少机型范围或厂商/机型不匹配"},
+    {"Confirm units, positive threshold/gains, window and timing parameters","请确认单位、正数阈值与倍率、窗口和时间参数"},
+    {"Pitch actual and command must be mapped to the same confirmed blade axis","实际角度与指令必须映射到同一已确认的叶片轴"},
+    {"Primary data missing, truncated, invalid, duplicated, reversed or gapped","主要测点存在缺测、窗口截断、无效值、重复/倒序时间或过大间隔"},
+    {"Reference data quality is insufficient","指令测点数据质量不足"},
+    {"Reference boundary timestamps must be strictly increasing","指令测点边界时间必须严格递增"},
+    {"Unmatched reference timestamps or insufficient samples","指令时间未匹配或样本不足"},
+    {"Timestamps cannot be represented as unique milliseconds","时间戳不能用唯一毫秒值表示"},
+    {"Converted value overflow","单位换算溢出"},{"RMS calculation overflow","RMS 计算溢出"},
+    {"Timestamp outside supported range","时间戳超出支持范围"},
+    {"Experimental condition only; not a validated turbine root cause","仅说明试验条件，不代表已经验证的机组故障根因"}};
+  const auto key=QString::fromStdString(reason);return messages.value(key,key);
+}
 inline void showTrial(QWidget* parent,QStringList names,QString vendor,QString model,double lo,double hi,int gap,
                       TrialReader reader,QString eventContext={}){
   if(!reader){QMessageBox::information(parent,"规则试跑","当前数据源没有提供完整原始样本快照接口");return;}
@@ -42,7 +57,7 @@ inline void showTrial(QWidget* parent,QStringList names,QString vendor,QString m
   primary.setCurrentIndex(qMax(0,primary.findData(saved.value("primary").toString())));reference.setCurrentIndex(qMax(0,reference.findData(saved.value("reference").toString())));
   threshold.setText(saved.value("threshold").toString());gain.setText(saved.value("gain").toString("1"));refGain.setText(saved.value("referenceGain").toString("1"));
   for(auto* edit:{&threshold,&gain,&refGain,&vendorEdit,&modelEdit})QObject::connect(edit,&QLineEdit::textChanged,&d,[&]{confirmed.setChecked(false);});
-  duration.setValue(saved.value("duration").toDouble(1));tolerance.setValue(saved.value("tolerance").toInt());cycles.setValue(saved.value("cycles").toInt(2));merge.setChecked(saved.value("merge").toBool());unit.setCurrentIndex(qMax(0,unit.findText(saved.value("unit").toString())));
+  duration.setValue(saved.value("duration").toDouble(1));tolerance.setValue(saved.value("tolerance").toInt());cycles.setValue(saved.value("cycles").toInt(2));merge.setChecked(saved.value("merge").toBool());unit.setCurrentIndex(qMax(0,unit.findText(saved.value("unit").toString())));axis.setValue(saved.value("axis").toInt(1));
   QString report;bool completed=false;
   auto invalidate=[&]{completed=false;exportButton->setEnabled(false);};
   for(auto* box:{&family,&primary,&reference,&unit})QObject::connect(box,qOverload<int>(&QComboBox::currentIndexChanged),&d,invalidate);
@@ -64,14 +79,14 @@ inline void showTrial(QWidget* parent,QStringList names,QString vendor,QString m
     QObject::connect(&progress,&QProgressDialog::canceled,&loop,[=]{cancelled->store(true);});QObject::connect(worker,&QThread::finished,&loop,&QEventLoop::quit);progress.show();worker->start();loop.exec();worker->wait();delete worker;QObject::disconnect(&progress,nullptr,&loop,nullptr);progress.reset();progress.close();
     if(cancelled->load()){output.setPlainText("已取消，未输出试验结论");return;}if(!error->isEmpty()){output.setPlainText(*error);return;}
     const auto& r=*result;
-    report=QString("规则生命周期：待验证；仅为试验条件，不是根因结论\n厂商：%1；机型：%2\n条件：%3\n原始角色映射：主要=%4；指令=%5\n目标单位=%6；主要倍率=%7；指令倍率=%8\n时间 UTC：%9 ～ %10\n最大采样间隔=%11 ms；持续要求=%12 ms；匹配差=%13 ms；最少周期=%14\n阈值=%15；合并同值重复=%16\n结果：%17\n特征值=%18；最长连续超限=%19 s；完整周期=%20\n有效样本=%21；未匹配=%22；主要合并=%23；指令合并=%24\n主要数据：无效=%25；重复=%26；倒序=%27；最大间隔=%28 ms；窗口覆盖=%29\n说明：%30\n定义：交流 RMS 去均值；波动 RMS 去线性趋势，周期按超过阈值 5% 的双向过零计数估计。未做频带或故障类型确认。")
+    report=QString("BladeScope 3.17.0.22 / trial-v1\n规则生命周期：待验证；仅为试验条件，不是根因结论\n厂商：%1；机型：%2\n条件：%3\n原始角色映射：主要=%4；指令=%5\n目标单位=%6；主要倍率=%7；指令倍率=%8\n时间 UTC：%9 ～ %10\n最大采样间隔=%11 ms；持续要求=%12 ms；匹配差=%13 ms；最少周期=%14\n阈值=%15；合并同值重复=%16\n结果：%17\n特征值=%18；最长连续超限=%19 s；完整周期=%20\n有效样本=%21；未匹配=%22；主要合并=%23；指令合并=%24\n主要数据：无效=%25；重复=%26；倒序=%27；最大间隔=%28 ms；窗口覆盖=%29\n说明：%30\n定义：交流 RMS 去均值；波动 RMS 去线性趋势，周期按超过阈值 5% 的双向过零计数估计。未做频带或故障类型确认。")
       .arg(vendorEdit.text()).arg(modelEdit.text()).arg(family.currentText()).arg(primaryName).arg(referenceName).arg(unit.currentText()).arg(spec.gain,0,'g',12).arg(spec.referenceGain,0,'g',12)
       .arg(iso(qRound64(lo*1000))).arg(iso(qRound64(hi*1000))).arg(gap).arg(spec.durationMs).arg(spec.toleranceMs).arg(spec.minimumCycles).arg(spec.threshold,0,'g',12).arg(spec.mergeIdentical?"是":"否")
       .arg(trialStateName(r.state)).arg(r.metric,0,'g',12).arg(r.longestSeconds,0,'g',12).arg(r.cycles).arg(qulonglong(r.samples)).arg(qulonglong(r.unmatched)).arg(qulonglong(r.merged)).arg(qulonglong(r.referenceMerged))
-      .arg(qulonglong(r.quality.invalid)).arg(qulonglong(r.quality.duplicates)).arg(qulonglong(r.quality.backwards)).arg(r.quality.maxGapSeconds*1000,0,'g',12).arg(r.quality.boundsCovered?"是":"否").arg(QString::fromStdString(r.reason));
+      .arg(qulonglong(r.quality.invalid)).arg(qulonglong(r.quality.duplicates)).arg(qulonglong(r.quality.backwards)).arg(r.quality.maxGapSeconds*1000,0,'g',12).arg(r.quality.boundsCovered?"是":"否").arg(trialReasonName(r.reason));
     report+="\n事件背景："+eventContext;
     report+=QString("\n用户确认的叶片轴号=%1（仅变桨条件使用）").arg(axis.value());output.setPlainText(report);completed=true;exportButton->setEnabled(true);
-    settings.setValue(key,QJsonDocument(QJsonObject{{"family",family.currentIndex()},{"primary",primaryName},{"reference",referenceName},{"threshold",threshold.text()},{"gain",gain.text()},{"referenceGain",refGain.text()},{"duration",duration.value()},{"tolerance",tolerance.value()},{"cycles",cycles.value()},{"merge",merge.isChecked()},{"unit",unit.currentText()}}).toJson());
+    settings.setValue(QStringLiteral("BladeScope/diagnosisTrial/")+vendorEdit.text().trimmed()+"/"+modelEdit.text().trimmed(),QJsonDocument(QJsonObject{{"family",family.currentIndex()},{"primary",primaryName},{"reference",referenceName},{"threshold",threshold.text()},{"gain",gain.text()},{"referenceGain",refGain.text()},{"duration",duration.value()},{"tolerance",tolerance.value()},{"cycles",cycles.value()},{"merge",merge.isChecked()},{"unit",unit.currentText()},{"axis",axis.value()}}).toJson());
   });
   QObject::connect(exportButton,&QPushButton::clicked,&d,[&]{if(!completed)return;const auto path=QFileDialog::getSaveFileName(&d,"导出试跑证据",{},"CSV (*.csv)");if(path.isEmpty())return;
     QByteArray bytes("\xEF\xBB\xBF");bytes+="line,evidence\n";int index=0;for(const auto& line:report.split('\n'))bytes+=QString::number(++index).toUtf8()+','+csvCell(line).toUtf8()+'\n';QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())QMessageBox::warning(&d,"导出失败",file.errorString());});

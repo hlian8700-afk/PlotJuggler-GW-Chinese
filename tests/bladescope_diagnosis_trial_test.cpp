@@ -16,6 +16,7 @@ int main(){
  assert(runTrial(spec,scope,{10,990},a,b).state==TrialState::Unknown);spec.toleranceMs=3;assert(runTrial(spec,scope,{10,990},a,b).state==TrialState::Supported);
  spec.family=TrialFamily::VibrationAC;spec.threshold=1;r=runTrial(spec,scope,{0,1000},a);assert(r.state==TrialState::NotSupported&&r.metric==0);
  a.clear();for(int i=0;i<=1000;++i)a.push_back({i*.01,100+3*std::sin(i*.01*6.283185307179586)});
+ spec.family=TrialFamily::VibrationAC;spec.threshold=1;r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::Supported&&r.metric>2.1&&r.metric<2.13);
  spec.family=TrialFamily::SpeedOscillation;spec.threshold=1;spec.minimumCycles=3;r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::Supported&&r.cycles>=8);
  for(auto& s:a)s.value=100+20*s.time;
  r=runTrial(spec,scope,{0,10000},a);assert(r.state==TrialState::NotSupported&&r.metric<1e-10);
