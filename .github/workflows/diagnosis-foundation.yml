@@ -8,6 +8,9 @@ on:
       - 'tests/bladescope_diagnosis_test.cpp'
       - 'tests/test_diagnosis_import.py'
       - '.github/workflows/diagnosis-foundation.yml'
+      - 'patches/bladescope_diagnosis_events.h'
+      - 'patches/bladescope_diagnosis_panel.h'
+      - 'tests/bladescope_diagnosis_qt_test.cpp'
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,3 +31,12 @@ jobs:
           /tmp/fit-test
           g++ -std=c++17 -O2 -UNDEBUG -I patches tests/bladescope_yaw_test.cpp -o /tmp/yaw-test
           /tmp/yaw-test
+
+      - name: Install Qt for event parser and workspace checks
+        run: sudo apt-get update -qq && sudo apt-get install -y qtbase5-dev libqt5sql5-sqlite
+      - name: Verify event reader and diagnosis workspace
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          g++ -std=c++17 -fPIC -UNDEBUG -I patches tests/bladescope_diagnosis_qt_test.cpp $(pkg-config --cflags --libs Qt5Widgets Qt5Sql) -o /tmp/diagnosis-qt-test
+          /tmp/diagnosis-qt-test
